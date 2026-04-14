@@ -8,5 +8,16 @@ web-build/
 *.p12
 *.key
 *.mobileprovision
-*.orig.*
-web-build/
+
+# EAS / build artifacts
+google-service-account.json
+android/
+ios/
+
+# Test coverage
+coverage/
+
+# Env files
+.env
+.env.local
+.env.*
