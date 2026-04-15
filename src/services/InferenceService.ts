@@ -2,7 +2,7 @@ import LiteRTModule from '../native/LiteRTModule';
 import { MODEL_LOCAL_PATH } from './ModelDownloadService';
 import * as FileSystem from 'expo-file-system';
 
-const MODEL_ASSET_NAME = 'gemma-4-e2b-it-int4.task';
+const MODEL_ASSET_NAME = 'gemma3-1b-it-int4.task';
 const DEFAULT_MAX_TOKENS = 512;
 
 export interface InferenceOptions {

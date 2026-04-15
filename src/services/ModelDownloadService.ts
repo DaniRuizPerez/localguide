@@ -1,9 +1,9 @@
 import * as FileSystem from 'expo-file-system';
 
 export const MODEL_DOWNLOAD_URL =
-  'https://example.com/models/gemma-4-e2b-it-int4.task'; // placeholder — replace with real hosting URL
+  'https://storage.googleapis.com/mediapipe-models/llm_inference/gemma3/int4/gemma3-1b-it-int4.task';
 
-export const MODEL_FILE_NAME = 'gemma-4-e2b-it-int4.task';
+export const MODEL_FILE_NAME = 'gemma3-1b-it-int4.task';
 export const MODEL_DIR = `${FileSystem.documentDirectory}models/`;
 export const MODEL_LOCAL_PATH = `${MODEL_DIR}${MODEL_FILE_NAME}`;
 

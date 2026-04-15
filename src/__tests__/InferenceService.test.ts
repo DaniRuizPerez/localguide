@@ -71,7 +71,7 @@ describe('InferenceService (with native module)', () => {
     const { InferenceService: IS } = require('../services/InferenceService');
     const svc = new IS();
     await svc.initialize();
-    expect(mockLoadModel).toHaveBeenCalledWith('gemma-4-e2b-it-int4.task');
+    expect(mockLoadModel).toHaveBeenCalledWith('gemma3-1b-it-int4.task');
   });
 
   it('calls runInference with prompt and maxTokens', async () => {

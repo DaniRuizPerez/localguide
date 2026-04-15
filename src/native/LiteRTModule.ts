@@ -3,7 +3,7 @@
  *
  * Native setup required:
  *   Android: implementation("com.google.ai.edge.litert:litert-lm:1.+") in build.gradle
- *            Place model file at android/app/src/main/assets/models/gemma-4-e2b-it-int4.task
+ *            Place model file at android/app/src/main/assets/models/gemma3-1b-it-int4.task
  *   iOS:     pod 'LiteRT-LM' in Podfile
  *            Place model file in Xcode project under Resources/models/
  *
