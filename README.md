@@ -100,9 +100,10 @@ eas build --platform android
 
 ## Permissions
 
-- **Location** (iOS + Android) — core feature, prompts for foreground location
+- **Location** (iOS + Android) — foreground location always required; **background location** required for auto-guide GPS polling
 - **Internet** (Android) — only used once to fetch the model bundle
-- Microphone — voice input (if enabled)
+- **Microphone** (iOS + Android) — voice input
+- **Foreground service** (Android) — `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_LOCATION` required for background GPS polling during auto-guide
 
 ---
 
