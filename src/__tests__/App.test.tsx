@@ -1,17 +1,48 @@
 import React from 'react';
-import { render } from '@testing-library/react-native';
+import { render, fireEvent } from '@testing-library/react-native';
 import ChatScreen from '../screens/ChatScreen';
+import MapScreen from '../screens/MapScreen';
 
-// Minimal navigation mock — avoids full navigator setup in unit tests
+jest.mock('../native/LiteRTModule', () => ({ __esModule: true, default: undefined }));
+
+const mockRequestForegroundPermissionsAsync = jest.fn().mockResolvedValue({ status: 'granted' });
+const mockGetCurrentPositionAsync = jest.fn().mockResolvedValue({
+  coords: { latitude: 48.8566, longitude: 2.3522, accuracy: 10 },
+});
+
+jest.mock('expo-location', () => ({
+  Accuracy: { Balanced: 3 },
+  requestForegroundPermissionsAsync: (...args: unknown[]) =>
+    mockRequestForegroundPermissionsAsync(...args),
+  getCurrentPositionAsync: (...args: unknown[]) => mockGetCurrentPositionAsync(...args),
+}));
+
 const mockNavigation = {} as any;
-const mockRoute = { key: 'Chat', name: 'Chat' } as any;
+const chatRoute = { key: 'Chat', name: 'Chat' } as any;
+const mapRoute = { key: 'Map', name: 'Map' } as any;
 
 describe('ChatScreen', () => {
-  it('renders title and subtitle', () => {
-    const { getByText } = render(
-      <ChatScreen navigation={mockNavigation} route={mockRoute} />
+  it('renders input and send button', () => {
+    const { getByPlaceholderText, getByText } = render(
+      <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
-    expect(getByText('Chat')).toBeTruthy();
-    expect(getByText('Local guide conversations will appear here.')).toBeTruthy();
+    expect(getByPlaceholderText('Ask about nearby places…')).toBeTruthy();
+    expect(getByText('Send')).toBeTruthy();
+  });
+
+  it('renders empty state hint', () => {
+    const { getByText } = render(
+      <ChatScreen navigation={mockNavigation} route={chatRoute} />
+    );
+    expect(getByText(/Ask your local guide/i)).toBeTruthy();
+  });
+});
+
+describe('MapScreen', () => {
+  it('renders without crashing', () => {
+    const { toJSON } = render(
+      <MapScreen navigation={mockNavigation} route={mapRoute} />
+    );
+    expect(toJSON()).toBeTruthy();
   });
 });

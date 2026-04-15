@@ -14,14 +14,19 @@
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.localguideapp"
+      "bundleIdentifier": "com.localguideapp",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Local Guide uses your location to provide information about nearby landmarks and points of interest.",
+        "NSLocationAlwaysUsageDescription": "Local Guide uses your location to provide information about nearby landmarks and points of interest."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.localguideapp"
+      "package": "com.localguideapp",
+      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
     },
     "web": {
       "favicon": "./assets/favicon.png"
