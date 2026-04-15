@@ -2,7 +2,7 @@
 
 Offline-first mobile tourist guide. Runs a small language model **on-device** (Gemma 3 1B, int4) so travelers get location-aware recommendations about landmarks, history, food, and hidden gems — with **no internet connection required** after setup.
 
-Built with **React Native + Expo + TypeScript**, GPS via `expo-location`, and native LiteRT / MediaPipe LLM inference bridged through a custom native module.
+Built with **React Native 0.83 + Expo SDK 55 + TypeScript**, GPS via `expo-location`, and native LiteRT / MediaPipe LLM inference bridged through a custom native module.
 
 ---
 
@@ -40,70 +40,157 @@ src/
  │   └─ useVoiceInput             mic capture + transcription
  ├─ native/
  │   └─ LiteRTModule              TS bridge for native LiteRT (iOS/Android)
- ├─ navigation/AppNavigator       bottom-tab nav (Chat / Map)
- └─ __tests__/                    Jest + @testing-library/react-native
+ └─ navigation/AppNavigator       bottom-tab nav (Chat / Map)
 ```
 
-### Model
+### On-device model
 
-- **File:** `gemma3-1b-it-int4.task`
-- **Source:** `https://storage.googleapis.com/mediapipe-models/llm_inference/gemma3/int4/gemma3-1b-it-int4.task`
-- Downloaded on first launch → stored at `${FileSystem.documentDirectory}models/`
-- Loaded into LiteRT native runtime; prompt includes current GPS coords
+| Property | Value |
+|---|---|
+| Model | Gemma 3 1B int4 |
+| File | `gemma3-1b-it-int4.task` |
+| Size | ≈530 MB |
+| Source | Google MediaPipe model hub |
+| Storage | `${FileSystem.documentDirectory}models/` (downloaded on first launch) |
 
 ---
 
-## Getting started
+## Development setup
 
 ### Prerequisites
 
-- Node.js 18+
-- Expo CLI (`npx expo …` works without global install)
-- For device builds: Xcode (iOS) or Android Studio (Android)
+| Tool | Version | Notes |
+|---|---|---|
+| Node.js | 22 (LTS) | Use [nvm](https://github.com/nvm-sh/nvm) or [fnm](https://github.com/Schniz/fnm) |
+| JDK | 17 | Android builds only — [Temurin](https://adoptium.net/) recommended |
+| Android Studio | Ladybug (2024.2.1+) | Includes Android SDK |
+| Android SDK | API 35 | Install via Android Studio SDK Manager |
 
-### Install
-
-```bash
-npm install
-```
-
-### Run
+### Install JS dependencies
 
 ```bash
-npm start          # Expo dev server
-npm run ios        # native iOS build (required for real inference)
-npm run android    # native Android build (required for real inference)
-npm run web        # web preview (mock inference only)
+npm install --legacy-peer-deps
 ```
 
-> **Note:** Expo Go **cannot run real inference** — the LiteRT native module must be linked. Use `expo run:ios` / `expo run:android` or an EAS build. Without the native module, `InferenceService` falls back to a mock response.
-
-### Test & typecheck
+### Run the Expo dev server
 
 ```bash
-npm test
-npm run typescript
+npm start          # Expo dev server (Metro bundler)
+npm run android    # launch on connected Android device / emulator
+npm run ios        # launch on iOS simulator (Mac only)
 ```
+
+> **Note:** Expo Go **cannot run native inference** — the LiteRT module must be linked. Use `expo run:android` / `expo run:ios` or open the `android/` folder in Android Studio. Without the native module linked, `InferenceService` falls back to a mock response.
 
 ---
 
-## Build & release
+## Opening in Android Studio
 
-EAS Build config lives in `eas.json`. CI workflows under `.github/`.
+The `android/` folder is a standard Android Gradle project and can be imported directly.
+
+### Steps
+
+1. **Clone the repo**
+   ```bash
+   git clone https://github.com/DaniRuizPerez/localguide.git
+   cd localguide
+   ```
+
+2. **Install JS dependencies** (Gradle reads from `node_modules`)
+   ```bash
+   npm install --legacy-peer-deps
+   ```
+
+3. **Open the project in Android Studio**
+   - Launch Android Studio → **Open** → select the `android/` subfolder
+   - Android Studio will detect it as a Gradle project and prompt you to sync
+
+4. **Set your Android SDK path**
+
+   Android Studio creates `android/local.properties` automatically when you open the project. If it doesn't, create it manually:
+   ```
+   # android/local.properties
+   sdk.dir=/path/to/your/Android/sdk
+   ```
+   Common paths:
+   - macOS: `sdk.dir=/Users/<you>/Library/Android/sdk`
+   - Linux: `sdk.dir=/home/<you>/Android/Sdk`
+   - Windows: `sdk.dir=C\:\\Users\\<you>\\AppData\\Local\\Android\\Sdk`
+
+5. **Sync Project with Gradle**
+   - Click **Sync Project with Gradle Files** (elephant icon in toolbar)
+   - First sync downloads Gradle 9.0.0 + all dependencies — takes several minutes
+   - Subsequent syncs are fast (cached)
+
+6. **Run on device / emulator**
+   - Connect an Android device (USB debugging on) or start an AVD
+   - Click the green **Run** button or use `Shift+F10`
+
+> `android/local.properties` is in `.gitignore` and never committed — each developer sets their own SDK path.
+
+---
+
+## Building without an emulator (CI / compile checks)
+
+These checks verify the project compiles and is correct without needing a running device:
+
+| Check | Command | What it catches |
+|---|---|---|
+| TypeScript | `npm run typescript` | Type errors, missing imports |
+| Unit tests | `npm test` | Logic regressions, component rendering |
+| Gradle compile | `cd android && ./gradlew assembleDebug` | Native build errors, broken Gradle config |
+| Android Lint | `cd android && ./gradlew lint` | Android-specific code issues |
+
+All four run automatically in CI (GitHub Actions) on every push and PR.
+
+### Running the Gradle build locally
 
 ```bash
-eas build --platform ios
-eas build --platform android
+# Install JS deps first (Gradle scripts call node to resolve paths)
+npm install --legacy-peer-deps
+
+# (If you wiped the android/ folder) regenerate native project
+npx expo prebuild --platform android
+
+# Set your SDK path
+echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties   # or set manually
+
+# Build debug APK
+cd android
+./gradlew assembleDebug
 ```
+
+The debug APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
 
 ---
 
 ## Permissions
 
-- **Location** (iOS + Android) — foreground location always required; **background location** required for auto-guide GPS polling
-- **Internet** (Android) — only used once to fetch the model bundle
-- **Microphone** (iOS + Android) — voice input
-- **Foreground service** (Android) — `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_LOCATION` required for background GPS polling during auto-guide
+| Permission | Platform | Required for |
+|---|---|---|
+| `ACCESS_FINE_LOCATION` | Android + iOS | GPS positioning |
+| `ACCESS_BACKGROUND_LOCATION` | Android | Auto-guide GPS polling |
+| `RECORD_AUDIO` | Android + iOS | Voice input |
+| `INTERNET` | Android | One-time model download |
+| `FOREGROUND_SERVICE` | Android | Background GPS during auto-guide |
+
+---
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| Framework | React Native 0.83 + Expo SDK 55 |
+| Language | TypeScript |
+| Navigation | React Navigation v6 (bottom tabs + native stack) |
+| Location | expo-location |
+| Voice in | expo-speech-recognition |
+| Voice out | expo-speech |
+| Background tasks | expo-task-manager |
+| File storage | expo-file-system |
+| Native inference | LiteRT (TFLite runtime) via custom native module |
+| Model | Gemma 3 1B int4 via MediaPipe LLM Inference API |
+| CI | GitHub Actions — TypeScript, Jest, Gradle assembleDebug, Android Lint |
 
 ---
 

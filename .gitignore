@@ -9,6 +9,12 @@ web-build/
 *.key
 *.mobileprovision
 
+# Android local config (each developer sets their own SDK path)
+android/local.properties
+android/.gradle/
+android/build/
+android/app/build/
+
 # EAS / build artifacts
 google-service-account.json
 ios/

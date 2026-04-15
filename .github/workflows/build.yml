@@ -1,4 +1,4 @@
-name: CI / EAS Build
+name: CI
 
 on:
   push:
@@ -7,20 +7,20 @@ on:
     branches: [main, master]
 
 jobs:
-  # ── Lint, type-check, and unit tests ──────────────────────────────────────
+  # ── TypeScript + Jest ──────────────────────────────────────────────────────
   test:
-    name: Test & Type Check
+    name: TypeScript & Unit Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: TypeScript check
         run: npm run typescript
@@ -28,23 +28,67 @@ jobs:
       - name: Unit tests
         run: npm test -- --ci --coverage
 
-  # ── EAS development build (iOS simulator + Android APK) ───────────────────
-  eas-build-development:
-    name: EAS Build (development)
+  # ── Gradle build (compile check, no emulator needed) ─────────────────────
+  gradle-build:
+    name: Android Gradle Build
     runs-on: ubuntu-latest
-    needs: test
-    # Only run on pushes to main/master, not on PRs
-    if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --legacy-peer-deps
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Expo prebuild (generate native Android project)
+        run: npx expo prebuild --platform android --clean
+
+      - name: Create local.properties
+        run: echo "sdk.dir=$ANDROID_SDK_ROOT" > android/local.properties
+
+      - name: Gradle assembleDebug
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2"
+
+      - name: Android Lint
+        run: cd android && ./gradlew lint --no-daemon
+        continue-on-error: true
+
+  # ── EAS development build (optional, requires EXPO_TOKEN secret) ──────────
+  eas-build:
+    name: EAS Build (development)
+    runs-on: ubuntu-latest
+    needs: [test, gradle-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
 
       - name: Check EXPO_TOKEN
         id: check-token
@@ -53,7 +97,7 @@ jobs:
             echo "available=true" >> $GITHUB_OUTPUT
           else
             echo "available=false" >> $GITHUB_OUTPUT
-            echo "EXPO_TOKEN secret not configured — skipping EAS build steps."
+            echo "EXPO_TOKEN secret not configured — skipping EAS build."
           fi
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -65,50 +109,10 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Build Android (APK for emulator)
+      - name: Build Android APK
         if: steps.check-token.outputs.available == 'true'
         run: eas build --platform android --profile development --non-interactive --no-wait
 
-      - name: Build iOS (simulator)
+      - name: Build iOS simulator
         if: steps.check-token.outputs.available == 'true'
         run: eas build --platform ios --profile development --non-interactive --no-wait
-
-  # ── EAS preview build on releases ─────────────────────────────────────────
-  eas-build-preview:
-    name: EAS Build (preview)
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Check EXPO_TOKEN
-        id: check-token
-        run: |
-          if [ -n "$EXPO_TOKEN" ]; then
-            echo "available=true" >> $GITHUB_OUTPUT
-          else
-            echo "available=false" >> $GITHUB_OUTPUT
-            echo "EXPO_TOKEN secret not configured — skipping EAS build steps."
-          fi
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Setup Expo
-        if: steps.check-token.outputs.available == 'true'
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Build preview (both platforms)
-        if: steps.check-token.outputs.available == 'true'
-        run: eas build --platform all --profile preview --non-interactive --no-wait
