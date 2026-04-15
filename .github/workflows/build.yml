@@ -46,16 +46,31 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check EXPO_TOKEN
+        id: check-token
+        run: |
+          if [ -n "$EXPO_TOKEN" ]; then
+            echo "available=true" >> $GITHUB_OUTPUT
+          else
+            echo "available=false" >> $GITHUB_OUTPUT
+            echo "EXPO_TOKEN secret not configured — skipping EAS build steps."
+          fi
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
       - name: Setup Expo
+        if: steps.check-token.outputs.available == 'true'
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Build Android (APK for emulator)
+        if: steps.check-token.outputs.available == 'true'
         run: eas build --platform android --profile development --non-interactive --no-wait
 
       - name: Build iOS (simulator)
+        if: steps.check-token.outputs.available == 'true'
         run: eas build --platform ios --profile development --non-interactive --no-wait
 
   # ── EAS preview build on releases ─────────────────────────────────────────
@@ -75,11 +90,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check EXPO_TOKEN
+        id: check-token
+        run: |
+          if [ -n "$EXPO_TOKEN" ]; then
+            echo "available=true" >> $GITHUB_OUTPUT
+          else
+            echo "available=false" >> $GITHUB_OUTPUT
+            echo "EXPO_TOKEN secret not configured — skipping EAS build steps."
+          fi
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
       - name: Setup Expo
+        if: steps.check-token.outputs.available == 'true'
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Build preview (both platforms)
+        if: steps.check-token.outputs.available == 'true'
         run: eas build --platform all --profile preview --non-interactive --no-wait
