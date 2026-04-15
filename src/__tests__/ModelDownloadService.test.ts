@@ -149,7 +149,12 @@ describe('ModelDownloadService', () => {
     it('pauses and sets status to paused', async () => {
       mockGetInfoAsync.mockResolvedValue({ exists: true });
       const mockPauseAsync = jest.fn().mockResolvedValue(undefined);
-      const mockDownloadAsync = jest.fn().mockResolvedValue({ status: 200 });
+
+      // Use a deferred downloadAsync so the download stays in-flight
+      let resolveDownload!: (value: any) => void;
+      const deferredDownload = new Promise<any>(resolve => { resolveDownload = resolve; });
+      const mockDownloadAsync = jest.fn().mockReturnValue(deferredDownload);
+
       mockCreateDownloadResumable.mockReturnValue({
         downloadAsync: mockDownloadAsync,
         pauseAsync: mockPauseAsync,
@@ -157,13 +162,19 @@ describe('ModelDownloadService', () => {
 
       // Start download without awaiting to leave it in 'downloading' state
       const downloadPromise = service.startDownload(jest.fn());
-      // Status is now 'downloading'
+
+      // Flush microtasks so _ensureModelDir completes and downloadResumable is set
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Now pause — downloadResumable is set and status is 'downloading'
       await service.pauseDownload();
 
       expect(mockPauseAsync).toHaveBeenCalled();
       expect(service.status).toBe('paused');
 
-      // Let download finish
+      // Resolve deferred download to clean up the pending promise
+      resolveDownload({ status: 200 });
       await downloadPromise;
     });
 
