@@ -17,7 +17,10 @@
       "bundleIdentifier": "com.localguideapp",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Local Guide uses your location to provide information about nearby landmarks and points of interest.",
-        "NSLocationAlwaysUsageDescription": "Local Guide uses your location to provide information about nearby landmarks and points of interest."
+        "NSLocationAlwaysUsageDescription": "Local Guide uses your location to provide information about nearby landmarks and points of interest.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Local Guide uses your background location to automatically tell you about interesting nearby places.",
+        "NSSpeechRecognitionUsageDescription": "Local Guide uses speech recognition so you can talk to your guide hands-free.",
+        "NSMicrophoneUsageDescription": "Local Guide needs microphone access for voice conversations with your guide."
       }
     },
     "android": {
@@ -26,7 +29,15 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.localguideapp",
-      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "INTERNET"]
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "RECORD_AUDIO",
+        "INTERNET",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"

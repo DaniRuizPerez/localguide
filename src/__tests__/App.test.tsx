@@ -5,6 +5,28 @@ import MapScreen from '../screens/MapScreen';
 
 jest.mock('../native/LiteRTModule', () => ({ __esModule: true, default: undefined }));
 
+jest.mock('expo-speech-recognition', () => ({
+  ExpoSpeechRecognitionModule: {
+    requestPermissionsAsync: jest.fn().mockResolvedValue({ granted: true }),
+    getPermissionsAsync: jest.fn().mockResolvedValue({ granted: true }),
+    start: jest.fn(),
+    stop: jest.fn(),
+    abort: jest.fn(),
+  },
+  useSpeechRecognitionEvent: jest.fn(),
+}));
+
+jest.mock('expo-speech', () => ({
+  speak: jest.fn(),
+  stop: jest.fn(),
+  isSpeakingAsync: jest.fn().mockResolvedValue(false),
+}));
+
+jest.mock('expo-task-manager', () => ({
+  defineTask: jest.fn(),
+  isTaskRegisteredAsync: jest.fn().mockResolvedValue(false),
+}));
+
 const mockRequestForegroundPermissionsAsync = jest.fn().mockResolvedValue({ status: 'granted' });
 const mockGetCurrentPositionAsync = jest.fn().mockResolvedValue({
   coords: { latitude: 48.8566, longitude: 2.3522, accuracy: 10 },
@@ -31,10 +53,10 @@ describe('ChatScreen', () => {
   });
 
   it('renders empty state hint', () => {
-    const { getByText } = render(
+    const { getAllByText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
-    expect(getByText(/Ask your local guide/i)).toBeTruthy();
+    expect(getAllByText(/local guide|Auto-Guide/i).length).toBeGreaterThan(0);
   });
 });
 

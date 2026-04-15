@@ -1,0 +1,172 @@
+import * as Location from 'expo-location';
+import * as TaskManager from 'expo-task-manager';
+import { inferenceService, type GPSContext } from './InferenceService';
+import { speechService } from './SpeechService';
+
+const BACKGROUND_LOCATION_TASK = 'background-location-task';
+const POLL_INTERVAL_MS = 60_000;
+const MIN_DISTANCE_METERS = 50;
+
+type AutoGuideCallback = (event: AutoGuideEvent) => void;
+
+export interface AutoGuideEvent {
+  type: 'location_update' | 'interesting' | 'nothing' | 'error' | 'speaking';
+  gps?: GPSContext;
+  text?: string;
+  durationMs?: number;
+}
+
+const TRIAGE_PROMPT =
+  'You are a local tourist guide. Given GPS coordinates, decide if this location is near anything interesting ' +
+  '(landmark, historic site, notable restaurant, scenic viewpoint, cultural spot, etc.). ' +
+  'If YES: describe what is nearby in 2-3 sentences. If NOTHING interesting, respond with exactly "NOTHING".';
+
+function buildTriagePrompt(gps: GPSContext): string {
+  const coords = `${gps.latitude.toFixed(6)}, ${gps.longitude.toFixed(6)}`;
+  return `${TRIAGE_PROMPT}\n\nCurrent location: ${coords}\nGuide:`;
+}
+
+function haversineDistance(a: GPSContext, b: GPSContext): number {
+  const R = 6371e3;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.latitude - a.latitude);
+  const dLon = toRad(b.longitude - a.longitude);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLon = Math.sin(dLon / 2);
+  const h = sinLat * sinLat + Math.cos(toRad(a.latitude)) * Math.cos(toRad(b.latitude)) * sinLon * sinLon;
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+class AutoGuideService {
+  private running = false;
+  private lastGps: GPSContext | null = null;
+  private foregroundTimer: ReturnType<typeof setInterval> | null = null;
+  private listener: AutoGuideCallback | null = null;
+
+  setListener(cb: AutoGuideCallback | null) {
+    this.listener = cb;
+  }
+
+  private emit(event: AutoGuideEvent) {
+    this.listener?.(event);
+  }
+
+  async start(): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      this.emit({ type: 'error', text: 'Location permission denied' });
+      this.running = false;
+      return;
+    }
+
+    await this.pollOnce();
+    this.foregroundTimer = setInterval(() => this.pollOnce(), POLL_INTERVAL_MS);
+
+    try {
+      const bgStatus = await Location.requestBackgroundPermissionsAsync();
+      if (bgStatus.status === 'granted') {
+        await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: POLL_INTERVAL_MS,
+          distanceInterval: MIN_DISTANCE_METERS,
+          showsBackgroundLocationIndicator: true,
+          foregroundService: {
+            notificationTitle: 'Local Guide',
+            notificationBody: 'Watching for interesting places nearby',
+          },
+        });
+      }
+    } catch {
+      // Background location not available — foreground polling still works
+    }
+  }
+
+  async stop(): Promise<void> {
+    this.running = false;
+    if (this.foregroundTimer) {
+      clearInterval(this.foregroundTimer);
+      this.foregroundTimer = null;
+    }
+    try {
+      const hasTask = await TaskManager.isTaskRegisteredAsync(BACKGROUND_LOCATION_TASK);
+      if (hasTask) {
+        await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+      }
+    } catch {
+      // ignore
+    }
+    speechService.stop();
+  }
+
+  get isRunning(): boolean {
+    return this.running;
+  }
+
+  async handleBackgroundLocation(gps: GPSContext): Promise<void> {
+    if (!this.running) return;
+    await this.evaluateLocation(gps);
+  }
+
+  private async pollOnce(): Promise<void> {
+    if (!this.running) return;
+    try {
+      const loc = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const gps: GPSContext = {
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+        accuracy: loc.coords.accuracy ?? undefined,
+      };
+      this.emit({ type: 'location_update', gps });
+      await this.evaluateLocation(gps);
+    } catch (err) {
+      this.emit({ type: 'error', text: err instanceof Error ? err.message : 'Location poll failed' });
+    }
+  }
+
+  private async evaluateLocation(gps: GPSContext): Promise<void> {
+    if (this.lastGps && haversineDistance(this.lastGps, gps) < MIN_DISTANCE_METERS) {
+      this.emit({ type: 'nothing', gps });
+      return;
+    }
+
+    try {
+      const prompt = buildTriagePrompt(gps);
+      const start = Date.now();
+      const response = await inferenceService.runInference(prompt, { maxTokens: 256 });
+      const durationMs = Date.now() - start;
+      const trimmed = response.trim();
+
+      this.lastGps = gps;
+
+      if (trimmed.toUpperCase().startsWith('NOTHING')) {
+        this.emit({ type: 'nothing', gps, durationMs });
+        return;
+      }
+
+      this.emit({ type: 'interesting', gps, text: trimmed, durationMs });
+      this.emit({ type: 'speaking', gps, text: trimmed });
+      await speechService.speak(trimmed);
+    } catch (err) {
+      this.emit({ type: 'error', text: err instanceof Error ? err.message : 'Inference failed' });
+    }
+  }
+}
+
+export const autoGuideService = new AutoGuideService();
+
+TaskManager.defineTask(BACKGROUND_LOCATION_TASK, ({ data, error }) => {
+  if (error) return;
+  const locations = (data as { locations?: Location.LocationObject[] })?.locations;
+  if (!locations?.length) return;
+  const loc = locations[0];
+  autoGuideService.handleBackgroundLocation({
+    latitude: loc.coords.latitude,
+    longitude: loc.coords.longitude,
+    accuracy: loc.coords.accuracy ?? undefined,
+  });
+});
