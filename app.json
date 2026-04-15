@@ -26,7 +26,7 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.localguideapp",
-      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
+      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "INTERNET"]
     },
     "web": {
       "favicon": "./assets/favicon.png"

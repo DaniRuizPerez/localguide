@@ -20,6 +20,13 @@ export interface LiteRTNativeModule {
   loadModel(modelAssetName: string): Promise<void>;
 
   /**
+   * Load the model from an absolute file path on device storage.
+   * Use this when the model has been downloaded to the device at runtime.
+   * @param absolutePath - full local filesystem path to the .task model file
+   */
+  loadModelFromPath(absolutePath: string): Promise<void>;
+
+  /**
    * Run a single-turn inference with the given prompt.
    * @param prompt - full formatted prompt string
    * @param maxTokens - maximum tokens to generate

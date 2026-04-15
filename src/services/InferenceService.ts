@@ -1,4 +1,6 @@
 import LiteRTModule from '../native/LiteRTModule';
+import { MODEL_LOCAL_PATH } from './ModelDownloadService';
+import * as FileSystem from 'expo-file-system';
 
 const MODEL_ASSET_NAME = 'gemma-4-e2b-it-int4.task';
 const DEFAULT_MAX_TOKENS = 512;
@@ -28,9 +30,15 @@ export class InferenceService {
 
     this.loading = true;
     try {
-      await LiteRTModule.loadModel(MODEL_ASSET_NAME);
+      const localInfo = await FileSystem.getInfoAsync(MODEL_LOCAL_PATH);
+      if (localInfo.exists && localInfo.size !== undefined && localInfo.size > 0) {
+        await LiteRTModule.loadModelFromPath(MODEL_LOCAL_PATH);
+        console.log('[InferenceService] Gemma model loaded from local storage');
+      } else {
+        await LiteRTModule.loadModel(MODEL_ASSET_NAME);
+        console.log('[InferenceService] Gemma model loaded from bundled assets');
+      }
       this.loaded = true;
-      console.log('[InferenceService] Gemma model loaded');
     } finally {
       this.loading = false;
     }
