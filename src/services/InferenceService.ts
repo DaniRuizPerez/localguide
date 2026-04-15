@@ -1,6 +1,6 @@
 import LiteRTModule from '../native/LiteRTModule';
 import { MODEL_LOCAL_PATH } from './ModelDownloadService';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 const MODEL_ASSET_NAME = 'gemma3-1b-it-int4.task';
 const DEFAULT_MAX_TOKENS = 512;

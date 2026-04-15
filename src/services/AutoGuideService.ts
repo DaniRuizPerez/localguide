@@ -159,12 +159,12 @@ class AutoGuideService {
 
 export const autoGuideService = new AutoGuideService();
 
-TaskManager.defineTask(BACKGROUND_LOCATION_TASK, ({ data, error }) => {
+TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   if (error) return;
   const locations = (data as { locations?: Location.LocationObject[] })?.locations;
   if (!locations?.length) return;
   const loc = locations[0];
-  autoGuideService.handleBackgroundLocation({
+  await autoGuideService.handleBackgroundLocation({
     latitude: loc.coords.latitude,
     longitude: loc.coords.longitude,
     accuracy: loc.coords.accuracy ?? undefined,
