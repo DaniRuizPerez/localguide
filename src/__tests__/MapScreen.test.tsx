@@ -19,10 +19,13 @@ const mockRoute = { key: 'Map', name: 'Map' } as any;
 
 describe('MapScreen', () => {
   it('renders without crashing', async () => {
-    const { toJSON } = render(
+    const { toJSON, queryByText } = render(
       <MapScreen navigation={mockNavigation} route={mockRoute} />
     );
-    await waitFor(() => expect(toJSON()).toBeTruthy());
+    expect(toJSON()).toBeTruthy();
+    await waitFor(() => {
+      expect(queryByText(/Getting your location/i)).toBeNull();
+    });
   });
 
   it('shows loading state initially', async () => {
