@@ -20,9 +20,10 @@ Built with **React Native 0.83 + Expo SDK 55 + TypeScript**, GPS via `expo-locat
 ## Architecture
 
 ```
-App.tsx
- ├─ ModelDownloadScreen   ← first-run; downloads Gemma .task file
- └─ AppNavigator
+index.js                 ← entry point (registers 'main' via registerRootComponent)
+ └─ App.tsx
+     ├─ ModelDownloadScreen   ← first-run; downloads Gemma .task file
+     └─ AppNavigator
      ├─ ChatScreen        ← user Q&A, uses LocalGuideService
      └─ MapScreen         ← map view + auto-guide
 
@@ -119,7 +120,7 @@ The `android/` folder is a standard Android Gradle project and can be imported d
 
 5. **Sync Project with Gradle**
    - Click **Sync Project with Gradle Files** (elephant icon in toolbar)
-   - First sync downloads Gradle 9.0.0 + all dependencies — takes several minutes
+   - First sync downloads Gradle 8.13 + all dependencies — takes several minutes
    - Subsequent syncs are fast (cached)
 
 6. **Run on device / emulator**
