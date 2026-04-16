@@ -58,11 +58,9 @@ jobs:
         run: |
           sdkmanager \
             "platforms;android-35" \
+            "platforms;android-36" \
             "build-tools;35.0.0" \
             "ndk;27.1.12297006"
-
-      - name: Expo prebuild (generate native Android project)
-        run: npx expo prebuild --platform android --clean
 
       - name: Create local.properties
         run: echo "sdk.dir=$ANDROID_HOME" > android/local.properties
