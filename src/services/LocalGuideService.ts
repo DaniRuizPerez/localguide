@@ -1,5 +1,6 @@
 import { inferenceService, type GPSContext, type InferenceOptions } from './InferenceService';
 import { buildPrompt } from './prompt';
+import type { ILocalGuideService } from '../types/services';
 
 const SYSTEM_PROMPT =
   'You are a knowledgeable local tourist guide helping visitors explore the area. ' +
@@ -12,7 +13,7 @@ export interface GuideResponse {
   durationMs: number;
 }
 
-export const localGuideService = {
+export const localGuideService: ILocalGuideService = {
   async initialize(): Promise<void> {
     return inferenceService.initialize();
   },

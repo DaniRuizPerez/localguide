@@ -1,6 +1,7 @@
 import { ExpoSpeechRecognitionModule } from 'expo-speech-recognition';
+import type { IVoiceRecognitionService } from '../types/services';
 
-export const voiceRecognitionService = {
+export const voiceRecognitionService: IVoiceRecognitionService = {
   async requestPermission(): Promise<boolean> {
     const { granted } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     return granted;

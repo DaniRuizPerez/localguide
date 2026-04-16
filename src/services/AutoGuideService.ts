@@ -182,4 +182,6 @@ class AutoGuideService {
   }
 }
 
-export const autoGuideService = new AutoGuideService();
+import type { IAutoGuideService } from '../types/services';
+
+export const autoGuideService: IAutoGuideService = new AutoGuideService();

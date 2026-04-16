@@ -1,9 +1,10 @@
 import * as Speech from 'expo-speech';
+import type { ISpeechService } from '../types/services';
 
 let speaking = false;
 let currentToken = 0;
 
-export const speechService = {
+export const speechService: ISpeechService = {
   async speak(text: string): Promise<void> {
     if (speaking) {
       Speech.stop();

@@ -75,5 +75,7 @@ export class InferenceService {
   }
 }
 
+import type { IInferenceService } from '../types/services';
+
 // Singleton — one model load shared across the app
-export const inferenceService = new InferenceService();
+export const inferenceService: IInferenceService = new InferenceService();

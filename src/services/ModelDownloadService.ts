@@ -142,4 +142,6 @@ export class ModelDownloadService {
   }
 }
 
-export const modelDownloadService = new ModelDownloadService();
+import type { IModelDownloadService } from '../types/services';
+
+export const modelDownloadService: IModelDownloadService = new ModelDownloadService();
