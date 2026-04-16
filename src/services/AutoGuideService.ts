@@ -2,10 +2,9 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { inferenceService, type GPSContext } from './InferenceService';
 import { speechService } from './SpeechService';
+import { POLL_INTERVAL_MS, MIN_DISTANCE_METERS } from '../config/constants';
 
 const BACKGROUND_LOCATION_TASK = 'background-location-task';
-const POLL_INTERVAL_MS = 60_000;
-const MIN_DISTANCE_METERS = 50;
 
 type AutoGuideCallback = (event: AutoGuideEvent) => void;
 

@@ -1,9 +1,7 @@
 import LiteRTModule from '../native/LiteRTModule';
-import { MODEL_LOCAL_PATH } from './ModelDownloadService';
+import { MODEL_LOCAL_PATH } from '../infrastructure/ModelStorage';
+import { MODEL_ASSET_NAME, DEFAULT_MAX_TOKENS } from '../config/constants';
 import * as FileSystem from 'expo-file-system/legacy';
-
-const MODEL_ASSET_NAME = 'gemma3-1b-it-int4.task';
-const DEFAULT_MAX_TOKENS = 512;
 
 export interface InferenceOptions {
   maxTokens?: number;

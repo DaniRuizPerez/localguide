@@ -1,11 +1,9 @@
 import * as FileSystem from 'expo-file-system/legacy';
+import { MODEL_DOWNLOAD_URL, MODEL_FILE_NAME } from '../config/constants';
+import { MODEL_DIR, MODEL_LOCAL_PATH } from '../infrastructure/ModelStorage';
 
-export const MODEL_DOWNLOAD_URL =
-  'https://storage.googleapis.com/mediapipe-models/llm_inference/gemma3/int4/gemma3-1b-it-int4.task';
-
-export const MODEL_FILE_NAME = 'gemma3-1b-it-int4.task';
-export const MODEL_DIR = `${FileSystem.documentDirectory}models/`;
-export const MODEL_LOCAL_PATH = `${MODEL_DIR}${MODEL_FILE_NAME}`;
+// Re-export for backward-compat consumers (tests, screens)
+export { MODEL_DOWNLOAD_URL, MODEL_FILE_NAME, MODEL_DIR, MODEL_LOCAL_PATH };
 
 export type DownloadStatus = 'idle' | 'checking' | 'downloading' | 'paused' | 'done' | 'error';
 
