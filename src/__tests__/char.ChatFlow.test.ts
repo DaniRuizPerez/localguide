@@ -8,7 +8,7 @@
  * relevant assertion and leave a commit note explaining why.
  */
 
-import { LocalGuideService } from '../services/LocalGuideService';
+import { localGuideService } from '../services/LocalGuideService';
 import type { GPSContext } from '../services/InferenceService';
 
 // ── Mock the native module so InferenceService runs in mock mode ───────────
@@ -41,7 +41,7 @@ jest.mock('../services/InferenceService', () => {
 });
 
 describe('Characterization: LocalGuideService — prompt format', () => {
-  let service: LocalGuideService;
+  let service: typeof localGuideService;
 
   beforeEach(() => {
     // LocalGuideService is a plain object export; use the module directly
@@ -88,7 +88,7 @@ describe('Characterization: LocalGuideService — prompt format', () => {
 });
 
 describe('Characterization: LocalGuideService — response shaping', () => {
-  let service: LocalGuideService;
+  let service: typeof localGuideService;
 
   beforeEach(() => {
     service = require('../services/LocalGuideService').localGuideService;
