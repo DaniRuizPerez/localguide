@@ -129,19 +129,26 @@ class AutoGuideService {
   }
 
   private async evaluateLocation(gps: GPSContext): Promise<void> {
-    if (this.lastGps && haversineDistance(this.lastGps, gps) < MIN_DISTANCE_METERS) {
+    if (!this.lastGps) {
+      // Establish baseline on first fix; skip inference so we only speak when the user moves
+      this.lastGps = gps;
+      this.emit({ type: 'nothing', gps });
+      return;
+    }
+
+    if (haversineDistance(this.lastGps, gps) < MIN_DISTANCE_METERS) {
       this.emit({ type: 'nothing', gps });
       return;
     }
 
     try {
       const prompt = buildTriagePrompt(gps);
+      // Update baseline before inference so concurrent evaluations don't double-fire
+      this.lastGps = gps;
       const start = Date.now();
       const response = await inferenceService.runInference(prompt, { maxTokens: 256 });
       const durationMs = Date.now() - start;
       const trimmed = response.trim();
-
-      this.lastGps = gps;
 
       if (trimmed.toUpperCase().startsWith('NOTHING')) {
         this.emit({ type: 'nothing', gps, durationMs });
@@ -161,7 +168,8 @@ export const autoGuideService = new AutoGuideService();
 
 TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   if (error) return;
-  const locations = (data as { locations?: Location.LocationObject[] })?.locations;
+  if (data == null || typeof data !== 'object' || !('locations' in data)) return;
+  const locations = (data as { locations?: Location.LocationObject[] }).locations;
   if (!locations?.length) return;
   const loc = locations[0];
   await autoGuideService.handleBackgroundLocation({

@@ -1,13 +1,12 @@
 /**
  * Characterization: SpeechService
  *
- * Locks in current behavior — including the known race-condition quirk —
- * so PR 1 can deliberately update the tests that capture broken behavior
- * while keeping the ones that capture correct behavior green.
+ * Locks in current behavior — including the cancellation-token fix from PR 1.
  *
- * Tests marked "CURRENT BEHAVIOR (pre-fix)" describe what the buggy code
- * does today.  PR 1 must update those specific assertions and leave a commit
- * note explaining the intentional change.
+ * The three "CURRENT BEHAVIOR (pre-fix)" tests from PR 0 have been updated
+ * to reflect the fixed cancellation-token behavior (PR 1 intentional change):
+ *   - stale onStopped/onDone callbacks are now ignored via token check
+ *   - isSpeaking stays true while the second utterance is playing
  */
 
 import * as Speech from 'expo-speech';
@@ -105,7 +104,7 @@ describe('Characterization: SpeechService — basic behavior', () => {
   });
 });
 
-describe('Characterization: SpeechService — concurrent speak() (pre-fix baseline)', () => {
+describe('Characterization: SpeechService — concurrent speak() (post-fix)', () => {
   let speechService: typeof import('../services/SpeechService').speechService;
 
   beforeEach(() => {
@@ -121,63 +120,60 @@ describe('Characterization: SpeechService — concurrent speak() (pre-fix baseli
   });
 
   /**
-   * CURRENT BEHAVIOR (pre-fix):
-   * When speak() is called while already speaking, Speech.stop() is called
-   * first (interrupting the current utterance), then Speech.speak() is called
-   * for the new text.  The first call's promise is left pending until its
-   * onStopped fires.
-   *
-   * PR 1 must update this test to reflect the fixed cancellation-token behavior.
+   * PR 1 fix (was: "CURRENT BEHAVIOR: second speak() calls Speech.stop() then starts new utterance"):
+   * The stop+speak sequence is unchanged. What changed: the first call's onStopped
+   * is now a no-op because the cancellation token no longer matches, so isSpeaking
+   * stays true while the second utterance is playing.
    */
-  it('CURRENT BEHAVIOR: second speak() calls Speech.stop() then starts new utterance', () => {
+  it('second speak() stops the first utterance and starts a new one', () => {
     speechService.speak('first');
-    // isSpeaking is now true from the module-level `speaking` flag
     speechService.speak('second');
 
     expect(mockStop).toHaveBeenCalledTimes(1);
     expect(mockSpeak).toHaveBeenCalledTimes(2);
     expect(mockSpeak.mock.calls[1][0]).toBe('second');
 
-    // Resolve both to clean up
+    // Stale onStopped is a no-op; isSpeaking stays true while second plays
     triggerSpeechCallback(0, 'onStopped');
+    expect(speechService.isSpeaking).toBe(true);
+
     triggerSpeechCallback(1, 'onDone');
   });
 
   /**
-   * CURRENT BEHAVIOR (pre-fix):
-   * The module-level `speaking` flag is set to true by the first speak() call.
-   * The second speak() call sees it and calls Speech.stop(), but the flag is
-   * still true when the second Speech.speak() call begins.
+   * PR 1 fix (was: "CURRENT BEHAVIOR: isSpeaking remains true between the two speak() calls"):
+   * isSpeaking is true throughout both calls and remains true after the stale
+   * onStopped fires (cancellation token prevents the flag being cleared).
    */
-  it('CURRENT BEHAVIOR: isSpeaking remains true between the two speak() calls', () => {
+  it('isSpeaking is true throughout both speak() calls and after stale onStopped', () => {
     speechService.speak('first');
-    expect(speechService.isSpeaking).toBe(true); // set by first call
+    expect(speechService.isSpeaking).toBe(true);
 
     speechService.speak('second');
-    expect(speechService.isSpeaking).toBe(true); // still true (second call set it again)
+    expect(speechService.isSpeaking).toBe(true);
 
+    // Stale callback ignored — still true
     triggerSpeechCallback(0, 'onStopped');
+    expect(speechService.isSpeaking).toBe(true);
+
     triggerSpeechCallback(1, 'onDone');
-  });
-
-  /**
-   * CURRENT BEHAVIOR (pre-fix):
-   * When the first call's onStopped fires (after Speech.stop() interrupted it),
-   * it resets the module-level `speaking = false`.  This happens even while the
-   * second utterance is still in progress — so isSpeaking briefly reports false
-   * while audio is actually playing.
-   */
-  it('CURRENT BEHAVIOR: first onStopped sets isSpeaking=false even while second is playing', () => {
-    speechService.speak('first');
-    speechService.speak('second');
-
-    // First utterance stopped — its callback fires
-    triggerSpeechCallback(0, 'onStopped');
-
-    // BUG: speaking flag is now false even though second utterance is ongoing
     expect(speechService.isSpeaking).toBe(false);
+  });
 
-    // Clean up
+  /**
+   * PR 1 fix (was: "CURRENT BEHAVIOR: first onStopped sets isSpeaking=false even while second is playing"):
+   * The cancellation token check causes the stale onStopped to return early,
+   * so isSpeaking correctly stays true while the second utterance is playing.
+   */
+  it('first onStopped is ignored (stale token) — isSpeaking stays true while second plays', () => {
+    speechService.speak('first');
+    speechService.speak('second');
+
+    // FIXED: stale callback ignored by cancellation token check
+    triggerSpeechCallback(0, 'onStopped');
+    expect(speechService.isSpeaking).toBe(true); // correctly true while second plays
+
     triggerSpeechCallback(1, 'onDone');
+    expect(speechService.isSpeaking).toBe(false);
   });
 });

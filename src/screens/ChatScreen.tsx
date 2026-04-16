@@ -96,7 +96,7 @@ export default function ChatScreen(_props: Props) {
 
   const addGuideMessage = useCallback((text: string, locationUsed: GPSContext, durationMs?: number) => {
     const msg: Message = {
-      id: String(Date.now()) + '-auto',
+      id: crypto.randomUUID(),
       role: 'guide',
       text,
       locationUsed,
@@ -115,14 +115,14 @@ export default function ChatScreen(_props: Props) {
       const effectiveGps = gps ?? autoGuide.latestGps;
       if (!effectiveGps) return;
 
-      const userMsg: Message = { id: String(Date.now()), role: 'user', text: transcript };
+      const userMsg: Message = { id: crypto.randomUUID(), role: 'user', text: transcript };
       setMessages((prev) => [...prev, userMsg]);
       setInferring(true);
 
       try {
         const response = await localGuideService.ask(transcript, effectiveGps);
         const guideMsg: Message = {
-          id: String(Date.now()) + '-g',
+          id: crypto.randomUUID(),
           role: 'guide',
           text: response.text,
           locationUsed: response.locationUsed,
@@ -135,7 +135,7 @@ export default function ChatScreen(_props: Props) {
       } catch {
         setMessages((prev) => [
           ...prev,
-          { id: String(Date.now()) + '-err', role: 'guide', text: 'Sorry, something went wrong.' },
+          { id: crypto.randomUUID(), role: 'guide', text: 'Sorry, something went wrong.' },
         ]);
       } finally {
         setInferring(false);
@@ -154,12 +154,12 @@ export default function ChatScreen(_props: Props) {
     if (!effectiveGps) {
       setMessages((prev) => [
         ...prev,
-        { id: String(Date.now()) + '-err', role: 'guide', text: 'Location not available yet. Please wait or tap the banner to retry.' },
+        { id: crypto.randomUUID(), role: 'guide', text: 'Location not available yet. Please wait or tap the banner to retry.' },
       ]);
       return;
     }
 
-    const userMsg: Message = { id: String(Date.now()), role: 'user', text: query };
+    const userMsg: Message = { id: crypto.randomUUID(), role: 'user', text: query };
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
     setInferring(true);
@@ -167,7 +167,7 @@ export default function ChatScreen(_props: Props) {
     try {
       const response = await localGuideService.ask(query, effectiveGps);
       const guideMsg: Message = {
-        id: String(Date.now()) + '-g',
+        id: crypto.randomUUID(),
         role: 'guide',
         text: response.text,
         locationUsed: response.locationUsed,
@@ -180,7 +180,7 @@ export default function ChatScreen(_props: Props) {
     } catch {
       setMessages((prev) => [
         ...prev,
-        { id: String(Date.now()) + '-err', role: 'guide', text: 'Sorry, something went wrong. Please try again.' },
+        { id: crypto.randomUUID(), role: 'guide', text: 'Sorry, something went wrong. Please try again.' },
       ]);
     } finally {
       setInferring(false);

@@ -2,16 +2,16 @@
  * Characterization: AutoGuideService
  *
  * Locks in current behavior of the triage loop:
- *   - First GPS fix always triggers inference (lastGps starts null)
+ *   - First GPS fix establishes lastGps baseline (no inference) — PR 1 fix
  *   - Movement < 50 m suppresses inference
  *   - Movement ≥ 50 m triggers inference
  *   - "NOTHING" response → 'nothing' event; speech not called
  *   - Non-NOTHING response → 'interesting' + 'speaking' events; speech called
  *   - Location permission denied → 'error' event; service stops running
  *
- * Update these tests in PR 1 when haversine-null-initialisation fix changes
- * the "first GPS fix" behavior, with a commit note explaining the intentional
- * change.
+ * PR 1 updated the "first GPS fix" test and all tests that require inference
+ * to be triggered (they now call handleBackgroundLocation with a far location
+ * after start() to establish the baseline).
  */
 
 import type { AutoGuideEvent } from '../services/AutoGuideService';
@@ -134,20 +134,23 @@ describe('Characterization: AutoGuideService — triage loop', () => {
     await service.stop();
   });
 
-  it('CURRENT BEHAVIOR: first GPS fix always triggers inference (lastGps starts null)', async () => {
-    // PR 1 will change this: after the fix, first fix after start() will also
-    // trigger inference, but subsequent close fixes will not. The baseline
-    // (captured here) is: null-check in evaluateLocation means first call always runs.
+  /**
+   * PR 1 fix (was: "CURRENT BEHAVIOR: first GPS fix always triggers inference"):
+   * With null lastGps, evaluateLocation now sets lastGps = gps and emits 'nothing'
+   * without running inference. Inference only fires once the user has moved ≥ 50 m.
+   */
+  it('first GPS fix establishes lastGps baseline without running inference', async () => {
     mockRunInference.mockResolvedValue('NOTHING');
     await service.start();
 
-    expect(mockRunInference).toHaveBeenCalledTimes(1);
-    const prompt: string = mockRunInference.mock.calls[0][0];
-    expect(prompt).toContain(`${BASE.latitude.toFixed(6)}`);
+    // FIXED: null lastGps → set baseline, emit 'nothing', skip inference
+    expect(mockRunInference).not.toHaveBeenCalled();
+    const nothingEvents = events.filter((e) => e.type === 'nothing');
+    expect(nothingEvents.length).toBeGreaterThan(0);
   });
 
   it('movement below 50 m suppresses subsequent inference call', async () => {
-    // First poll fires inference (see test above)
+    // start() establishes lastGps = BASE without running inference
     mockRunInference.mockResolvedValue('NOTHING');
     await service.start();
     mockRunInference.mockClear();
@@ -166,7 +169,7 @@ describe('Characterization: AutoGuideService — triage loop', () => {
 
   it('movement of 100 m triggers inference', async () => {
     mockRunInference.mockResolvedValue('NOTHING');
-    await service.start(); // first poll sets lastGps
+    await service.start(); // establishes lastGps = BASE
     mockRunInference.mockClear();
 
     const farGps = moveNorth(BASE, 100);
@@ -185,15 +188,21 @@ describe('Characterization: AutoGuideService — triage loop', () => {
   });
 
   it('"NOTHING" match is case-insensitive (startsWith check)', async () => {
+    await service.start(); // establishes lastGps = BASE
     mockRunInference.mockResolvedValue('nothing interesting here');
-    await service.start();
+
+    const farGps = moveNorth(BASE, 100);
+    await service.handleBackgroundLocation(farGps);
 
     expect(mockSpeechSpeak).not.toHaveBeenCalled();
   });
 
   it('interesting response emits "interesting" and "speaking" events and calls speech', async () => {
+    await service.start(); // establishes lastGps = BASE
     mockRunInference.mockResolvedValue('You are near the Eiffel Tower. It was built in 1889.');
-    await service.start();
+
+    const farGps = moveNorth(BASE, 100);
+    await service.handleBackgroundLocation(farGps);
 
     const interestingEvents = events.filter((e) => e.type === 'interesting');
     expect(interestingEvents.length).toBeGreaterThan(0);
@@ -208,8 +217,11 @@ describe('Characterization: AutoGuideService — triage loop', () => {
   });
 
   it('interesting response trims the inference output before emitting', async () => {
+    await service.start(); // establishes lastGps = BASE
     mockRunInference.mockResolvedValue('  Near the Louvre.  \n');
-    await service.start();
+
+    const farGps = moveNorth(BASE, 100);
+    await service.handleBackgroundLocation(farGps);
 
     const interestingEvents = events.filter((e) => e.type === 'interesting');
     expect(interestingEvents[0]?.text).toBe('Near the Louvre.');
@@ -217,16 +229,22 @@ describe('Characterization: AutoGuideService — triage loop', () => {
 
   it('triage prompt includes GPS coordinates formatted to 6 decimal places', async () => {
     mockRunInference.mockResolvedValue('NOTHING');
-    await service.start();
+    await service.start(); // establishes lastGps = BASE
+
+    const farGps = moveNorth(BASE, 100);
+    await service.handleBackgroundLocation(farGps);
 
     const prompt: string = mockRunInference.mock.calls[0][0];
-    expect(prompt).toContain('48.856600');
-    expect(prompt).toContain('2.352200');
+    expect(prompt).toContain(farGps.latitude.toFixed(6));
+    expect(prompt).toContain(farGps.longitude.toFixed(6));
   });
 
   it('triage prompt uses 256 maxTokens', async () => {
     mockRunInference.mockResolvedValue('NOTHING');
-    await service.start();
+    await service.start(); // establishes lastGps = BASE
+
+    const farGps = moveNorth(BASE, 100);
+    await service.handleBackgroundLocation(farGps);
 
     const options = mockRunInference.mock.calls[0][1];
     expect(options?.maxTokens).toBe(256);
@@ -244,7 +262,10 @@ describe('Characterization: AutoGuideService — triage loop', () => {
 
   it('inference error emits error event without crashing', async () => {
     mockRunInference.mockRejectedValue(new Error('model crash'));
-    await service.start();
+    await service.start(); // establishes lastGps = BASE
+
+    const farGps = moveNorth(BASE, 100);
+    await service.handleBackgroundLocation(farGps);
 
     const errorEvents = events.filter((e) => e.type === 'error');
     expect(errorEvents.length).toBeGreaterThan(0);
