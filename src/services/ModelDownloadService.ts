@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 export const MODEL_DOWNLOAD_URL =
   'https://storage.googleapis.com/mediapipe-models/llm_inference/gemma3/int4/gemma3-1b-it-int4.task';
