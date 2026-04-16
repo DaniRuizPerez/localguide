@@ -2,9 +2,15 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { inferenceService, type GPSContext } from './InferenceService';
 import { speechService } from './SpeechService';
-import { POLL_INTERVAL_MS, MIN_DISTANCE_METERS } from '../config/constants';
+import { POLL_INTERVAL_MS, MIN_DISTANCE_METERS, TRIAGE_MAX_TOKENS } from '../config/constants';
+import { buildPrompt } from './prompt';
 
 const BACKGROUND_LOCATION_TASK = 'background-location-task';
+
+const TRIAGE_SYSTEM_PROMPT =
+  'You are a local tourist guide. Given GPS coordinates, decide if this location is near anything interesting ' +
+  '(landmark, historic site, notable restaurant, scenic viewpoint, cultural spot, etc.). ' +
+  'If YES: describe what is nearby in 2-3 sentences. If NOTHING interesting, respond with exactly "NOTHING".';
 
 type AutoGuideCallback = (event: AutoGuideEvent) => void;
 
@@ -13,16 +19,6 @@ export interface AutoGuideEvent {
   gps?: GPSContext;
   text?: string;
   durationMs?: number;
-}
-
-const TRIAGE_PROMPT =
-  'You are a local tourist guide. Given GPS coordinates, decide if this location is near anything interesting ' +
-  '(landmark, historic site, notable restaurant, scenic viewpoint, cultural spot, etc.). ' +
-  'If YES: describe what is nearby in 2-3 sentences. If NOTHING interesting, respond with exactly "NOTHING".';
-
-function buildTriagePrompt(gps: GPSContext): string {
-  const coords = `${gps.latitude.toFixed(6)}, ${gps.longitude.toFixed(6)}`;
-  return `${TRIAGE_PROMPT}\n\nCurrent location: ${coords}\nGuide:`;
 }
 
 function haversineDistance(a: GPSContext, b: GPSContext): number {
@@ -141,11 +137,11 @@ class AutoGuideService {
     }
 
     try {
-      const prompt = buildTriagePrompt(gps);
+      const prompt = buildPrompt(TRIAGE_SYSTEM_PROMPT, gps);
       // Update baseline before inference so concurrent evaluations don't double-fire
       this.lastGps = gps;
       const start = Date.now();
-      const response = await inferenceService.runInference(prompt, { maxTokens: 256 });
+      const response = await inferenceService.runInference(prompt, { maxTokens: TRIAGE_MAX_TOKENS });
       const durationMs = Date.now() - start;
       const trimmed = response.trim();
 
