@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -7,11 +7,8 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
-import {
-  modelDownloadService,
-  DownloadProgress,
-  MODEL_DOWNLOAD_URL,
-} from '../services/ModelDownloadService';
+import { MODEL_DOWNLOAD_URL } from '../services/ModelDownloadService';
+import { useModelDownload } from '../hooks/useModelDownload';
 
 interface Props {
   onDownloadComplete: () => void;
@@ -26,86 +23,14 @@ function formatBytes(bytes: number): string {
 }
 
 export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
-  const [remoteSize, setRemoteSize] = useState<number | null>(null);
-  const [progress, setProgress] = useState<DownloadProgress>({
-    bytesDownloaded: 0,
-    bytesTotal: 0,
-    fraction: 0,
-  });
-  const [downloadStatus, setDownloadStatus] = useState<
-    'idle' | 'downloading' | 'paused' | 'done' | 'error'
-  >('idle');
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [fetchingSize, setFetchingSize] = useState(false);
-
-  useEffect(() => {
-    setFetchingSize(true);
-    modelDownloadService
-      .getRemoteFileSize()
-      .then((size) => setRemoteSize(size))
-      .finally(() => setFetchingSize(false));
-  }, []);
-
-  const handleProgress = useCallback((p: DownloadProgress) => {
-    setProgress(p);
-  }, []);
-
-  const handleStart = useCallback(async () => {
-    setErrorMessage(null);
-    setDownloadStatus('downloading');
-    try {
-      await modelDownloadService.startDownload(handleProgress);
-      setDownloadStatus('done');
-      onDownloadComplete();
-    } catch (err) {
-      setDownloadStatus('error');
-      setErrorMessage(
-        modelDownloadService.error ?? (err instanceof Error ? err.message : String(err))
-      );
-    }
-  }, [handleProgress, onDownloadComplete]);
-
-  const handlePause = useCallback(async () => {
-    await modelDownloadService.pauseDownload();
-    setDownloadStatus('paused');
-  }, []);
-
-  const handleResume = useCallback(async () => {
-    setDownloadStatus('downloading');
-    setErrorMessage(null);
-    try {
-      await modelDownloadService.resumeDownload(handleProgress);
-      setDownloadStatus('done');
-      onDownloadComplete();
-    } catch (err) {
-      setDownloadStatus('error');
-      setErrorMessage(
-        modelDownloadService.error ?? (err instanceof Error ? err.message : String(err))
-      );
-    }
-  }, [handleProgress, onDownloadComplete]);
-
-  const handleRetry = useCallback(async () => {
-    setErrorMessage(null);
-    setProgress({ bytesDownloaded: 0, bytesTotal: 0, fraction: 0 });
-    setDownloadStatus('downloading');
-    try {
-      await modelDownloadService.retryDownload(handleProgress);
-      setDownloadStatus('done');
-      onDownloadComplete();
-    } catch (err) {
-      setDownloadStatus('error');
-      setErrorMessage(
-        modelDownloadService.error ?? (err instanceof Error ? err.message : String(err))
-      );
-    }
-  }, [handleProgress, onDownloadComplete]);
+  const { status, progress, remoteSize, fetchingSize, errorMessage, start, pause, resume, retry } =
+    useModelDownload(onDownloadComplete);
 
   const progressPercent = Math.round(progress.fraction * 100);
-  const isActive = downloadStatus === 'downloading';
-  const isPaused = downloadStatus === 'paused';
-  const isError = downloadStatus === 'error';
-  const isIdle = downloadStatus === 'idle';
+  const isActive = status === 'downloading';
+  const isPaused = status === 'paused';
+  const isError = status === 'error';
+  const isIdle = status === 'idle';
 
   return (
     <View style={styles.container}>
@@ -155,25 +80,25 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
 
       <View style={styles.buttonRow}>
         {isIdle && (
-          <TouchableOpacity style={styles.primaryButton} onPress={handleStart}>
+          <TouchableOpacity style={styles.primaryButton} onPress={start}>
             <Text style={styles.primaryButtonText}>Download</Text>
           </TouchableOpacity>
         )}
 
         {isActive && (
-          <TouchableOpacity style={styles.secondaryButton} onPress={handlePause}>
+          <TouchableOpacity style={styles.secondaryButton} onPress={pause}>
             <Text style={styles.secondaryButtonText}>Pause</Text>
           </TouchableOpacity>
         )}
 
         {isPaused && (
-          <TouchableOpacity style={styles.primaryButton} onPress={handleResume}>
+          <TouchableOpacity style={styles.primaryButton} onPress={resume}>
             <Text style={styles.primaryButtonText}>Resume</Text>
           </TouchableOpacity>
         )}
 
         {isError && (
-          <TouchableOpacity style={styles.primaryButton} onPress={handleRetry}>
+          <TouchableOpacity style={styles.primaryButton} onPress={retry}>
             <Text style={styles.primaryButtonText}>Retry</Text>
           </TouchableOpacity>
         )}
