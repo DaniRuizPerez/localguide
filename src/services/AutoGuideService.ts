@@ -12,7 +12,7 @@ const TRIAGE_SYSTEM_PROMPT =
   '(landmark, historic site, notable restaurant, scenic viewpoint, cultural spot, etc.). ' +
   'If YES: describe what is nearby in 2-3 sentences. If NOTHING interesting, respond with exactly "NOTHING".';
 
-type AutoGuideCallback = (event: AutoGuideEvent) => void;
+export type AutoGuideCallback = (event: AutoGuideEvent) => void;
 
 export interface AutoGuideEvent {
   type: 'location_update' | 'interesting' | 'nothing' | 'error' | 'speaking';
@@ -36,18 +36,41 @@ class AutoGuideService {
   private running = false;
   private lastGps: GPSContext | null = null;
   private foregroundTimer: ReturnType<typeof setInterval> | null = null;
-  private listener: AutoGuideCallback | null = null;
+  private listeners = new Set<AutoGuideCallback>();
+  private taskDefined = false;
 
-  setListener(cb: AutoGuideCallback | null) {
-    this.listener = cb;
+  addListener(cb: AutoGuideCallback): void {
+    this.listeners.add(cb);
   }
 
-  private emit(event: AutoGuideEvent) {
-    this.listener?.(event);
+  removeListener(cb: AutoGuideCallback): void {
+    this.listeners.delete(cb);
+  }
+
+  private emit(event: AutoGuideEvent): void {
+    this.listeners.forEach((cb) => cb(event));
   }
 
   async start(): Promise<void> {
     if (this.running) return;
+
+    // Register background task handler on first start, not at module load time
+    if (!this.taskDefined) {
+      TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
+        if (error) return;
+        if (data == null || typeof data !== 'object' || !('locations' in data)) return;
+        const locations = (data as { locations?: Location.LocationObject[] }).locations;
+        if (!locations?.length) return;
+        const loc = locations[0];
+        await this.handleBackgroundLocation({
+          latitude: loc.coords.latitude,
+          longitude: loc.coords.longitude,
+          accuracy: loc.coords.accuracy ?? undefined,
+        });
+      });
+      this.taskDefined = true;
+    }
+
     this.running = true;
 
     const { status } = await Location.requestForegroundPermissionsAsync();
@@ -160,16 +183,3 @@ class AutoGuideService {
 }
 
 export const autoGuideService = new AutoGuideService();
-
-TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
-  if (error) return;
-  if (data == null || typeof data !== 'object' || !('locations' in data)) return;
-  const locations = (data as { locations?: Location.LocationObject[] }).locations;
-  if (!locations?.length) return;
-  const loc = locations[0];
-  await autoGuideService.handleBackgroundLocation({
-    latitude: loc.coords.latitude,
-    longitude: loc.coords.longitude,
-    accuracy: loc.coords.accuracy ?? undefined,
-  });
-});

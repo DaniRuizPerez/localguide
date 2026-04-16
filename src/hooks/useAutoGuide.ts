@@ -45,8 +45,8 @@ export function useAutoGuide(onNewMessage?: (text: string, gps: GPSContext) => v
       }
     };
 
-    autoGuideService.setListener(handler);
-    return () => autoGuideService.setListener(null);
+    autoGuideService.addListener(handler);
+    return () => autoGuideService.removeListener(handler);
   }, []);
 
   useEffect(() => {

@@ -118,7 +118,7 @@ describe('Characterization: AutoGuideService — triage loop', () => {
     service = mod.autoGuideService;
 
     events.length = 0;
-    service.setListener((e: AutoGuideEvent) => events.push(e));
+    service.addListener((e: AutoGuideEvent) => events.push(e));
 
     mockRunInference.mockClear();
     mockSpeechSpeak.mockClear();
