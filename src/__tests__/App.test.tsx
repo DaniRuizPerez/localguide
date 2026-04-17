@@ -49,7 +49,7 @@ describe('ChatScreen', () => {
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
     expect(getByPlaceholderText('Ask about nearby places…')).toBeTruthy();
-    expect(getByText('Send')).toBeTruthy();
+    expect(getByText('↑')).toBeTruthy();
   });
 
   it('renders empty state hint', () => {
