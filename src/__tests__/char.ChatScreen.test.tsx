@@ -165,15 +165,17 @@ describe('Characterization: ChatScreen — sending a message', () => {
   });
 
   it('appends user message to the list after Send', async () => {
-    const { getByPlaceholderText, getByText, findByText } = render(
+    const { getByPlaceholderText, getByText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
 
     const input = getByPlaceholderText('Ask about nearby places…');
     fireEvent.changeText(input, 'What is near me?');
-    fireEvent.press(getByText('↑'));
+    await act(async () => {
+      fireEvent.press(getByText('↑'));
+    });
 
-    expect(await findByText('What is near me?')).toBeTruthy();
+    expect(getByText('What is near me?')).toBeTruthy();
   });
 
   it('appends guide response after inference resolves', async () => {
