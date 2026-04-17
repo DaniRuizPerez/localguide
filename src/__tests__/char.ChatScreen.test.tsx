@@ -235,7 +235,7 @@ describe('Characterization: ChatScreen — no location available', () => {
   it('shows error message when Send pressed with no GPS', async () => {
     mockGetCurrentPosition.mockRejectedValue(new Error('location unavailable'));
 
-    const { getByPlaceholderText, getByText, findByText } = render(
+    const { getByPlaceholderText, getByText, findAllByText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
 
@@ -245,7 +245,8 @@ describe('Characterization: ChatScreen — no location available', () => {
     fireEvent.changeText(getByPlaceholderText('Ask about nearby places…'), 'where am I?');
     fireEvent.press(getByText('↑'));
 
-    expect(await findByText(/Location not available|enter a location/i)).toBeTruthy();
+    const matches = await findAllByText(/Location not available yet|GPS unavailable/i);
+    expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 });
 
