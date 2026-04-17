@@ -46,13 +46,12 @@ jest.mock('expo-task-manager', () => ({
   isTaskRegisteredAsync: jest.fn().mockResolvedValue(false),
 }));
 
-const mockGetCurrentPosition = jest.fn().mockResolvedValue({
-  coords: { latitude: 48.8566, longitude: 2.3522, accuracy: 10 },
-});
 jest.mock('expo-location', () => ({
   Accuracy: { Balanced: 3 },
   requestForegroundPermissionsAsync: jest.fn().mockResolvedValue({ status: 'granted' }),
-  getCurrentPositionAsync: (...args: unknown[]) => mockGetCurrentPosition(...args),
+  getCurrentPositionAsync: jest.fn().mockResolvedValue({
+    coords: { latitude: 48.8566, longitude: 2.3522, accuracy: 10 },
+  }),
   requestBackgroundPermissionsAsync: jest.fn().mockResolvedValue({ status: 'denied' }),
   startLocationUpdatesAsync: jest.fn().mockResolvedValue(undefined),
   stopLocationUpdatesAsync: jest.fn().mockResolvedValue(undefined),
@@ -75,14 +74,37 @@ jest.mock('../services/SpeechService', () => ({
   },
 }));
 
-const mockNavigation = {} as any;
-const chatRoute = { key: 'Chat', name: 'Chat' } as any;
+// ── useLocation mock — eliminates async act() warnings from async GPS fetch ──
 
 const GPS = { latitude: 48.8566, longitude: 2.3522, accuracy: 10 };
+
+const mockRefresh = jest.fn().mockResolvedValue(undefined);
+const mockSetManualLocation = jest.fn();
+
+const defaultLocationState = {
+  gps: GPS,
+  status: 'ready' as const,
+  errorMessage: null,
+  refresh: mockRefresh,
+  manualLocation: null,
+  setManualLocation: mockSetManualLocation,
+};
+
+jest.mock('../hooks/useLocation', () => ({
+  useLocation: jest.fn(),
+}));
+
+const mockNavigation = {} as any;
+const chatRoute = { key: 'Chat', name: 'Chat' } as any;
 
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe('Characterization: ChatScreen — initial render', () => {
+  beforeEach(() => {
+    const { useLocation } = require('../hooks/useLocation');
+    useLocation.mockReturnValue(defaultLocationState);
+  });
+
   it('renders the text input with correct placeholder', () => {
     const { getByPlaceholderText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
@@ -131,11 +153,10 @@ describe('Characterization: ChatScreen — initial render', () => {
 
 describe('Characterization: ChatScreen — sending a message', () => {
   beforeEach(() => {
+    const { useLocation } = require('../hooks/useLocation');
+    useLocation.mockReturnValue(defaultLocationState);
     mockAsk.mockClear();
     mockSpeechSpeak.mockClear();
-    mockGetCurrentPosition.mockResolvedValue({
-      coords: { latitude: GPS.latitude, longitude: GPS.longitude, accuracy: GPS.accuracy },
-    });
     mockAsk.mockResolvedValue({
       text: 'You are near the Eiffel Tower.',
       locationUsed: GPS,
@@ -147,9 +168,6 @@ describe('Characterization: ChatScreen — sending a message', () => {
     const { getByPlaceholderText, getByText, findByText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
-
-    // Wait for location to load
-    await waitFor(() => expect(mockGetCurrentPosition).toHaveBeenCalled());
 
     const input = getByPlaceholderText('Ask about nearby places…');
     fireEvent.changeText(input, 'What is near me?');
@@ -163,8 +181,6 @@ describe('Characterization: ChatScreen — sending a message', () => {
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
 
-    await waitFor(() => expect(mockGetCurrentPosition).toHaveBeenCalled());
-
     const input = getByPlaceholderText('Ask about nearby places…');
     fireEvent.changeText(input, 'What is near me?');
     fireEvent.press(getByText('↑'));
@@ -176,8 +192,6 @@ describe('Characterization: ChatScreen — sending a message', () => {
     const { getByPlaceholderText, getByText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
-
-    await waitFor(() => expect(mockGetCurrentPosition).toHaveBeenCalled());
 
     fireEvent.changeText(getByPlaceholderText('Ask about nearby places…'), 'test query');
     await act(async () => { fireEvent.press(getByText('↑')); });
@@ -193,8 +207,6 @@ describe('Characterization: ChatScreen — sending a message', () => {
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
 
-    await waitFor(() => expect(mockGetCurrentPosition).toHaveBeenCalled());
-
     fireEvent.changeText(getByPlaceholderText('Ask about nearby places…'), 'speak test');
     await act(async () => { fireEvent.press(getByText('↑')); });
 
@@ -208,8 +220,6 @@ describe('Characterization: ChatScreen — sending a message', () => {
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
 
-    await waitFor(() => expect(mockGetCurrentPosition).toHaveBeenCalled());
-
     fireEvent.changeText(getByPlaceholderText('Ask about nearby places…'), 'crash test');
     fireEvent.press(getByText('↑'));
 
@@ -221,8 +231,6 @@ describe('Characterization: ChatScreen — sending a message', () => {
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
 
-    await waitFor(() => expect(mockGetCurrentPosition).toHaveBeenCalled());
-
     const input = getByPlaceholderText('Ask about nearby places…');
     fireEvent.changeText(input, 'clear me');
     await act(async () => { fireEvent.press(getByText('↑')); });
@@ -233,14 +241,19 @@ describe('Characterization: ChatScreen — sending a message', () => {
 
 describe('Characterization: ChatScreen — no location available', () => {
   it('shows error message when Send pressed with no GPS', async () => {
-    mockGetCurrentPosition.mockRejectedValue(new Error('location unavailable'));
+    const { useLocation } = require('../hooks/useLocation');
+    useLocation.mockReturnValue({
+      gps: null,
+      status: 'error',
+      errorMessage: 'location unavailable',
+      refresh: mockRefresh,
+      manualLocation: null,
+      setManualLocation: mockSetManualLocation,
+    });
 
     const { getByPlaceholderText, getByText, findAllByText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
-
-    // Wait for location attempt to fail
-    await waitFor(() => expect(mockGetCurrentPosition).toHaveBeenCalled());
 
     fireEvent.changeText(getByPlaceholderText('Ask about nearby places…'), 'where am I?');
     fireEvent.press(getByText('↑'));
@@ -252,19 +265,13 @@ describe('Characterization: ChatScreen — no location available', () => {
 
 describe('Characterization: ChatScreen — message rendering', () => {
   it('renders both user and guide bubbles in a mixed conversation', async () => {
+    const { useLocation } = require('../hooks/useLocation');
+    useLocation.mockReturnValue(defaultLocationState);
     mockAsk.mockResolvedValue({ text: 'Guide reply.', locationUsed: GPS, durationMs: 100 });
-    mockGetCurrentPosition.mockResolvedValue({
-      coords: { latitude: GPS.latitude, longitude: GPS.longitude, accuracy: GPS.accuracy },
-    });
 
-    const { getByPlaceholderText, getByText, findByText, findByDisplayValue } = render(
+    const { getByPlaceholderText, getByText, findByText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
-
-    // Wait for location banner to be ready (GPS loaded)
-    await waitFor(() => expect(mockGetCurrentPosition).toHaveBeenCalled());
-    // Small additional flush to let state updates propagate
-    await act(async () => {});
 
     const input = getByPlaceholderText('Ask about nearby places…');
     fireEvent.changeText(input, 'Hello');
