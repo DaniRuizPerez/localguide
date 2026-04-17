@@ -15,6 +15,7 @@ Built with **React Native 0.83 + Expo SDK 55 + TypeScript**, GPS via `expo-locat
 - **Voice** — speech-to-text input + text-to-speech output for hands-free use
 - **On-device inference** — Gemma 3 1B int4 (≈530 MB) runs fully offline via LiteRT
 - **Resumable model download** — fetch once, pause/resume/retry, persist locally
+- **Location fallback** — manual location entry when GPS is denied or unavailable
 
 ---
 
@@ -37,11 +38,13 @@ src/
  │   ├─ SpeechService             text-to-speech
  │   └─ VoiceRecognitionService   speech-to-text
  ├─ hooks/
- │   ├─ useLocation               GPS with permission + watch
+ │   ├─ useLocation               GPS with permission + watch; manual fallback
  │   ├─ useAutoGuide              subscribes to AutoGuideService
  │   └─ useVoiceInput             mic capture + transcription
  ├─ native/
  │   └─ LiteRTModule              TS bridge for native LiteRT (iOS/Android)
+ ├─ theme/
+ │   └─ colors.ts                 centralized color palette (amber, teal, warm neutrals)
  └─ navigation/AppNavigator       bottom-tab nav (Chat / Map)
 ```
 
