@@ -181,6 +181,7 @@ The debug APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
 | `CAMERA` | Android + iOS | Photo capture for vision queries |
 | `INTERNET` | Android | One-time model download |
 | `FOREGROUND_SERVICE` | Android | Background GPS during auto-guide |
+| `FOREGROUND_SERVICE_LOCATION` | Android | Required for foreground service with location type (API 34+) |
 
 ---
 
