@@ -12,6 +12,7 @@ import {
   DownloadProgress,
   MODEL_DOWNLOAD_URL,
 } from '../services/ModelDownloadService';
+import { Colors } from '../theme/colors';
 
 interface Props {
   onDownloadComplete: () => void;
@@ -109,40 +110,54 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Gemma Model Required</Text>
+      <View style={styles.logoRow}>
+        <Text style={styles.logoEmoji}>🧭</Text>
+        <Text style={styles.logoTitle}>Local Guide</Text>
+      </View>
+
+      <Text style={styles.title}>Download AI Model</Text>
       <Text style={styles.subtitle}>
         The on-device AI model must be downloaded before you can use Local Guide.
+        Your conversations stay private — all inference runs on your device.
       </Text>
 
       <View style={styles.infoBox}>
-        <Text style={styles.infoLabel}>Model</Text>
-        <Text style={styles.infoValue}>Gemma 3 1B IT (INT4)</Text>
-
-        <Text style={styles.infoLabel}>Storage Required</Text>
-        {fetchingSize ? (
-          <ActivityIndicator size="small" color="#007AFF" />
-        ) : (
-          <Text style={styles.infoValue}>
-            {remoteSize != null ? formatBytes(remoteSize) : 'Unknown'}
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>Model</Text>
+          <Text style={styles.infoValue}>Gemma 3 1B IT (INT4)</Text>
+        </View>
+        <View style={styles.infoDivider} />
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>Storage Required</Text>
+          {fetchingSize ? (
+            <ActivityIndicator size="small" color={Colors.primary} />
+          ) : (
+            <Text style={styles.infoValue}>
+              {remoteSize != null ? formatBytes(remoteSize) : 'Unknown'}
+            </Text>
+          )}
+        </View>
+        <View style={styles.infoDivider} />
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>Source</Text>
+          <Text style={styles.infoValueSmall} numberOfLines={1}>
+            {MODEL_DOWNLOAD_URL}
           </Text>
-        )}
-
-        <Text style={styles.infoLabel}>Source</Text>
-        <Text style={styles.infoValueSmall} numberOfLines={1}>
-          {MODEL_DOWNLOAD_URL}
-        </Text>
+        </View>
       </View>
 
       {(isActive || isPaused) && (
         <View style={styles.progressContainer}>
-          <View style={styles.progressBarBg}>
-            <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
+          <View style={styles.progressHeader}>
+            <Text style={styles.progressLabel}>Downloading…</Text>
+            <Text style={styles.progressPercent}>{progressPercent}%</Text>
           </View>
-          <Text style={styles.progressText}>
+          <View style={styles.progressBarBg}>
+            <View style={[styles.progressBarFill, { width: `${progressPercent}%` as any }]} />
+          </View>
+          <Text style={styles.progressBytes}>
             {formatBytes(progress.bytesDownloaded)}
-            {progress.bytesTotal > 0 ? ` / ${formatBytes(progress.bytesTotal)}` : ''}
-            {'  '}
-            {progressPercent}%
+            {progress.bytesTotal > 0 ? ` of ${formatBytes(progress.bytesTotal)}` : ''}
           </Text>
         </View>
       )}
@@ -156,7 +171,7 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
       <View style={styles.buttonRow}>
         {isIdle && (
           <TouchableOpacity style={styles.primaryButton} onPress={handleStart}>
-            <Text style={styles.primaryButtonText}>Download</Text>
+            <Text style={styles.primaryButtonText}>Download Model</Text>
           </TouchableOpacity>
         )}
 
@@ -174,14 +189,14 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
 
         {isError && (
           <TouchableOpacity style={styles.primaryButton} onPress={handleRetry}>
-            <Text style={styles.primaryButtonText}>Retry</Text>
+            <Text style={styles.primaryButtonText}>Retry Download</Text>
           </TouchableOpacity>
         )}
 
         {isActive && (
           <ActivityIndicator
             size="small"
-            color="#007AFF"
+            color={Colors.primary}
             style={styles.spinner}
           />
         )}
@@ -189,7 +204,7 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
 
       {Platform.OS === 'android' && (
         <Text style={styles.platformNote}>
-          Wi-Fi recommended — model may be several hundred MB.
+          📶 Wi-Fi recommended — model may be several hundred MB.
         </Text>
       )}
     </View>
@@ -201,72 +216,102 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 24,
     justifyContent: 'center',
-    backgroundColor: '#F2F2F7',
+    backgroundColor: Colors.background,
+  },
+  logoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 28,
+  },
+  logoEmoji: { fontSize: 36, marginRight: 10 },
+  logoTitle: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: Colors.primary,
+    letterSpacing: -0.5,
   },
   title: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '700',
-    color: '#1C1C1E',
+    color: Colors.textPrimary,
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 15,
-    color: '#3C3C43',
+    fontSize: 14,
+    color: Colors.textSecondary,
     marginBottom: 24,
-    lineHeight: 22,
+    lineHeight: 20,
   },
   infoBox: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+    backgroundColor: Colors.surface,
+    borderRadius: 16,
     padding: 16,
     marginBottom: 24,
-    gap: 4,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  infoDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Colors.borderLight,
   },
   infoLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#8E8E93',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginTop: 8,
-  },
-  infoValue: {
-    fontSize: 15,
-    color: '#1C1C1E',
+    fontSize: 13,
+    color: Colors.textSecondary,
     fontWeight: '500',
   },
+  infoValue: {
+    fontSize: 14,
+    color: Colors.textPrimary,
+    fontWeight: '600',
+  },
   infoValueSmall: {
-    fontSize: 12,
-    color: '#3C3C43',
+    fontSize: 11,
+    color: Colors.textSecondary,
+    maxWidth: '60%',
+    textAlign: 'right',
   },
   progressContainer: {
     marginBottom: 20,
   },
+  progressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  progressLabel: { fontSize: 13, color: Colors.textSecondary, fontWeight: '500' },
+  progressPercent: { fontSize: 13, color: Colors.primary, fontWeight: '700' },
   progressBarBg: {
     height: 8,
-    backgroundColor: '#E5E5EA',
+    backgroundColor: Colors.surfaceAlt,
     borderRadius: 4,
     overflow: 'hidden',
     marginBottom: 6,
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: '#007AFF',
+    backgroundColor: Colors.primary,
     borderRadius: 4,
   },
-  progressText: {
-    fontSize: 13,
-    color: '#3C3C43',
-    textAlign: 'right',
+  progressBytes: {
+    fontSize: 12,
+    color: Colors.textTertiary,
   },
   errorBox: {
-    backgroundColor: '#FFE5E5',
-    borderRadius: 8,
-    padding: 12,
+    backgroundColor: Colors.errorLight,
+    borderRadius: 12,
+    padding: 14,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#FECACA',
   },
   errorText: {
-    color: '#D70015',
+    color: Colors.error,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -276,34 +321,41 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   primaryButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
+    backgroundColor: Colors.primary,
+    borderRadius: 14,
+    paddingVertical: 15,
+    paddingHorizontal: 28,
+    shadowColor: Colors.primary,
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
   },
   primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '600',
+    color: Colors.surface,
+    fontSize: 16,
+    fontWeight: '700',
   },
   secondaryButton: {
-    backgroundColor: '#E5E5EA',
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
+    backgroundColor: Colors.surfaceAlt,
+    borderRadius: 14,
+    paddingVertical: 15,
+    paddingHorizontal: 28,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   secondaryButtonText: {
-    color: '#1C1C1E',
-    fontSize: 17,
+    color: Colors.textPrimary,
+    fontSize: 16,
     fontWeight: '600',
   },
   spinner: {
     marginLeft: 8,
   },
   platformNote: {
-    marginTop: 16,
+    marginTop: 20,
     fontSize: 12,
-    color: '#8E8E93',
+    color: Colors.textTertiary,
     textAlign: 'center',
   },
 });

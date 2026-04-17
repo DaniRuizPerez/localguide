@@ -4,6 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text } from 'react-native';
 import ChatScreen from '../screens/ChatScreen';
 import MapScreen from '../screens/MapScreen';
+import { Colors } from '../theme/colors';
 
 export type RootTabParamList = {
   Chat: undefined;
@@ -18,15 +19,24 @@ export default function AppNavigator() {
       <Tab.Navigator
         screenOptions={{
           headerShown: true,
-          tabBarActiveTintColor: '#007AFF',
-          tabBarInactiveTintColor: '#8E8E93',
+          headerStyle: { backgroundColor: Colors.surface },
+          headerTitleStyle: { color: Colors.textPrimary, fontWeight: '700' },
+          headerShadowVisible: false,
+          tabBarActiveTintColor: Colors.tabActive,
+          tabBarInactiveTintColor: Colors.tabInactive,
+          tabBarStyle: {
+            backgroundColor: Colors.tabBar,
+            borderTopColor: Colors.border,
+          },
+          tabBarLabelStyle: { fontWeight: '600', fontSize: 11 },
         }}
       >
         <Tab.Screen
           name="Chat"
           component={ChatScreen}
           options={{
-            title: 'Chat',
+            title: 'Local Guide',
+            tabBarLabel: 'Chat',
             tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>💬</Text>,
           }}
         />
@@ -34,7 +44,8 @@ export default function AppNavigator() {
           name="Map"
           component={MapScreen}
           options={{
-            title: 'Map',
+            title: 'Location',
+            tabBarLabel: 'Map',
             tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 20 }}>🗺️</Text>,
           }}
         />
