@@ -11,7 +11,10 @@ import {
   StyleSheet,
   ListRenderItem,
   Switch,
+  Image,
+  Alert,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { RootTabParamList } from '../navigation/AppNavigator';
 import { useLocation } from '../hooks/useLocation';
@@ -27,7 +30,8 @@ interface Message {
   id: string;
   role: 'user' | 'guide';
   text: string;
-  locationUsed?: GPSContext;
+  imageUri?: string;
+  locationUsed?: GPSContext | string;
   durationMs?: number;
 }
 
@@ -75,6 +79,13 @@ function ChatBubble({ message }: { message: Message }) {
   return (
     <View style={[styles.bubbleRow, isUser ? styles.bubbleRowUser : styles.bubbleRowGuide]}>
       <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleGuide]}>
+        {message.imageUri && (
+          <Image
+            source={{ uri: message.imageUri }}
+            style={styles.bubbleImage}
+            resizeMode="cover"
+          />
+        )}
         <Text style={[styles.bubbleText, isUser ? styles.bubbleTextUser : styles.bubbleTextGuide]}>
           {message.text}
         </Text>
@@ -94,6 +105,10 @@ export default function ChatScreen(_props: Props) {
   const [speakResponses, setSpeakResponses] = useState(true);
   const listRef = useRef<FlatList<Message>>(null);
 
+  const scrollToEnd = useCallback(() => {
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+  }, []);
+
   const addGuideMessage = useCallback((text: string, locationUsed: GPSContext, durationMs?: number) => {
     const msg: Message = {
       id: String(Date.now()) + '-auto',
@@ -103,8 +118,8 @@ export default function ChatScreen(_props: Props) {
       durationMs,
     };
     setMessages((prev) => [...prev, msg]);
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
-  }, []);
+    scrollToEnd();
+  }, [scrollToEnd]);
 
   const autoGuide = useAutoGuide((text, autoGps) => {
     addGuideMessage(text, autoGps);
@@ -139,10 +154,10 @@ export default function ChatScreen(_props: Props) {
         ]);
       } finally {
         setInferring(false);
-        setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+        scrollToEnd();
       }
     },
-    [gps, autoGuide.latestGps, speakResponses]
+    [gps, autoGuide.latestGps, speakResponses, scrollToEnd]
   );
 
   const voice = useVoiceInput(handleVoiceResult);
@@ -184,9 +199,69 @@ export default function ChatScreen(_props: Props) {
       ]);
     } finally {
       setInferring(false);
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+      scrollToEnd();
     }
-  }, [input, inferring, gps, autoGuide.latestGps, speakResponses]);
+  }, [input, inferring, gps, autoGuide.latestGps, speakResponses, scrollToEnd]);
+
+  const takePicture = useCallback(async () => {
+    if (inferring) return;
+    const effectiveGps = gps ?? autoGuide.latestGps;
+    if (!effectiveGps) {
+      Alert.alert('No Location', 'Location not available yet. Please wait for GPS lock.');
+      return;
+    }
+
+    const { status: camStatus } = await ImagePicker.requestCameraPermissionsAsync();
+    if (camStatus !== 'granted') {
+      Alert.alert('Camera Permission', 'Camera access is required to take photos.');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
+      allowsEditing: false,
+    });
+
+    if (result.canceled || !result.assets?.[0]) return;
+
+    const imageUri = result.assets[0].uri;
+    const userQuery = input.trim();
+
+    const userMsg: Message = {
+      id: String(Date.now()),
+      role: 'user',
+      text: userQuery || 'What do you see here?',
+      imageUri,
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    setInput('');
+    setInferring(true);
+    scrollToEnd();
+
+    try {
+      const response = await localGuideService.askWithImage(userQuery, effectiveGps);
+      const guideMsg: Message = {
+        id: String(Date.now()) + '-g',
+        role: 'guide',
+        text: response.text,
+        locationUsed: response.locationUsed,
+        durationMs: response.durationMs,
+      };
+      setMessages((prev) => [...prev, guideMsg]);
+      if (speakResponses) {
+        speechService.speak(response.text);
+      }
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        { id: String(Date.now()) + '-err', role: 'guide', text: 'Sorry, something went wrong. Please try again.' },
+      ]);
+    } finally {
+      setInferring(false);
+      scrollToEnd();
+    }
+  }, [inferring, gps, autoGuide.latestGps, input, speakResponses, scrollToEnd]);
 
   const renderItem: ListRenderItem<Message> = useCallback(
     ({ item }) => <ChatBubble message={item} />,
@@ -241,7 +316,7 @@ export default function ChatScreen(_props: Props) {
           <Text style={styles.emptyHint}>
             {autoGuide.enabled
               ? 'Auto-guide active. Walk around and your guide will speak when something interesting is nearby.'
-              : 'Ask your local guide anything about what\'s around you, or enable Auto-Guide.'}
+              : "Ask your local guide anything about what's around you, tap 📷 to take a photo, or enable Auto-Guide."}
           </Text>
         }
       />
@@ -260,6 +335,14 @@ export default function ChatScreen(_props: Props) {
           disabled={inferring}
         >
           <Text style={styles.micBtnText}>{voice.isListening ? '⏹' : '🎤'}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.cameraBtn}
+          onPress={takePicture}
+          disabled={inferring}
+        >
+          <Text style={styles.micBtnText}>📷</Text>
         </TouchableOpacity>
 
         <TextInput
@@ -353,6 +436,12 @@ const styles = StyleSheet.create({
   },
   bubbleUser: { backgroundColor: '#007AFF', borderBottomRightRadius: 4 },
   bubbleGuide: { backgroundColor: '#FFFFFF', borderBottomLeftRadius: 4 },
+  bubbleImage: {
+    width: 200,
+    height: 150,
+    borderRadius: 10,
+    marginBottom: 6,
+  },
   bubbleText: { fontSize: 15, lineHeight: 20 },
   bubbleTextUser: { color: '#FFFFFF' },
   bubbleTextGuide: { color: '#1C1C1E' },
@@ -384,6 +473,15 @@ const styles = StyleSheet.create({
   },
   micBtnActive: {
     backgroundColor: '#FF3B30',
+  },
+  cameraBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F2F2F7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
   },
   micBtnText: { fontSize: 20 },
   input: {
