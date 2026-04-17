@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   Switch,
   Image,
   Alert,
+  Animated,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
@@ -23,6 +24,7 @@ import { useVoiceInput } from '../hooks/useVoiceInput';
 import { localGuideService } from '../services/LocalGuideService';
 import { speechService } from '../services/SpeechService';
 import type { GPSContext } from '../services/InferenceService';
+import { Colors } from '../theme/colors';
 
 type Props = BottomTabScreenProps<RootTabParamList, 'Chat'>;
 
@@ -40,16 +42,22 @@ function LocationBanner({
   gps,
   errorMessage,
   onRefresh,
+  manualLocation,
+  onSetManualLocation,
 }: {
   status: string;
   gps: GPSContext | null;
   errorMessage: string | null;
   onRefresh: () => void;
+  manualLocation: string | null;
+  onSetManualLocation: (placeName: string) => void;
 }) {
+  const [locationInput, setLocationInput] = useState('');
+
   if (status === 'ready' && gps) {
     return (
       <View style={styles.bannerReady}>
-        <Text style={styles.bannerText}>
+        <Text style={styles.bannerReadyText}>
           📍 {gps.latitude.toFixed(4)}, {gps.longitude.toFixed(4)}
           {gps.accuracy != null ? `  ±${Math.round(gps.accuracy)}m` : ''}
         </Text>
@@ -59,25 +67,86 @@ function LocationBanner({
   if (status === 'requesting') {
     return (
       <View style={styles.bannerLoading}>
-        <ActivityIndicator size="small" color="#007AFF" />
-        <Text style={[styles.bannerText, { marginLeft: 6 }]}>Getting location…</Text>
+        <ActivityIndicator size="small" color={Colors.primary} />
+        <Text style={[styles.bannerLoadingText, { marginLeft: 6 }]}>Getting location…</Text>
       </View>
     );
   }
   if (status === 'denied' || status === 'error') {
+    if (manualLocation) {
+      return (
+        <TouchableOpacity style={styles.bannerManual} onPress={() => onSetManualLocation('')}>
+          <Text style={styles.bannerManualText}>📍 {manualLocation} — tap to change</Text>
+        </TouchableOpacity>
+      );
+    }
     return (
-      <TouchableOpacity style={styles.bannerError} onPress={onRefresh}>
-        <Text style={styles.bannerErrorText}>{errorMessage ?? 'Location unavailable'} — tap to retry</Text>
-      </TouchableOpacity>
+      <View style={styles.bannerErrorFallback}>
+        <Text style={styles.bannerErrorText}>GPS unavailable — enter a location to continue:</Text>
+        <View style={styles.locationInputRow}>
+          <TextInput
+            style={styles.locationInput}
+            value={locationInput}
+            onChangeText={setLocationInput}
+            placeholder="e.g. Times Square, NYC"
+            placeholderTextColor={Colors.textTertiary}
+            returnKeyType="done"
+            onSubmitEditing={() => {
+              if (locationInput.trim()) {
+                onSetManualLocation(locationInput.trim());
+                setLocationInput('');
+              }
+            }}
+          />
+          <TouchableOpacity
+            style={[styles.locationSetBtn, !locationInput.trim() && styles.locationSetBtnDisabled]}
+            onPress={() => {
+              if (locationInput.trim()) {
+                onSetManualLocation(locationInput.trim());
+                setLocationInput('');
+              }
+            }}
+            disabled={!locationInput.trim()}
+          >
+            <Text style={styles.locationSetBtnText}>Set</Text>
+          </TouchableOpacity>
+        </View>
+        <TouchableOpacity onPress={onRefresh}>
+          <Text style={[styles.bannerErrorText, { marginTop: 4, textDecorationLine: 'underline' }]}>
+            Retry GPS
+          </Text>
+        </TouchableOpacity>
+      </View>
     );
   }
   return null;
 }
 
-function ChatBubble({ message }: { message: Message }) {
+function AnimatedChatBubble({ message }: { message: Message }) {
   const isUser = message.role === 'user';
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(12)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
+      Animated.spring(slideAnim, { toValue: 0, tension: 80, friction: 10, useNativeDriver: true }),
+    ]).start();
+  }, [fadeAnim, slideAnim]);
+
   return (
-    <View style={[styles.bubbleRow, isUser ? styles.bubbleRowUser : styles.bubbleRowGuide]}>
+    <Animated.View
+      style={[
+        styles.bubbleRow,
+        isUser ? styles.bubbleRowUser : styles.bubbleRowGuide,
+        { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
+      ]}
+    >
+      {!isUser && (
+        <View style={styles.guideAvatar}>
+          <Text style={styles.guideAvatarText}>🧭</Text>
+        </View>
+      )}
       <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleGuide]}>
         {message.imageUri && (
           <Image
@@ -93,12 +162,12 @@ function ChatBubble({ message }: { message: Message }) {
           <Text style={styles.bubbleMeta}>{message.durationMs}ms · on-device</Text>
         )}
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
 export default function ChatScreen(_props: Props) {
-  const { gps, status, errorMessage, refresh } = useLocation();
+  const { gps, status, errorMessage, refresh, manualLocation, setManualLocation } = useLocation();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [inferring, setInferring] = useState(false);
@@ -109,7 +178,7 @@ export default function ChatScreen(_props: Props) {
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
   }, []);
 
-  const addGuideMessage = useCallback((text: string, locationUsed: GPSContext, durationMs?: number) => {
+  const addGuideMessage = useCallback((text: string, locationUsed: GPSContext | string, durationMs?: number) => {
     const msg: Message = {
       id: String(Date.now()) + '-auto',
       role: 'guide',
@@ -127,15 +196,16 @@ export default function ChatScreen(_props: Props) {
 
   const handleVoiceResult = useCallback(
     async (transcript: string) => {
-      const effectiveGps = gps ?? autoGuide.latestGps;
-      if (!effectiveGps) return;
+      const effectiveLocation: GPSContext | string | null =
+        (gps ?? autoGuide.latestGps) ?? manualLocation ?? null;
+      if (!effectiveLocation) return;
 
       const userMsg: Message = { id: String(Date.now()), role: 'user', text: transcript };
       setMessages((prev) => [...prev, userMsg]);
       setInferring(true);
 
       try {
-        const response = await localGuideService.ask(transcript, effectiveGps);
+        const response = await localGuideService.ask(transcript, effectiveLocation);
         const guideMsg: Message = {
           id: String(Date.now()) + '-g',
           role: 'guide',
@@ -157,7 +227,7 @@ export default function ChatScreen(_props: Props) {
         scrollToEnd();
       }
     },
-    [gps, autoGuide.latestGps, speakResponses, scrollToEnd]
+    [gps, autoGuide.latestGps, manualLocation, speakResponses, scrollToEnd]
   );
 
   const voice = useVoiceInput(handleVoiceResult);
@@ -165,11 +235,12 @@ export default function ChatScreen(_props: Props) {
   const sendMessage = useCallback(async () => {
     const query = input.trim();
     if (!query || inferring) return;
-    const effectiveGps = gps ?? autoGuide.latestGps;
-    if (!effectiveGps) {
+    const effectiveLocation: GPSContext | string | null =
+      (gps ?? autoGuide.latestGps) ?? manualLocation ?? null;
+    if (!effectiveLocation) {
       setMessages((prev) => [
         ...prev,
-        { id: String(Date.now()) + '-err', role: 'guide', text: 'Location not available yet. Please wait or tap the banner to retry.' },
+        { id: String(Date.now()) + '-err', role: 'guide', text: 'Location not available yet. Please wait or enter a location above.' },
       ]);
       return;
     }
@@ -180,7 +251,7 @@ export default function ChatScreen(_props: Props) {
     setInferring(true);
 
     try {
-      const response = await localGuideService.ask(query, effectiveGps);
+      const response = await localGuideService.ask(query, effectiveLocation);
       const guideMsg: Message = {
         id: String(Date.now()) + '-g',
         role: 'guide',
@@ -201,13 +272,14 @@ export default function ChatScreen(_props: Props) {
       setInferring(false);
       scrollToEnd();
     }
-  }, [input, inferring, gps, autoGuide.latestGps, speakResponses, scrollToEnd]);
+  }, [input, inferring, gps, autoGuide.latestGps, manualLocation, speakResponses, scrollToEnd]);
 
   const takePicture = useCallback(async () => {
     if (inferring) return;
-    const effectiveGps = gps ?? autoGuide.latestGps;
-    if (!effectiveGps) {
-      Alert.alert('No Location', 'Location not available yet. Please wait for GPS lock.');
+    const effectiveLocation: GPSContext | string | null =
+      (gps ?? autoGuide.latestGps) ?? manualLocation ?? null;
+    if (!effectiveLocation) {
+      Alert.alert('No Location', 'Location not available yet. Please enter a location above.');
       return;
     }
 
@@ -240,7 +312,7 @@ export default function ChatScreen(_props: Props) {
     scrollToEnd();
 
     try {
-      const response = await localGuideService.askWithImage(userQuery, effectiveGps);
+      const response = await localGuideService.askWithImage(userQuery, effectiveLocation);
       const guideMsg: Message = {
         id: String(Date.now()) + '-g',
         role: 'guide',
@@ -261,10 +333,10 @@ export default function ChatScreen(_props: Props) {
       setInferring(false);
       scrollToEnd();
     }
-  }, [inferring, gps, autoGuide.latestGps, input, speakResponses, scrollToEnd]);
+  }, [inferring, gps, autoGuide.latestGps, manualLocation, input, speakResponses, scrollToEnd]);
 
   const renderItem: ListRenderItem<Message> = useCallback(
-    ({ item }) => <ChatBubble message={item} />,
+    ({ item }) => <AnimatedChatBubble message={item} />,
     []
   );
 
@@ -274,7 +346,14 @@ export default function ChatScreen(_props: Props) {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={88}
     >
-      <LocationBanner status={status} gps={gps} errorMessage={errorMessage} onRefresh={refresh} />
+      <LocationBanner
+        status={status}
+        gps={gps}
+        errorMessage={errorMessage}
+        onRefresh={refresh}
+        manualLocation={manualLocation}
+        onSetManualLocation={setManualLocation}
+      />
 
       <View style={styles.controlsRow}>
         <View style={styles.controlItem}>
@@ -282,7 +361,8 @@ export default function ChatScreen(_props: Props) {
           <Switch
             value={autoGuide.enabled}
             onValueChange={autoGuide.toggle}
-            trackColor={{ true: '#34C759' }}
+            trackColor={{ false: Colors.border, true: Colors.secondary }}
+            thumbColor={Colors.surface}
           />
         </View>
         <View style={styles.controlItem}>
@@ -290,7 +370,8 @@ export default function ChatScreen(_props: Props) {
           <Switch
             value={speakResponses}
             onValueChange={setSpeakResponses}
-            trackColor={{ true: '#007AFF' }}
+            trackColor={{ false: Colors.border, true: Colors.primary }}
+            thumbColor={Colors.surface}
           />
         </View>
         {autoGuide.enabled && autoGuide.isSpeaking && (
@@ -313,36 +394,41 @@ export default function ChatScreen(_props: Props) {
         renderItem={renderItem}
         contentContainerStyle={styles.messageList}
         ListEmptyComponent={
-          <Text style={styles.emptyHint}>
-            {autoGuide.enabled
-              ? 'Auto-guide active. Walk around and your guide will speak when something interesting is nearby.'
-              : "Ask your local guide anything about what's around you, tap 📷 to take a photo, or enable Auto-Guide."}
-          </Text>
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyEmoji}>🧭</Text>
+            <Text style={styles.emptyHint}>
+              {autoGuide.enabled
+                ? 'Auto-guide active. Walk around and your guide will speak when something interesting is nearby.'
+                : "Ask your local guide anything about what's around you, tap 📷 to take a photo, or enable Auto-Guide."}
+            </Text>
+          </View>
         }
       />
 
       {inferring && (
         <View style={styles.typingRow}>
-          <ActivityIndicator size="small" color="#007AFF" />
-          <Text style={styles.typingText}>Guide is thinking…</Text>
+          <View style={styles.typingBubble}>
+            <ActivityIndicator size="small" color={Colors.secondary} />
+            <Text style={styles.typingText}>Guide is thinking…</Text>
+          </View>
         </View>
       )}
 
       <View style={styles.inputRow}>
         <TouchableOpacity
-          style={[styles.micBtn, voice.isListening && styles.micBtnActive]}
+          style={[styles.iconBtn, voice.isListening && styles.micBtnActive]}
           onPress={voice.isListening ? voice.stopListening : voice.startListening}
           disabled={inferring}
         >
-          <Text style={styles.micBtnText}>{voice.isListening ? '⏹' : '🎤'}</Text>
+          <Text style={styles.iconBtnText}>{voice.isListening ? '⏹' : '🎤'}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.cameraBtn}
+          style={styles.iconBtn}
           onPress={takePicture}
           disabled={inferring}
         >
-          <Text style={styles.micBtnText}>📷</Text>
+          <Text style={styles.iconBtnText}>📷</Text>
         </TouchableOpacity>
 
         <TextInput
@@ -350,7 +436,7 @@ export default function ChatScreen(_props: Props) {
           value={input}
           onChangeText={setInput}
           placeholder={voice.isListening ? 'Listening…' : 'Ask about nearby places…'}
-          placeholderTextColor="#8E8E93"
+          placeholderTextColor={Colors.textTertiary}
           returnKeyType="send"
           onSubmitEditing={sendMessage}
           editable={!inferring && !voice.isListening}
@@ -361,7 +447,7 @@ export default function ChatScreen(_props: Props) {
           onPress={sendMessage}
           disabled={!input.trim() || inferring}
         >
-          <Text style={styles.sendBtnText}>Send</Text>
+          <Text style={styles.sendBtnText}>↑</Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -369,137 +455,235 @@ export default function ChatScreen(_props: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F2F2F7' },
+  root: { flex: 1, backgroundColor: Colors.background },
   bannerReady: {
-    backgroundColor: '#E8F5E9',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    backgroundColor: Colors.successLight,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
     flexDirection: 'row',
     alignItems: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#BBF7D0',
   },
+  bannerReadyText: { fontSize: 12, color: Colors.success, fontWeight: '500' },
   bannerLoading: {
-    backgroundColor: '#E3F2FD',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    backgroundColor: Colors.warningLight,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
     flexDirection: 'row',
     alignItems: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#FDE68A',
   },
+  bannerLoadingText: { fontSize: 12, color: Colors.warning, fontWeight: '500' },
   bannerError: {
-    backgroundColor: '#FFEBEE',
+    backgroundColor: Colors.errorLight,
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#FECACA',
   },
-  bannerText: { fontSize: 12, color: '#2E7D32' },
-  bannerErrorText: { fontSize: 12, color: '#C62828' },
+  bannerErrorFallback: {
+    backgroundColor: Colors.errorLight,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#FECACA',
+  },
+  bannerManual: {
+    backgroundColor: '#FFF8E1',
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#FDE68A',
+  },
+  bannerManualText: { fontSize: 12, color: '#92400E', fontWeight: '500' },
+  locationInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  locationInput: {
+    flex: 1,
+    backgroundColor: Colors.surface,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    fontSize: 13,
+    color: Colors.textPrimary,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    marginRight: 6,
+  },
+  locationSetBtn: {
+    backgroundColor: Colors.primary,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+  },
+  locationSetBtnDisabled: { backgroundColor: Colors.disabled },
+  locationSetBtnText: { color: Colors.surface, fontWeight: '600', fontSize: 13 },
+  bannerErrorText: { fontSize: 12, color: Colors.error, fontWeight: '500' },
   controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: Colors.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#C6C6C8',
+    borderBottomColor: Colors.border,
   },
   controlItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 16,
+    marginRight: 18,
   },
   controlLabel: {
     fontSize: 13,
-    color: '#3C3C43',
-    marginRight: 6,
+    color: Colors.textSecondary,
+    marginRight: 7,
+    fontWeight: '500',
   },
   stopSpeakBtn: {
-    backgroundColor: '#FF3B30',
+    backgroundColor: Colors.error,
     borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
   },
-  stopSpeakText: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
-  messageList: { padding: 12, paddingBottom: 8 },
-  emptyHint: {
-    textAlign: 'center',
-    color: '#8E8E93',
+  stopSpeakText: { color: Colors.surface, fontSize: 12, fontWeight: '600' },
+  messageList: { padding: 16, paddingBottom: 8 },
+  emptyContainer: {
+    alignItems: 'center',
     marginTop: 80,
-    fontSize: 15,
     paddingHorizontal: 32,
   },
-  bubbleRow: { marginVertical: 4, flexDirection: 'row' },
+  emptyEmoji: { fontSize: 48, marginBottom: 16 },
+  emptyHint: {
+    textAlign: 'center',
+    color: Colors.textSecondary,
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  bubbleRow: { marginVertical: 5, flexDirection: 'row', alignItems: 'flex-end' },
   bubbleRowUser: { justifyContent: 'flex-end' },
   bubbleRowGuide: { justifyContent: 'flex-start' },
-  bubble: {
-    maxWidth: '80%',
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
+  guideAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: Colors.secondaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: Colors.guideBubbleBorder,
   },
-  bubbleUser: { backgroundColor: '#007AFF', borderBottomRightRadius: 4 },
-  bubbleGuide: { backgroundColor: '#FFFFFF', borderBottomLeftRadius: 4 },
+  guideAvatarText: { fontSize: 16 },
+  bubble: {
+    maxWidth: '78%',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  bubbleUser: {
+    backgroundColor: Colors.userBubble,
+    borderBottomRightRadius: 4,
+    shadowColor: Colors.primary,
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  bubbleGuide: {
+    backgroundColor: Colors.guideBubble,
+    borderBottomLeftRadius: 4,
+    borderWidth: 1,
+    borderColor: Colors.guideBubbleBorder,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
+  },
   bubbleImage: {
     width: 200,
     height: 150,
-    borderRadius: 10,
-    marginBottom: 6,
+    borderRadius: 12,
+    marginBottom: 8,
   },
-  bubbleText: { fontSize: 15, lineHeight: 20 },
-  bubbleTextUser: { color: '#FFFFFF' },
-  bubbleTextGuide: { color: '#1C1C1E' },
-  bubbleMeta: { fontSize: 10, color: '#8E8E93', marginTop: 3 },
+  bubbleText: { fontSize: 15, lineHeight: 21 },
+  bubbleTextUser: { color: Colors.userBubbleText },
+  bubbleTextGuide: { color: Colors.guideBubbleText },
+  bubbleMeta: { fontSize: 10, color: Colors.textTertiary, marginTop: 4, opacity: 0.8 },
   typingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 6,
+    alignItems: 'flex-start',
   },
-  typingText: { marginLeft: 6, fontSize: 13, color: '#8E8E93' },
+  typingBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.guideBubble,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: Colors.guideBubbleBorder,
+  },
+  typingText: { marginLeft: 8, fontSize: 13, color: Colors.secondary, fontWeight: '500' },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: '#FFFFFF',
+    paddingVertical: 10,
+    backgroundColor: Colors.surface,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#C6C6C8',
+    borderTopColor: Colors.border,
   },
-  micBtn: {
+  iconBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#F2F2F7',
+    backgroundColor: Colors.micInactive,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 8,
   },
   micBtnActive: {
-    backgroundColor: '#FF3B30',
+    backgroundColor: Colors.micActive,
   },
-  cameraBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#F2F2F7',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 8,
-  },
-  micBtnText: { fontSize: 20 },
+  iconBtnText: { fontSize: 18 },
   input: {
     flex: 1,
-    backgroundColor: '#F2F2F7',
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    backgroundColor: Colors.background,
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     fontSize: 15,
-    color: '#1C1C1E',
+    color: Colors.textPrimary,
     marginRight: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   sendBtn: {
-    backgroundColor: '#007AFF',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: Colors.primary,
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
-  sendBtnDisabled: { backgroundColor: '#C7C7CC' },
-  sendBtnText: { color: '#FFFFFF', fontWeight: '600', fontSize: 15 },
+  sendBtnDisabled: {
+    backgroundColor: Colors.disabled,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  sendBtnText: { color: Colors.surface, fontWeight: '700', fontSize: 20, lineHeight: 24 },
 });

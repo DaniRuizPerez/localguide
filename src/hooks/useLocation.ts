@@ -9,6 +9,8 @@ export interface LocationState {
   status: LocationStatus;
   errorMessage: string | null;
   refresh: () => Promise<void>;
+  manualLocation: string | null;
+  setManualLocation: (placeName: string) => void;
 }
 
 const LOCATION_OPTIONS: Location.LocationOptions = {
@@ -19,6 +21,7 @@ export function useLocation(): LocationState {
   const [gps, setGps] = useState<GPSContext | null>(null);
   const [status, setStatus] = useState<LocationStatus>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [manualLocation, setManualLocation] = useState<string | null>(null);
 
   const fetchLocation = useCallback(async () => {
     setStatus('requesting');
@@ -49,5 +52,5 @@ export function useLocation(): LocationState {
     fetchLocation();
   }, [fetchLocation]);
 
-  return { gps, status, errorMessage, refresh: fetchLocation };
+  return { gps, status, errorMessage, refresh: fetchLocation, manualLocation, setManualLocation };
 }

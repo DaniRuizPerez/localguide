@@ -16,6 +16,12 @@ import ChatScreen from '../screens/ChatScreen';
 
 jest.mock('../native/LiteRTModule', () => ({ __esModule: true, default: undefined }));
 
+jest.mock('expo-image-picker', () => ({
+  requestCameraPermissionsAsync: jest.fn().mockResolvedValue({ status: 'granted' }),
+  launchCameraAsync: jest.fn().mockResolvedValue({ canceled: true }),
+  MediaTypeOptions: { Images: 'Images' },
+}));
+
 jest.mock('expo-speech-recognition', () => ({
   ExpoSpeechRecognitionModule: {
     requestPermissionsAsync: jest.fn().mockResolvedValue({ granted: true }),
@@ -88,7 +94,7 @@ describe('Characterization: ChatScreen — initial render', () => {
     const { getByText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
-    expect(getByText('Send')).toBeTruthy();
+    expect(getByText('↑')).toBeTruthy();
   });
 
   it('renders the Auto-Guide toggle label', () => {
@@ -118,7 +124,7 @@ describe('Characterization: ChatScreen — initial render', () => {
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
     // Press Send with no input typed — ask() must not be called
-    fireEvent.press(getByText('Send'));
+    fireEvent.press(getByText('↑'));
     expect(mockAsk).not.toHaveBeenCalled();
   });
 });
@@ -147,7 +153,7 @@ describe('Characterization: ChatScreen — sending a message', () => {
 
     const input = getByPlaceholderText('Ask about nearby places…');
     fireEvent.changeText(input, 'What is near me?');
-    fireEvent.press(getByText('Send'));
+    fireEvent.press(getByText('↑'));
 
     expect(await findByText('What is near me?')).toBeTruthy();
   });
@@ -161,7 +167,7 @@ describe('Characterization: ChatScreen — sending a message', () => {
 
     const input = getByPlaceholderText('Ask about nearby places…');
     fireEvent.changeText(input, 'What is near me?');
-    fireEvent.press(getByText('Send'));
+    fireEvent.press(getByText('↑'));
 
     expect(await findByText('You are near the Eiffel Tower.')).toBeTruthy();
   });
@@ -174,7 +180,7 @@ describe('Characterization: ChatScreen — sending a message', () => {
     await waitFor(() => expect(mockGetCurrentPosition).toHaveBeenCalled());
 
     fireEvent.changeText(getByPlaceholderText('Ask about nearby places…'), 'test query');
-    await act(async () => { fireEvent.press(getByText('Send')); });
+    await act(async () => { fireEvent.press(getByText('↑')); });
 
     expect(mockAsk).toHaveBeenCalledWith(
       'test query',
@@ -190,7 +196,7 @@ describe('Characterization: ChatScreen — sending a message', () => {
     await waitFor(() => expect(mockGetCurrentPosition).toHaveBeenCalled());
 
     fireEvent.changeText(getByPlaceholderText('Ask about nearby places…'), 'speak test');
-    await act(async () => { fireEvent.press(getByText('Send')); });
+    await act(async () => { fireEvent.press(getByText('↑')); });
 
     await waitFor(() => expect(mockSpeechSpeak).toHaveBeenCalledWith('You are near the Eiffel Tower.'));
   });
@@ -205,7 +211,7 @@ describe('Characterization: ChatScreen — sending a message', () => {
     await waitFor(() => expect(mockGetCurrentPosition).toHaveBeenCalled());
 
     fireEvent.changeText(getByPlaceholderText('Ask about nearby places…'), 'crash test');
-    fireEvent.press(getByText('Send'));
+    fireEvent.press(getByText('↑'));
 
     expect(await findByText(/something went wrong/i)).toBeTruthy();
   });
@@ -219,7 +225,7 @@ describe('Characterization: ChatScreen — sending a message', () => {
 
     const input = getByPlaceholderText('Ask about nearby places…');
     fireEvent.changeText(input, 'clear me');
-    await act(async () => { fireEvent.press(getByText('Send')); });
+    await act(async () => { fireEvent.press(getByText('↑')); });
 
     expect(input.props.value).toBe('');
   });
@@ -237,9 +243,9 @@ describe('Characterization: ChatScreen — no location available', () => {
     await waitFor(() => expect(mockGetCurrentPosition).toHaveBeenCalled());
 
     fireEvent.changeText(getByPlaceholderText('Ask about nearby places…'), 'where am I?');
-    fireEvent.press(getByText('Send'));
+    fireEvent.press(getByText('↑'));
 
-    expect(await findByText(/Location not available/i)).toBeTruthy();
+    expect(await findByText(/Location not available|enter a location/i)).toBeTruthy();
   });
 });
 
@@ -262,7 +268,7 @@ describe('Characterization: ChatScreen — message rendering', () => {
     const input = getByPlaceholderText('Ask about nearby places…');
     fireEvent.changeText(input, 'Hello');
 
-    await act(async () => { fireEvent.press(getByText('Send')); });
+    await act(async () => { fireEvent.press(getByText('↑')); });
 
     expect(await findByText('Hello')).toBeTruthy();
     expect(await findByText('Guide reply.')).toBeTruthy();
