@@ -9,6 +9,7 @@ Built with **React Native 0.83 + Expo SDK 55 + TypeScript**, GPS via `expo-locat
 ## Features
 
 - **Chat** — ask questions about where you are; model answers as a local guide
+- **Camera** — tap 📷 to take a photo; image shown inline in chat with a GPS-aware guide response
 - **Map** — see your current location, explore nearby points of interest
 - **Auto-guide** — proactive narration as you move between locations
 - **Voice** — speech-to-text input + text-to-speech output for hands-free use
@@ -53,6 +54,8 @@ src/
 | Size | ≈530 MB |
 | Source | Google MediaPipe model hub |
 | Storage | `${FileSystem.documentDirectory}models/` (downloaded on first launch) |
+
+> **Vision limitation:** Gemma 3 1B via the LiteRT LM Inference API is **text-only** — the `runInference` call accepts only a string prompt. When users capture a photo, the guide responds with a location-aware description using GPS context as a proxy. True image→text on-device would require a multimodal model (e.g. PaliGemma) via the LiteRT image inference pipeline.
 
 ---
 
@@ -172,6 +175,7 @@ The debug APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
 | `ACCESS_FINE_LOCATION` | Android + iOS | GPS positioning |
 | `ACCESS_BACKGROUND_LOCATION` | Android | Auto-guide GPS polling |
 | `RECORD_AUDIO` | Android + iOS | Voice input |
+| `CAMERA` | Android + iOS | Photo capture for vision queries |
 | `INTERNET` | Android | One-time model download |
 | `FOREGROUND_SERVICE` | Android | Background GPS during auto-guide |
 
@@ -187,6 +191,7 @@ The debug APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
 | Location | expo-location |
 | Voice in | expo-speech-recognition |
 | Voice out | expo-speech |
+| Camera / photo | expo-image-picker |
 | Background tasks | expo-task-manager |
 | File storage | expo-file-system |
 | Native inference | LiteRT (TFLite runtime) via custom native module |
