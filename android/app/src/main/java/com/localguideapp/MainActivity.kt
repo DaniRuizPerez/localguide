@@ -25,6 +25,12 @@ class MainActivity : ReactActivity() {
    */
   override fun getMainComponentName(): String = "main"
 
+  override fun onWindowFocusChanged(hasFocus: Boolean) {
+    if ((application as MainApplication).reactHost.currentReactContext != null) {
+      super.onWindowFocusChanged(hasFocus)
+    }
+  }
+
   /**
    * Returns the instance of the [ReactActivityDelegate]. We use [DefaultReactActivityDelegate]
    * which allows you to enable New Architecture with a single boolean flags [fabricEnabled]
