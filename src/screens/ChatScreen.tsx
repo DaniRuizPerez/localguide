@@ -320,6 +320,13 @@ export default function ChatScreen(_props: Props) {
 
   const voice = useVoiceInput(handleVoiceResult);
 
+  const stopStream = useCallback(() => {
+    streamRef.current?.abort();
+    streamRef.current = null;
+    speechService.stop();
+    setInferring(false);
+  }, []);
+
   const sendMessage = useCallback(async () => {
     const query = input.trim();
     if (!query || inferring) return;
@@ -486,13 +493,24 @@ export default function ChatScreen(_props: Props) {
           editable={!inferring && !voice.isListening}
           multiline={false}
         />
-        <TouchableOpacity
-          style={[styles.sendBtn, (!input.trim() || inferring) && styles.sendBtnDisabled]}
-          onPress={sendMessage}
-          disabled={!input.trim() || inferring}
-        >
-          <Text style={styles.sendBtnText}>↑</Text>
-        </TouchableOpacity>
+        {inferring ? (
+          <TouchableOpacity
+            style={[styles.sendBtn, styles.stopBtn]}
+            onPress={stopStream}
+            accessibilityLabel="Stop generating"
+          >
+            <Text style={styles.sendBtnText}>■</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={[styles.sendBtn, !input.trim() && styles.sendBtnDisabled]}
+            onPress={sendMessage}
+            disabled={!input.trim()}
+            accessibilityLabel="Send"
+          >
+            <Text style={styles.sendBtnText}>↑</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </KeyboardAvoidingView>
   );
@@ -728,6 +746,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.disabled,
     shadowOpacity: 0,
     elevation: 0,
+  },
+  stopBtn: {
+    backgroundColor: Colors.error ?? '#d33',
+    shadowColor: Colors.error ?? '#d33',
   },
   sendBtnText: { color: Colors.surface, fontWeight: '700', fontSize: 20, lineHeight: 24 },
 });

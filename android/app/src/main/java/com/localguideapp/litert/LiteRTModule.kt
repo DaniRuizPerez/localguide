@@ -1,26 +1,72 @@
 package com.localguideapp.litert
 
+import android.app.ActivityManager
+import android.content.Context
 import android.net.Uri
 import com.facebook.react.bridge.*
 import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.modules.core.DeviceEventManagerModule
+import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
-import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.Conversation
+import com.google.ai.edge.litertlm.InputData
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
+import com.google.ai.edge.litertlm.ResponseCallback
+import com.google.ai.edge.litertlm.SamplerConfig
+import com.google.ai.edge.litertlm.Session
+import com.google.ai.edge.litertlm.SessionConfig
 import java.io.File
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicReference
 
 @ReactModule(name = LiteRTModule.NAME)
 class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
 
     private var engine: Engine? = null
+    private var activeTier: DeviceTier = DeviceTier.LOW
     private val activeStream = AtomicReference<StreamHandle?>(null)
+    // Single-thread executor serializes inference so one model can't be asked
+    // to generate twice in parallel. `generateContentStream` is a blocking call
+    // that delivers tokens via callback; we need to run it off the RN module thread.
+    private val inferenceExecutor = Executors.newSingleThreadExecutor()
 
     override fun getName(): String = NAME
+
+    // Device-class profile. Each tier picks a trade-off between speed, quality, and
+    // memory footprint. `topK` feeds SessionConfig so the sampler cost matches the
+    // hardware. `maxTokens` sets the KV cache size — the single biggest CPU-perf lever:
+    // prefill and per-decode attention cost both scale with context length, so a
+    // smaller KV cache on a slow device is dramatically faster.
+    enum class DeviceTier(
+        val tierName: String,
+        val maxTokens: Int,
+        val topK: Int,
+        val cpuThreads: Int,
+        val attemptGpu: Boolean,
+    ) {
+        // maxTokens is the TOTAL KV-cache size (prompt + generated tokens). The model's
+        // compiled prefill subgraphs are `prefill_128` and `prefill_1024`; for prompts
+        // above 128 tokens the runtime uses `prefill_1024`, which needs headroom in the
+        // KV cache beyond its own write size (otherwise DYNAMIC_UPDATE_SLICE overflows
+        // and prefill fails with "INTERNAL: ERROR" at llm_litert_compiled_model_executor.cc:780).
+        // 2048 is the smallest safe value for real queries; 1024 crashes.
+        //
+        // topK=1 on LOW is greedy sampling (skips softmax sort per token); HIGH uses 40
+        // for richer output where GPU has spare throughput.
+        LOW("low", maxTokens = 2048, topK = 1, cpuThreads = 4, attemptGpu = false),
+        MID("mid", maxTokens = 2048, topK = 20, cpuThreads = 4, attemptGpu = false),
+        HIGH("high", maxTokens = 2048, topK = 40, cpuThreads = 6, attemptGpu = true),
+    }
+
+    private fun selectDeviceTier(totalRamBytes: Long): DeviceTier = when {
+        totalRamBytes >= 6L * 1024 * 1024 * 1024 -> DeviceTier.HIGH
+        totalRamBytes >= 4L * 1024 * 1024 * 1024 -> DeviceTier.MID
+        else -> DeviceTier.LOW
+    }
 
     @ReactMethod
     fun loadModel(modelAssetName: String, promise: Promise) {
@@ -73,10 +119,132 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
 
     private fun loadEngine(modelPath: String) {
         engine?.close()
-        val config = EngineConfig(modelPath = modelPath)
-        val newEngine = Engine(config)
-        newEngine.initialize()
-        engine = newEngine
+
+        val totalRamBytes = deviceTotalRamBytes()
+        val tier = selectDeviceTier(totalRamBytes)
+        activeTier = tier
+
+        // Cache dir is namespaced by tier so different maxTokens configs don't mix
+        // (old cache compiled for a larger KV would be stale at a smaller one).
+        val cacheDir = File(
+            reactApplicationContext.cacheDir,
+            "litertlm-kernels-${tier.tierName}-${tier.maxTokens}"
+        ).apply { if (!exists()) mkdirs() }.absolutePath
+
+        // On big.LITTLE chips, using half the cores (capped at `tier.cpuThreads`) keeps
+        // work on the performance cluster — spanning both clusters costs more in
+        // cross-cache migration than the little cores contribute.
+        val cpuThreads = (Runtime.getRuntime().availableProcessors() / 2)
+            .coerceAtLeast(2)
+            .coerceAtMost(tier.cpuThreads)
+
+        fun cpuConfig() = EngineConfig(
+            modelPath = modelPath,
+            backend = Backend.CPU(cpuThreads),
+            visionBackend = Backend.CPU(),
+            maxNumImages = 1,
+            maxNumTokens = tier.maxTokens,
+            cacheDir = cacheDir,
+        )
+
+        android.util.Log.i(
+            "LiteRTModule",
+            "Device RAM: ${totalRamBytes / (1024 * 1024)} MB; " +
+                "tier=${tier.tierName} maxTokens=${tier.maxTokens} " +
+                "topK=${tier.topK} cpuThreads=$cpuThreads attemptGpu=${tier.attemptGpu}"
+        )
+
+        engine = if (tier.attemptGpu) {
+            try {
+                val gpuEngine = Engine(EngineConfig(
+                    modelPath = modelPath,
+                    backend = Backend.GPU(),
+                    visionBackend = Backend.CPU(),
+                    maxNumImages = 1,
+                    maxNumTokens = tier.maxTokens,
+                    cacheDir = cacheDir,
+                ))
+                gpuEngine.initialize()
+                android.util.Log.i("LiteRTModule", "Engine loaded with GPU backend (${tier.tierName} tier)")
+                gpuEngine
+            } catch (e: Throwable) {
+                android.util.Log.w("LiteRTModule", "GPU backend failed (${e.message}); falling back to CPU", e)
+                val cpuEngine = Engine(cpuConfig())
+                cpuEngine.initialize()
+                android.util.Log.i("LiteRTModule", "Engine loaded with CPU fallback ($cpuThreads threads)")
+                cpuEngine
+            }
+        } else {
+            val cpuEngine = Engine(cpuConfig())
+            cpuEngine.initialize()
+            android.util.Log.i(
+                "LiteRTModule",
+                "Engine loaded with CPU backend ($cpuThreads threads, ${tier.tierName} tier)"
+            )
+            cpuEngine
+        }
+
+        // Warmup runs synchronously and blocks loadModel's promise. The UI shows a
+        // dedicated "Getting ready" screen while this finishes, so the cost is paid
+        // during a clearly-telegraphed loading state instead of surprising the user
+        // on their first query. Warms: graph delegation for prefill AND decode
+        // subgraphs, XNNPack partition compilation, weight scratch buffers. Decode
+        // cost specifically (~15 s cold on Pixel 3) is the dominant first-query
+        // latency, so paying it here saves every user query after.
+        warmupEngine()
+    }
+
+    // Pre-runs a short generation to warm graph delegation + allocator + decode subgraph.
+    // Uses a prompt >128 tokens so the prefill_1024 subgraph is exercised — the short
+    // "hi" prompt only warmed prefill_128 and let a prefill_1024-shape bug hide until
+    // the first real user query. Non-fatal on failure.
+    private fun warmupEngine() {
+        val e = engine ?: return
+        val startMs = System.currentTimeMillis()
+        // ~150-token prompt (matches the real user-prompt size class) so we hit
+        // prefill_1024 rather than prefill_128 during warmup.
+        val warmupPrompt = "<start_of_turn>user\n" +
+            "You are a brief offline assistant. Reply in one short sentence. " +
+            "The user is at a city center and wants to know about a famous nearby landmark. " +
+            "Do not invent specific names or hours. Just say something general and friendly. " +
+            "Say hello to the user and tell them you are ready to help." +
+            "<end_of_turn>\n<start_of_turn>model\n"
+        try {
+            e.createSession(
+                SessionConfig(SamplerConfig(topK = 1, topP = 1.0, temperature = 0.0, seed = 0))
+            ).use { session ->
+                session.generateContentStream(
+                    listOf(InputData.Text(warmupPrompt)),
+                    object : ResponseCallback {
+                        private var tokensSeen = 0
+                        override fun onNext(response: String) {
+                            tokensSeen += 1
+                            // One decode token is enough to warm the decode subgraph;
+                            // cancel to save the rest.
+                            if (tokensSeen >= 1) {
+                                try { session.cancelProcess() } catch (_: Throwable) {}
+                            }
+                        }
+                        override fun onDone() {}
+                        override fun onError(throwable: Throwable) {}
+                    },
+                )
+            }
+            android.util.Log.i("LiteRTModule", "Warmup complete in ${System.currentTimeMillis() - startMs} ms")
+        } catch (t: Throwable) {
+            android.util.Log.w("LiteRTModule", "Warmup failed (non-fatal): ${t.message}")
+        }
+    }
+
+    private fun deviceTotalRamBytes(): Long {
+        return try {
+            val am = reactApplicationContext.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val info = ActivityManager.MemoryInfo()
+            am.getMemoryInfo(info)
+            info.totalMem
+        } catch (_: Throwable) {
+            0L
+        }
     }
 
     @ReactMethod
@@ -102,6 +270,14 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
     // Streaming inference. Emits EVENT_TOKEN for each new chunk, EVENT_DONE on success,
     // EVENT_ERROR on failure. `requestId` correlates events with the JS-side listener.
     // Only one stream can be active at a time; starting a new one aborts the previous.
+    //
+    // Two backends:
+    //   * Text-only  → Session.generateContentStream + ResponseCallback (true per-token
+    //                  streaming; no image preprocessing needed).
+    //   * With image → Conversation.sendMessageAsync + MessageCallback. Session rejects
+    //                  raw image bytes ("Image must be preprocessed") because it expects
+    //                  already-preprocessed tensors; Conversation runs the vision encoder
+    //                  natively when fed Content.ImageFile/ImageBytes.
     @ReactMethod
     fun runInferenceStream(prompt: String, requestId: String, imagePath: String?, promise: Promise) {
         val currentEngine = engine
@@ -112,47 +288,161 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
 
         abortActiveStream()
 
-        try {
-            val contents = buildContents(prompt, imagePath)
-            val conversation = currentEngine.createConversation()
-            val handle = StreamHandle(requestId, conversation)
-            activeStream.set(handle)
+        if (!imagePath.isNullOrBlank()) {
+            startConversationStream(currentEngine, prompt, requestId, imagePath, promise)
+        } else {
+            startSessionStream(currentEngine, prompt, requestId, promise)
+        }
+    }
 
-            val callback = object : MessageCallback {
-                private var emittedChars = 0
+    private fun startSessionStream(
+        engine: Engine,
+        prompt: String,
+        requestId: String,
+        promise: Promise,
+    ) {
+        val inputs: List<InputData> = try {
+            buildTextInputData(prompt)
+        } catch (e: Exception) {
+            promise.reject("INFERENCE_ERROR", "Failed to build inputs: ${e.message}", e)
+            return
+        }
 
-                override fun onMessage(message: Message) {
+        val session: Session = try {
+            // topK is tier-scaled: fewer softmax candidates = faster per-token sampling,
+            // measurable on CPU and a small win on GPU. Low-RAM tier uses topK=10 for
+            // aggressive speed, high-tier uses topK=40 for richer output. topP/temp stay
+            // near defaults so quality doesn't collapse.
+            engine.createSession(
+                SessionConfig(SamplerConfig(topK = activeTier.topK, topP = 0.95, temperature = 0.8, seed = 0))
+            )
+        } catch (e: Exception) {
+            promise.reject("INFERENCE_ERROR", "Failed to create session: ${e.message}", e)
+            return
+        }
+
+        val handle = StreamHandle(
+            requestId = requestId,
+            cancel = { try { session.cancelProcess() } catch (_: Throwable) {} },
+            close = { try { session.close() } catch (_: Throwable) {} },
+        )
+        activeStream.set(handle)
+        promise.resolve(null)
+
+        inferenceExecutor.execute {
+            val callback = object : ResponseCallback {
+                override fun onNext(response: String) {
                     if (activeStream.get()?.requestId != requestId) return
-                    val full = extractText(message)
-                    if (full.length > emittedChars) {
-                        val delta = full.substring(emittedChars)
-                        emittedChars = full.length
-                        emitToken(requestId, delta)
-                    }
+                    if (response.isEmpty()) return
+                    emitToken(requestId, response)
                 }
 
                 override fun onDone() {
                     if (activeStream.compareAndSet(handle, null)) {
-                        try { conversation.close() } catch (_: Throwable) {}
+                        handle.close()
                         emitDone(requestId)
                     }
                 }
 
                 override fun onError(throwable: Throwable) {
                     if (activeStream.compareAndSet(handle, null)) {
-                        try { conversation.close() } catch (_: Throwable) {}
+                        handle.close()
                         emitError(requestId, throwable.message ?: throwable.javaClass.simpleName)
                     }
                 }
             }
 
-            conversation.sendMessageAsync(contents, callback)
-            promise.resolve(null)
-        } catch (e: Exception) {
-            activeStream.set(null)
-            promise.reject("INFERENCE_ERROR", "Failed to start stream: ${e.message}", e)
+            try {
+                session.generateContentStream(inputs, callback)
+            } catch (e: Throwable) {
+                if (activeStream.compareAndSet(handle, null)) {
+                    handle.close()
+                    emitError(requestId, e.message ?: e.javaClass.simpleName)
+                }
+            }
         }
     }
+
+    private fun startConversationStream(
+        engine: Engine,
+        prompt: String,
+        requestId: String,
+        imagePath: String,
+        promise: Promise,
+    ) {
+        val contents: Contents = try {
+            buildContents(prompt, imagePath)
+        } catch (e: Exception) {
+            promise.reject("INFERENCE_ERROR", "Failed to build contents: ${e.message}", e)
+            return
+        }
+
+        val conversation: Conversation = try {
+            engine.createConversation()
+        } catch (e: Exception) {
+            promise.reject("INFERENCE_ERROR", "Failed to create conversation: ${e.message}", e)
+            return
+        }
+
+        val handle = StreamHandle(
+            requestId = requestId,
+            cancel = { try { conversation.cancelProcess() } catch (_: Throwable) {} },
+            close = { try { conversation.close() } catch (_: Throwable) {} },
+        )
+        activeStream.set(handle)
+        promise.resolve(null)
+
+        inferenceExecutor.execute {
+            // MessageCallback.onMessage fires per-chunk with the incremental delta
+            // (not the cumulative message), so emit extractText(message) directly.
+            // Diffing against a running offset — the natural cumulative-stream pattern —
+            // slices each chunk and produces garbled output.
+            val callback = object : MessageCallback {
+                override fun onMessage(message: Message) {
+                    if (activeStream.get()?.requestId != requestId) return
+                    val delta = extractText(message)
+                    if (delta.isNotEmpty()) {
+                        emitToken(requestId, delta)
+                    }
+                }
+
+                override fun onDone() {
+                    if (activeStream.compareAndSet(handle, null)) {
+                        handle.close()
+                        emitDone(requestId)
+                    }
+                }
+
+                override fun onError(throwable: Throwable) {
+                    if (activeStream.compareAndSet(handle, null)) {
+                        handle.close()
+                        emitError(requestId, throwable.message ?: throwable.javaClass.simpleName)
+                    }
+                }
+            }
+
+            try {
+                conversation.sendMessageAsync(contents, callback)
+            } catch (e: Throwable) {
+                if (activeStream.compareAndSet(handle, null)) {
+                    handle.close()
+                    emitError(requestId, e.message ?: e.javaClass.simpleName)
+                }
+            }
+        }
+    }
+
+    private fun buildTextInputData(prompt: String): List<InputData> {
+        // Session.generateContentStream runs raw completion — it does NOT apply the
+        // model's chat template. Without this, Gemma continues the user turn instead
+        // of answering (e.g. emits `</user_message>` to close an unclosed tag).
+        // Conversation.sendMessage applies this template internally; Session does not.
+        val templated = applyGemmaChatTemplate(prompt)
+        return listOf(InputData.Text(templated))
+    }
+
+    private fun applyGemmaChatTemplate(userPrompt: String): String =
+        "<start_of_turn>user\n$userPrompt<end_of_turn>\n<start_of_turn>model\n"
 
     private fun buildContents(prompt: String, imagePath: String?): Contents {
         if (imagePath.isNullOrBlank()) {
@@ -189,12 +479,8 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
 
     private fun abortActiveStream() {
         val handle = activeStream.getAndSet(null) ?: return
-        try {
-            handle.conversation.cancelProcess()
-        } catch (_: Throwable) {}
-        try {
-            handle.conversation.close()
-        } catch (_: Throwable) {}
+        handle.cancel()
+        handle.close()
     }
 
     private fun extractText(message: Message): String =
@@ -258,7 +544,11 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
         }
     }
 
-    private data class StreamHandle(val requestId: String, val conversation: Conversation)
+    private data class StreamHandle(
+        val requestId: String,
+        val cancel: () -> Unit,
+        val close: () -> Unit,
+    )
 
     companion object {
         const val NAME = "LiteRTModule"
