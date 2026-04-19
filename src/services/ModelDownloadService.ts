@@ -1,9 +1,9 @@
 import * as FileSystem from 'expo-file-system/legacy';
 
 export const MODEL_DOWNLOAD_URL =
-  'https://storage.googleapis.com/mediapipe-models/llm_inference/gemma3/int4/gemma3-1b-it-int4.task';
+  'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm';
 
-export const MODEL_FILE_NAME = 'gemma3-1b-it-int4.task';
+export const MODEL_FILE_NAME = 'gemma-4-E2B-it.litertlm';
 export const MODEL_DIR = `${FileSystem.documentDirectory}models/`;
 export const MODEL_LOCAL_PATH = `${MODEL_DIR}${MODEL_FILE_NAME}`;
 
@@ -55,34 +55,63 @@ export class ModelDownloadService {
 
     await this._ensureModelDir();
 
-    this.downloadResumable = FileSystem.createDownloadResumable(
-      MODEL_DOWNLOAD_URL,
-      MODEL_LOCAL_PATH,
-      {},
-      (downloadProgress) => {
-        const { totalBytesWritten, totalBytesExpectedToWrite } = downloadProgress;
-        onProgress({
-          bytesDownloaded: totalBytesWritten,
-          bytesTotal: totalBytesExpectedToWrite,
-          fraction:
-            totalBytesExpectedToWrite > 0
-              ? totalBytesWritten / totalBytesExpectedToWrite
-              : 0,
-        });
-      }
-    );
-
     try {
+      // 1. Resolve redirect and check content
+      const headResponse = await fetch(MODEL_DOWNLOAD_URL, { method: 'HEAD' });
+      const finalUrl = headResponse.url;
+      const contentType = headResponse.headers.get('Content-Type');
+
+      if (contentType?.includes('text/html')) {
+        throw new Error('The download URL returned an HTML page instead of a model file. The link might be expired or restricted.');
+      }
+
+      // 2. Clear any existing corrupted file
+      const info = await FileSystem.getInfoAsync(MODEL_LOCAL_PATH);
+      if (info.exists) {
+        await FileSystem.deleteAsync(MODEL_LOCAL_PATH, { idempotent: true });
+      }
+
+      // 3. Start the actual download using the resolved URL
+      this.downloadResumable = FileSystem.createDownloadResumable(
+        finalUrl,
+        MODEL_LOCAL_PATH,
+        {},
+        (downloadProgress) => {
+          const { totalBytesWritten, totalBytesExpectedToWrite } = downloadProgress;
+          onProgress({
+            bytesDownloaded: totalBytesWritten,
+            bytesTotal: totalBytesExpectedToWrite,
+            fraction:
+              totalBytesExpectedToWrite > 0
+                ? totalBytesWritten / totalBytesExpectedToWrite
+                : 0,
+          });
+        }
+      );
+
       const result = await this.downloadResumable.downloadAsync();
-      if (result && result.status === 200) {
-        this._status = 'done';
+
+      if (result && (result.status === 200 || result.status === 206)) {
+        const finalInfo = await FileSystem.getInfoAsync(MODEL_LOCAL_PATH);
+        const actualSize = finalInfo.exists ? (finalInfo.size ?? 0) : 0;
+        const MIN_SIZE = 100 * 1024 * 1024;
+
+        if (actualSize > MIN_SIZE) {
+          this._status = 'done';
+          console.log(`[ModelDownloadService] Download successful: ${actualSize} bytes`);
+        } else {
+          throw new Error(`Downloaded file is too small (${actualSize} bytes).`);
+        }
       } else {
-        this._status = 'error';
-        this._error = `Download failed with status ${result?.status ?? 'unknown'}`;
+        throw new Error(`Download failed with status ${result?.status ?? 'unknown'}`);
       }
     } catch (err) {
       this._status = 'error';
       this._error = err instanceof Error ? err.message : String(err);
+      // Cleanup bad file on error
+      try {
+        await FileSystem.deleteAsync(MODEL_LOCAL_PATH, { idempotent: true });
+      } catch {}
       throw err;
     }
   }

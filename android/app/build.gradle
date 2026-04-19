@@ -97,6 +97,11 @@ android {
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -156,8 +161,8 @@ dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
 
-    // MediaPipe GenAI for LLM Inference (LiteRT backend)
-    implementation("com.google.mediapipe:tasks-genai:0.10.14")
+    // LiteRT-LM runtime for Gemma 4 (.litertlm) on-device inference
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.10.2")
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";

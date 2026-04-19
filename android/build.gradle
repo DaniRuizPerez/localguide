@@ -8,7 +8,10 @@ buildscript {
   dependencies {
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
-    classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
+    // Pin the Kotlin compiler plugin to match `android.kotlinVersion` in gradle.properties.
+    // Without this, RN's libs.versions.toml pins kotlin-gradle-plugin to 2.1.20, which
+    // is unable to read the 2.3.0 stdlib metadata (com.google.ai.edge.litertlm forces 2.3.0).
+    classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:${providers.gradleProperty('android.kotlinVersion').get()}")
   }
 }
 

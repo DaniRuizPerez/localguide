@@ -124,7 +124,7 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
       <View style={styles.infoBox}>
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Model</Text>
-          <Text style={styles.infoValue}>Gemma 3 1B IT (INT4)</Text>
+          <Text style={styles.infoValue}>Gemma 4 E2B IT (INT4)</Text>
         </View>
         <View style={styles.infoDivider} />
         <View style={styles.infoRow}>
