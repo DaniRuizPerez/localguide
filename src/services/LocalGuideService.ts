@@ -18,16 +18,33 @@ Rules:
 - Never invent specific names, addresses, hours, prices, or distances. If asked, say you can't verify offline and offer general guidance.
 - Stay on local topics (landmarks, history, culture, food, walking, etiquette); briefly decline anything else.`;
 
+// Topic the user wants the guide to focus on. "everything" means no bias.
+export type GuideTopic = 'everything' | 'history' | 'nature' | 'geography' | 'food' | 'culture';
+
+const TOPIC_LABELS: Record<GuideTopic, string> = {
+  everything: 'everything',
+  history: 'history',
+  nature: 'nature, wildlife, and landscape',
+  geography: 'geography, landforms, and how the place is laid out',
+  food: 'food, drink, and culinary traditions',
+  culture: 'culture, customs, and everyday life',
+};
+
+function topicFocusLine(topic: GuideTopic | undefined): string {
+  if (!topic || topic === 'everything') return '';
+  return `\nFocus area: ${TOPIC_LABELS[topic]}. Lean your reply toward this topic unless the user asks about something else.`;
+}
+
 function formatLocation(location: GPSContext | string): string {
   if (typeof location === 'string') return location;
   const accuracyNote = location.accuracy != null ? ` (±${Math.round(location.accuracy)}m)` : '';
   return `${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}${accuracyNote}`;
 }
 
-function buildPrompt(location: GPSContext | string, userQuery: string): string {
+function buildPrompt(location: GPSContext | string, userQuery: string, topic?: GuideTopic): string {
   const coords = formatLocation(location);
   const query = userQuery.trim() || 'Tell me something interesting about where I am.';
-  return `${SYSTEM_PROMPT}\nGPS: ${coords}\nUser: ${query}`;
+  return `${SYSTEM_PROMPT}${topicFocusLine(topic)}\nGPS: ${coords}\nUser: ${query}`;
 }
 
 export interface GuideResponse {
@@ -36,11 +53,11 @@ export interface GuideResponse {
   durationMs: number;
 }
 
-function buildImagePrompt(location: GPSContext | string, userQuery: string): string {
+function buildImagePrompt(location: GPSContext | string, userQuery: string, topic?: GuideTopic): string {
   const coords = formatLocation(location);
   const query = userQuery.trim() || 'What am I looking at here?';
   return (
-    `${SYSTEM_PROMPT}\n` +
+    `${SYSTEM_PROMPT}${topicFocusLine(topic)}\n` +
     `GPS: ${coords}\n` +
     `A photo was taken at this spot. Describe what is actually visible in the image and ground every claim in it. Use GPS only to disambiguate. Follow the rules above.\n` +
     `User: ${query}`
@@ -86,9 +103,10 @@ export const localGuideService = {
   async askStream(
     userQuery: string,
     location: GPSContext | string,
-    callbacks: StreamCallbacks
+    callbacks: StreamCallbacks,
+    topic?: GuideTopic
   ): Promise<StreamHandle> {
-    const prompt = buildPrompt(location, userQuery);
+    const prompt = buildPrompt(location, userQuery, topic);
     return inferenceService.runInferenceStream(prompt, callbacks);
   },
 
@@ -96,9 +114,10 @@ export const localGuideService = {
     userQuery: string,
     location: GPSContext | string,
     imagePath: string,
-    callbacks: StreamCallbacks
+    callbacks: StreamCallbacks,
+    topic?: GuideTopic
   ): Promise<StreamHandle> {
-    const prompt = buildImagePrompt(location, userQuery);
+    const prompt = buildImagePrompt(location, userQuery, topic);
     return inferenceService.runInferenceStream(prompt, callbacks, { imagePath });
   },
 

@@ -331,13 +331,56 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
 
         inferenceExecutor.execute {
             val callback = object : ResponseCallback {
+                // Gemma decodes its end-of-turn marker to the literal string "<end_of_turn>".
+                // Depending on tokenizer behaviour, it can arrive either as one whole chunk
+                // or split across several onNext calls (e.g. "<end", "_of_turn>"). We keep
+                // a sliding buffer of the last (EOS.length - 1) chars held back so a partial
+                // match at the tail is never emitted; when the full marker assembles we
+                // trim it, emit what came before, cancel the session, and stop.
+                private val pending = StringBuilder()
+                private var eosSeen = false
+
                 override fun onNext(response: String) {
+                    if (eosSeen) return
                     if (activeStream.get()?.requestId != requestId) return
                     if (response.isEmpty()) return
-                    emitToken(requestId, response)
+
+                    pending.append(response)
+
+                    val eosIdx = pending.indexOf(EOS_TOKEN)
+                    if (eosIdx != -1) {
+                        eosSeen = true
+                        val before = pending.substring(0, eosIdx)
+                        if (before.isNotEmpty()) emitToken(requestId, before)
+                        pending.setLength(0)
+                        // Settle the stream ourselves before cancelling so a cancel-
+                        // triggered onError/onDone below is swallowed by the
+                        // compareAndSet (handle != activeStream → no-op).
+                        if (activeStream.compareAndSet(handle, null)) {
+                            try { session.cancelProcess() } catch (_: Throwable) {}
+                            handle.close()
+                            emitDone(requestId)
+                        }
+                        return
+                    }
+
+                    // Hold back the last (EOS.length - 1) chars in case they're the start
+                    // of a cross-chunk EOS; emit everything before that.
+                    val holdback = EOS_TOKEN.length - 1
+                    val safeLen = pending.length - holdback
+                    if (safeLen > 0) {
+                        emitToken(requestId, pending.substring(0, safeLen))
+                        pending.delete(0, safeLen)
+                    }
                 }
 
                 override fun onDone() {
+                    // No EOS marker appeared — flush any held-back tail so we don't
+                    // truncate the last few chars of a natural completion.
+                    if (!eosSeen && pending.isNotEmpty()) {
+                        emitToken(requestId, pending.toString())
+                        pending.setLength(0)
+                    }
                     if (activeStream.compareAndSet(handle, null)) {
                         handle.close()
                         emitDone(requestId)
@@ -555,5 +598,6 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
         const val EVENT_TOKEN = "LiteRTToken"
         const val EVENT_DONE = "LiteRTDone"
         const val EVENT_ERROR = "LiteRTError"
+        private const val EOS_TOKEN = "<end_of_turn>"
     }
 }

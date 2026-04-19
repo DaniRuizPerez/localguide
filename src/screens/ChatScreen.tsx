@@ -4,6 +4,7 @@ import {
   Text,
   TextInput,
   FlatList,
+  ScrollView,
   TouchableOpacity,
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -21,7 +22,7 @@ import type { RootTabParamList } from '../navigation/AppNavigator';
 import { useLocation } from '../hooks/useLocation';
 import { useAutoGuide } from '../hooks/useAutoGuide';
 import { useVoiceInput } from '../hooks/useVoiceInput';
-import { localGuideService } from '../services/LocalGuideService';
+import { localGuideService, type GuideTopic } from '../services/LocalGuideService';
 import { speechService } from '../services/SpeechService';
 import { SpeechChunker } from '../services/SpeechChunker';
 import type { GPSContext, StreamHandle } from '../services/InferenceService';
@@ -167,12 +168,60 @@ function AnimatedChatBubble({ message }: { message: Message }) {
   );
 }
 
+const TOPIC_OPTIONS: { id: GuideTopic; emoji: string; label: string }[] = [
+  { id: 'everything', emoji: '✨', label: 'Everything' },
+  { id: 'history', emoji: '🏛️', label: 'History' },
+  { id: 'nature', emoji: '🌿', label: 'Nature' },
+  { id: 'geography', emoji: '🗺️', label: 'Geography' },
+  { id: 'food', emoji: '🍽️', label: 'Food' },
+  { id: 'culture', emoji: '🎭', label: 'Culture' },
+];
+
+function TopicChips({
+  selected,
+  onSelect,
+}: {
+  selected: GuideTopic;
+  onSelect: (topic: GuideTopic) => void;
+}) {
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.topicsScroll}
+      contentContainerStyle={styles.topicsRow}
+    >
+      {TOPIC_OPTIONS.map((t) => {
+        const active = t.id === selected;
+        return (
+          <TouchableOpacity
+            key={t.id}
+            onPress={() => onSelect(t.id)}
+            style={[styles.topicChip, active && styles.topicChipActive]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
+          >
+            <Text style={[styles.topicChipText, active && styles.topicChipTextActive]}>
+              {t.emoji} {t.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
 export default function ChatScreen(_props: Props) {
   const { gps, status, errorMessage, refresh, manualLocation, setManualLocation } = useLocation();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [inferring, setInferring] = useState(false);
   const [speakResponses, setSpeakResponses] = useState(true);
+  const [topic, setTopic] = useState<GuideTopic>('everything');
+  const topicRef = useRef<GuideTopic>(topic);
+  useEffect(() => {
+    topicRef.current = topic;
+  }, [topic]);
   const listRef = useRef<FlatList<Message>>(null);
   const speakResponsesRef = useRef(speakResponses);
   const streamRef = useRef<StreamHandle | null>(null);
@@ -259,9 +308,15 @@ export default function ChatScreen(_props: Props) {
                     query,
                     effectiveLocation,
                     imageUri,
-                    callbacks
+                    callbacks,
+                    topicRef.current
                   )
-                : await localGuideService.askStream(query, effectiveLocation, callbacks);
+                : await localGuideService.askStream(
+                    query,
+                    effectiveLocation,
+                    callbacks,
+                    topicRef.current
+                  );
             streamRef.current = handle;
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
@@ -405,6 +460,8 @@ export default function ChatScreen(_props: Props) {
         manualLocation={manualLocation}
         onSetManualLocation={setManualLocation}
       />
+
+      <TopicChips selected={topic} onSelect={setTopic} />
 
       <View style={styles.controlsRow}>
         <View style={styles.controlItem}>
@@ -588,6 +645,39 @@ const styles = StyleSheet.create({
   locationSetBtnDisabled: { backgroundColor: Colors.disabled },
   locationSetBtnText: { color: Colors.surface, fontWeight: '600', fontSize: 13 },
   bannerErrorText: { fontSize: 12, color: Colors.error, fontWeight: '500' },
+  topicsScroll: {
+    backgroundColor: Colors.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.borderLight ?? Colors.border,
+  },
+  topicsRow: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  topicChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: Colors.surfaceAlt ?? Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  topicChipActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  topicChipText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: Colors.textSecondary,
+  },
+  topicChipTextActive: {
+    color: Colors.surface,
+    fontWeight: '600',
+  },
   controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
