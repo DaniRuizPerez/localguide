@@ -59,16 +59,16 @@ describe('Characterization: LocalGuideService — prompt format', () => {
     // System prompt present
     expect(prompt).toContain('local tourist guide');
     // Location section present
-    expect(prompt).toContain('Current location:');
+    expect(prompt).toContain('Current GPS:');
     // Coordinates formatted to 6 decimal places
     expect(prompt).toContain('48.856600');
     expect(prompt).toContain('2.352200');
     // Accuracy appended when present
     expect(prompt).toContain('±10m');
-    // User query present
+    // User query wrapped in delimiters
+    expect(prompt).toContain('<user_message>');
     expect(prompt).toContain('What is near me?');
-    // Ends with "Guide:" suffix
-    expect(prompt.endsWith('Guide:')).toBe(true);
+    expect(prompt).toContain('</user_message>');
   });
 
   it('omits accuracy note when accuracy is undefined', async () => {

@@ -121,24 +121,18 @@ describe('Characterization: SpeechService — concurrent speak() (pre-fix baseli
   });
 
   /**
-   * CURRENT BEHAVIOR (pre-fix):
-   * When speak() is called while already speaking, Speech.stop() is called
-   * first (interrupting the current utterance), then Speech.speak() is called
-   * for the new text.  The first call's promise is left pending until its
-   * onStopped fires.
-   *
-   * PR 1 must update this test to reflect the fixed cancellation-token behavior.
+   * After the queue refactor, speak() unconditionally calls Speech.stop()
+   * and clears the pending queue before dispatching the new utterance — so
+   * two consecutive speak() calls produce two Speech.stop() calls, not one.
    */
-  it('CURRENT BEHAVIOR: second speak() calls Speech.stop() then starts new utterance', () => {
+  it('each speak() stops any in-flight speech and clears the queue', () => {
     speechService.speak('first');
-    // isSpeaking is now true from the module-level `speaking` flag
     speechService.speak('second');
 
-    expect(mockStop).toHaveBeenCalledTimes(1);
+    expect(mockStop).toHaveBeenCalledTimes(2);
     expect(mockSpeak).toHaveBeenCalledTimes(2);
     expect(mockSpeak.mock.calls[1][0]).toBe('second');
 
-    // Resolve both to clean up
     triggerSpeechCallback(0, 'onStopped');
     triggerSpeechCallback(1, 'onDone');
   });
@@ -179,5 +173,105 @@ describe('Characterization: SpeechService — concurrent speak() (pre-fix baseli
 
     // Clean up
     triggerSpeechCallback(1, 'onDone');
+  });
+});
+
+describe('SpeechService — queue-based enqueue()', () => {
+  let speechService: typeof import('../services/SpeechService').speechService;
+
+  beforeEach(() => {
+    jest.resetModules();
+    jest.mock('expo-speech', () => ({
+      speak: (...args: unknown[]) => mockSpeak(...args),
+      stop: (...args: unknown[]) => mockStop(...args),
+      isSpeakingAsync: jest.fn().mockResolvedValue(false),
+    }));
+    mockSpeak.mockClear();
+    mockStop.mockClear();
+    speechService = require('../services/SpeechService').speechService;
+  });
+
+  it('speaks the first enqueued segment immediately', () => {
+    speechService.enqueue('First sentence.');
+    expect(mockSpeak).toHaveBeenCalledTimes(1);
+    expect(mockSpeak.mock.calls[0][0]).toBe('First sentence.');
+    triggerSpeechCallback(0, 'onDone');
+  });
+
+  it('queues further segments and speaks them after the previous finishes', () => {
+    speechService.enqueue('First.');
+    speechService.enqueue('Second.');
+    speechService.enqueue('Third.');
+
+    // Only the first is spoken up front; the rest wait in the queue.
+    expect(mockSpeak).toHaveBeenCalledTimes(1);
+
+    triggerSpeechCallback(0, 'onDone');
+    expect(mockSpeak).toHaveBeenCalledTimes(2);
+    expect(mockSpeak.mock.calls[1][0]).toBe('Second.');
+
+    triggerSpeechCallback(1, 'onDone');
+    expect(mockSpeak).toHaveBeenCalledTimes(3);
+    expect(mockSpeak.mock.calls[2][0]).toBe('Third.');
+
+    triggerSpeechCallback(2, 'onDone');
+  });
+
+  it('keeps playing the queue when an individual segment errors', () => {
+    speechService.enqueue('First.');
+    speechService.enqueue('Second.');
+
+    triggerSpeechCallback(0, 'onError', new Error('tts blip'));
+    expect(mockSpeak).toHaveBeenCalledTimes(2);
+    expect(mockSpeak.mock.calls[1][0]).toBe('Second.');
+    triggerSpeechCallback(1, 'onDone');
+  });
+
+  it('ignores empty or whitespace-only segments', () => {
+    speechService.enqueue('');
+    speechService.enqueue('   \n  ');
+    expect(mockSpeak).not.toHaveBeenCalled();
+  });
+
+  it('stop() clears the queue so subsequent segments are dropped', () => {
+    speechService.enqueue('First.');
+    speechService.enqueue('Second.');
+    speechService.enqueue('Third.');
+
+    speechService.stop();
+    triggerSpeechCallback(0, 'onStopped');
+
+    // The queue was cleared before onStopped fired — the drain loop
+    // should not pick up Second or Third.
+    expect(mockSpeak).toHaveBeenCalledTimes(1);
+  });
+
+  it('speak() flushes any pending queued items', () => {
+    speechService.enqueue('Queued one.');
+    speechService.enqueue('Queued two.');
+
+    // Barge-in with a direct speak() call.
+    speechService.speak('Interrupt!');
+
+    // mockStop called once for the initial enqueue path (via speak) and once by the
+    // explicit speak(). We only care that the queue can't resurface afterward.
+    triggerSpeechCallback(0, 'onStopped');
+    triggerSpeechCallback(1, 'onDone');
+
+    const spoken = mockSpeak.mock.calls.map((c) => c[0]);
+    expect(spoken).not.toContain('Queued two.');
+    expect(spoken).toContain('Interrupt!');
+  });
+
+  it('isSpeaking is true while any segment is queued, false after all drain', () => {
+    speechService.enqueue('First.');
+    speechService.enqueue('Second.');
+    expect(speechService.isSpeaking).toBe(true);
+
+    triggerSpeechCallback(0, 'onDone');
+    expect(speechService.isSpeaking).toBe(true); // Second now playing
+
+    triggerSpeechCallback(1, 'onDone');
+    expect(speechService.isSpeaking).toBe(false);
   });
 });

@@ -1,5 +1,27 @@
 import React from 'react';
 import { render, waitFor, act } from '@testing-library/react-native';
+
+// react-native-maps calls TurboModuleRegistry.getEnforcing('RNMapsAirModule') at
+// import time, which explodes in Jest. Stub the surface we actually use.
+jest.mock('react-native-maps', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  const MapView = React.forwardRef(function MapView(
+    props: Record<string, unknown>,
+    _ref: unknown
+  ) {
+    return React.createElement(View, { testID: 'map-view', ...props });
+  });
+  const Marker = (props: Record<string, unknown>) =>
+    React.createElement(View, { testID: 'map-marker', ...props });
+  return {
+    __esModule: true,
+    default: MapView,
+    Marker,
+    PROVIDER_GOOGLE: 'google',
+  };
+});
+
 import MapScreen from '../screens/MapScreen';
 
 const mockRequestForegroundPermissionsAsync = jest.fn().mockResolvedValue({ status: 'granted' });

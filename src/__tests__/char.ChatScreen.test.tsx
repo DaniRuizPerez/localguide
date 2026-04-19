@@ -57,18 +57,45 @@ jest.mock('expo-location', () => ({
   stopLocationUpdatesAsync: jest.fn().mockResolvedValue(undefined),
 }));
 
+// ChatScreen was refactored to use askStream / askWithImageStream. The mock
+// accepts the callbacks bag and resolves the full response via onToken + onDone,
+// letting UI-level assertions ("guide bubble shows X") continue to work.
+// `mockAsk` records the call args so assertions can inspect what was streamed.
 const mockAsk = jest.fn();
+let nextStreamResponse: string | { error: string } = 'You are near the Eiffel Tower.';
+
+function mockAskStream(
+  query: unknown,
+  location: unknown,
+  callbacks: { onToken: (d: string) => void; onDone: () => void; onError: (m: string) => void }
+) {
+  mockAsk(query, location);
+  queueMicrotask(() => {
+    if (typeof nextStreamResponse === 'object' && 'error' in nextStreamResponse) {
+      callbacks.onError(nextStreamResponse.error);
+      return;
+    }
+    callbacks.onToken(nextStreamResponse);
+    callbacks.onDone();
+  });
+  return Promise.resolve({ abort: jest.fn().mockResolvedValue(undefined) });
+}
+
 jest.mock('../services/LocalGuideService', () => ({
   localGuideService: {
     initialize: jest.fn().mockResolvedValue(undefined),
-    ask: (...args: unknown[]) => mockAsk(...args),
+    ask: jest.fn(), // kept for backwards compat but no longer invoked by ChatScreen
+    askStream: mockAskStream,
+    askWithImageStream: mockAskStream,
     dispose: jest.fn().mockResolvedValue(undefined),
   },
 }));
 
+const mockSpeechEnqueue = jest.fn();
 jest.mock('../services/SpeechService', () => ({
   speechService: {
     speak: (...args: unknown[]) => mockSpeechSpeak(...args),
+    enqueue: (...args: unknown[]) => mockSpeechEnqueue(...args),
     stop: (...args: unknown[]) => mockSpeechStop(...args),
     isSpeaking: false,
   },
@@ -157,11 +184,8 @@ describe('Characterization: ChatScreen — sending a message', () => {
     useLocation.mockReturnValue(defaultLocationState);
     mockAsk.mockClear();
     mockSpeechSpeak.mockClear();
-    mockAsk.mockResolvedValue({
-      text: 'You are near the Eiffel Tower.',
-      locationUsed: GPS,
-      durationMs: 420,
-    });
+    mockSpeechEnqueue.mockClear();
+    nextStreamResponse = 'You are near the Eiffel Tower.';
   });
 
   it('appends user message to the list after Send', async () => {
@@ -204,7 +228,10 @@ describe('Characterization: ChatScreen — sending a message', () => {
     );
   });
 
-  it('calls speechService.speak with the response text when Speak is on', async () => {
+  it('pipes the streamed response to speechService.enqueue when Speak is on', async () => {
+    // Include a sentence terminator so the chunker releases the segment.
+    nextStreamResponse = 'You are near the Eiffel Tower.';
+
     const { getByPlaceholderText, getByText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
@@ -212,11 +239,13 @@ describe('Characterization: ChatScreen — sending a message', () => {
     fireEvent.changeText(getByPlaceholderText('Ask about nearby places…'), 'speak test');
     await act(async () => { fireEvent.press(getByText('↑')); });
 
-    await waitFor(() => expect(mockSpeechSpeak).toHaveBeenCalledWith('You are near the Eiffel Tower.'));
+    await waitFor(() =>
+      expect(mockSpeechEnqueue).toHaveBeenCalledWith('You are near the Eiffel Tower.')
+    );
   });
 
-  it('shows error message when inference throws', async () => {
-    mockAsk.mockRejectedValue(new Error('model crash'));
+  it('shows error message when the stream reports an error', async () => {
+    nextStreamResponse = { error: 'model crash' };
 
     const { getByPlaceholderText, getByText, findByText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
@@ -269,7 +298,7 @@ describe('Characterization: ChatScreen — message rendering', () => {
   it('renders both user and guide bubbles in a mixed conversation', async () => {
     const { useLocation } = require('../hooks/useLocation');
     useLocation.mockReturnValue(defaultLocationState);
-    mockAsk.mockResolvedValue({ text: 'Guide reply.', locationUsed: GPS, durationMs: 100 });
+    nextStreamResponse = 'Guide reply.';
 
     const { getByPlaceholderText, getByText, findByText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />

@@ -96,6 +96,13 @@ android {
         versionName "1.0.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
+
+        // Google Maps SDK for Android API key. Set MAPS_API_KEY in gradle.properties
+        // (keep it out of git) or export MAPS_API_KEY in the build environment.
+        // An empty value still builds but map tiles will not render.
+        manifestPlaceholders = [
+            MAPS_API_KEY: (findProperty('MAPS_API_KEY') ?: System.getenv('MAPS_API_KEY') ?: '').toString()
+        ]
     }
     packagingOptions {
         jniLibs {

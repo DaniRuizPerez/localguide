@@ -30,9 +30,23 @@ export interface LiteRTNativeModule {
    * Run a single-turn inference with the given prompt.
    * @param prompt - full formatted prompt string
    * @param maxTokens - maximum tokens to generate
+   * @param imagePath - optional file://, absolute, or content:// URI to a photo
+   *   the (multimodal) model should see alongside the prompt. Pass null for text-only.
    * @returns generated text response
    */
-  runInference(prompt: string, maxTokens: number): Promise<string>;
+  runInference(prompt: string, maxTokens: number, imagePath: string | null): Promise<string>;
+
+  /**
+   * Start a streaming inference. Tokens are delivered via `LiteRTToken` events
+   * with `{ requestId, delta }` payloads. `LiteRTDone` fires on success,
+   * `LiteRTError` on failure. Only one stream is active at a time — starting
+   * a new one aborts any in-flight stream silently. Pass `imagePath` to feed
+   * a photo to a multimodal model (null = text-only).
+   */
+  runInferenceStream(prompt: string, requestId: string, imagePath: string | null): Promise<void>;
+
+  /** Aborts the currently running streaming inference, if any. */
+  abortInference(): Promise<void>;
 
   /**
    * Returns true if the model is currently loaded and ready.
@@ -43,6 +57,28 @@ export interface LiteRTNativeModule {
    * Unload the model and free device memory.
    */
   unloadModel(): Promise<void>;
+
+  // RCTEventEmitter parity methods; not called from application code.
+  addListener(eventName: string): void;
+  removeListeners(count: number): void;
+}
+
+export const LITERT_EVENT_TOKEN = 'LiteRTToken';
+export const LITERT_EVENT_DONE = 'LiteRTDone';
+export const LITERT_EVENT_ERROR = 'LiteRTError';
+
+export interface LiteRTTokenEvent {
+  requestId: string;
+  delta: string;
+}
+
+export interface LiteRTDoneEvent {
+  requestId: string;
+}
+
+export interface LiteRTErrorEvent {
+  requestId: string;
+  message: string;
 }
 
 const { LiteRTModule } = NativeModules;

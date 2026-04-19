@@ -1,5 +1,27 @@
 import React from 'react';
 import { render, fireEvent } from '@testing-library/react-native';
+
+// Stub react-native-maps before MapScreen is imported — the real module calls
+// TurboModuleRegistry.getEnforcing('RNMapsAirModule'), which doesn't exist in Jest.
+jest.mock('react-native-maps', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  const MapView = React.forwardRef(function MapView(
+    props: Record<string, unknown>,
+    _ref: unknown
+  ) {
+    return React.createElement(View, { testID: 'map-view', ...props });
+  });
+  const Marker = (props: Record<string, unknown>) =>
+    React.createElement(View, { testID: 'map-marker', ...props });
+  return {
+    __esModule: true,
+    default: MapView,
+    Marker,
+    PROVIDER_GOOGLE: 'google',
+  };
+});
+
 import ChatScreen from '../screens/ChatScreen';
 import MapScreen from '../screens/MapScreen';
 

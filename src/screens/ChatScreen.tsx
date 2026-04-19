@@ -23,7 +23,8 @@ import { useAutoGuide } from '../hooks/useAutoGuide';
 import { useVoiceInput } from '../hooks/useVoiceInput';
 import { localGuideService } from '../services/LocalGuideService';
 import { speechService } from '../services/SpeechService';
-import type { GPSContext } from '../services/InferenceService';
+import { SpeechChunker } from '../services/SpeechChunker';
+import type { GPSContext, StreamHandle } from '../services/InferenceService';
 import { Colors } from '../theme/colors';
 
 type Props = BottomTabScreenProps<RootTabParamList, 'Chat'>;
@@ -173,9 +174,118 @@ export default function ChatScreen(_props: Props) {
   const [inferring, setInferring] = useState(false);
   const [speakResponses, setSpeakResponses] = useState(true);
   const listRef = useRef<FlatList<Message>>(null);
+  const speakResponsesRef = useRef(speakResponses);
+  const streamRef = useRef<StreamHandle | null>(null);
+
+  useEffect(() => {
+    speakResponsesRef.current = speakResponses;
+  }, [speakResponses]);
 
   const scrollToEnd = useCallback(() => {
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+  }, []);
+
+  // Start a streaming generation for `intent` (text or image), append tokens to a new guide
+  // message as they arrive, and pipe completed sentences to TTS so speech runs alongside text.
+  const streamGuideResponse = useCallback(
+    async (
+      intent: 'text' | 'image',
+      query: string,
+      effectiveLocation: GPSContext | string,
+      imageUri?: string
+    ) => {
+      const guideId = `${Date.now()}-g`;
+      const guidePlaceholder: Message = {
+        id: guideId,
+        role: 'guide',
+        text: '',
+        locationUsed: effectiveLocation,
+      };
+      setMessages((prev) => [...prev, guidePlaceholder]);
+
+      const appendDelta = (delta: string) => {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === guideId ? { ...m, text: m.text + delta } : m))
+        );
+        scrollToEnd();
+      };
+
+      const chunker = new SpeechChunker((segment) => {
+        if (speakResponsesRef.current) {
+          speechService.enqueue(segment);
+        }
+      });
+
+      const start = Date.now();
+
+      return new Promise<void>((resolve) => {
+        const launch = async () => {
+          try {
+            const callbacks = {
+              onToken: (delta: string) => {
+                appendDelta(delta);
+                chunker.push(delta);
+              },
+              onDone: () => {
+                chunker.flush();
+                const durationMs = Date.now() - start;
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === guideId ? { ...m, text: m.text.trim(), durationMs } : m
+                  )
+                );
+                streamRef.current = null;
+                setInferring(false);
+                scrollToEnd();
+                resolve();
+              },
+              onError: (message: string) => {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === guideId
+                      ? { ...m, text: m.text || `Sorry, something went wrong. (${message})` }
+                      : m
+                  )
+                );
+                streamRef.current = null;
+                setInferring(false);
+                scrollToEnd();
+                resolve();
+              },
+            };
+            const handle =
+              intent === 'image' && imageUri
+                ? await localGuideService.askWithImageStream(
+                    query,
+                    effectiveLocation,
+                    imageUri,
+                    callbacks
+                  )
+                : await localGuideService.askStream(query, effectiveLocation, callbacks);
+            streamRef.current = handle;
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === guideId ? { ...m, text: `Sorry, something went wrong. (${message})` } : m
+              )
+            );
+            streamRef.current = null;
+            setInferring(false);
+            resolve();
+          }
+        };
+        launch();
+      });
+    },
+    [scrollToEnd]
+  );
+
+  useEffect(() => {
+    return () => {
+      streamRef.current?.abort();
+      speechService.stop();
+    };
   }, []);
 
   const addGuideMessage = useCallback((text: string, locationUsed: GPSContext | string, durationMs?: number) => {
@@ -203,31 +313,9 @@ export default function ChatScreen(_props: Props) {
       const userMsg: Message = { id: String(Date.now()), role: 'user', text: transcript };
       setMessages((prev) => [...prev, userMsg]);
       setInferring(true);
-
-      try {
-        const response = await localGuideService.ask(transcript, effectiveLocation);
-        const guideMsg: Message = {
-          id: String(Date.now()) + '-g',
-          role: 'guide',
-          text: response.text,
-          locationUsed: response.locationUsed,
-          durationMs: response.durationMs,
-        };
-        setMessages((prev) => [...prev, guideMsg]);
-        if (speakResponses) {
-          speechService.speak(response.text);
-        }
-      } catch {
-        setMessages((prev) => [
-          ...prev,
-          { id: String(Date.now()) + '-err', role: 'guide', text: 'Sorry, something went wrong.' },
-        ]);
-      } finally {
-        setInferring(false);
-        scrollToEnd();
-      }
+      await streamGuideResponse('text', transcript, effectiveLocation);
     },
-    [gps, autoGuide.latestGps, manualLocation, speakResponses, scrollToEnd]
+    [gps, autoGuide.latestGps, manualLocation, streamGuideResponse]
   );
 
   const voice = useVoiceInput(handleVoiceResult);
@@ -249,30 +337,8 @@ export default function ChatScreen(_props: Props) {
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
     setInferring(true);
-
-    try {
-      const response = await localGuideService.ask(query, effectiveLocation);
-      const guideMsg: Message = {
-        id: String(Date.now()) + '-g',
-        role: 'guide',
-        text: response.text,
-        locationUsed: response.locationUsed,
-        durationMs: response.durationMs,
-      };
-      setMessages((prev) => [...prev, guideMsg]);
-      if (speakResponses) {
-        speechService.speak(response.text);
-      }
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { id: String(Date.now()) + '-err', role: 'guide', text: 'Sorry, something went wrong. Please try again.' },
-      ]);
-    } finally {
-      setInferring(false);
-      scrollToEnd();
-    }
-  }, [input, inferring, gps, autoGuide.latestGps, manualLocation, speakResponses, scrollToEnd]);
+    await streamGuideResponse('text', query, effectiveLocation);
+  }, [input, inferring, gps, autoGuide.latestGps, manualLocation, streamGuideResponse]);
 
   const takePicture = useCallback(async () => {
     if (inferring) return;
@@ -310,30 +376,8 @@ export default function ChatScreen(_props: Props) {
     setInput('');
     setInferring(true);
     scrollToEnd();
-
-    try {
-      const response = await localGuideService.askWithImage(userQuery, effectiveLocation);
-      const guideMsg: Message = {
-        id: String(Date.now()) + '-g',
-        role: 'guide',
-        text: response.text,
-        locationUsed: response.locationUsed,
-        durationMs: response.durationMs,
-      };
-      setMessages((prev) => [...prev, guideMsg]);
-      if (speakResponses) {
-        speechService.speak(response.text);
-      }
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { id: String(Date.now()) + '-err', role: 'guide', text: 'Sorry, something went wrong. Please try again.' },
-      ]);
-    } finally {
-      setInferring(false);
-      scrollToEnd();
-    }
-  }, [inferring, gps, autoGuide.latestGps, manualLocation, input, speakResponses, scrollToEnd]);
+    await streamGuideResponse('image', userQuery, effectiveLocation, imageUri);
+  }, [inferring, gps, autoGuide.latestGps, manualLocation, input, streamGuideResponse, scrollToEnd]);
 
   const renderItem: ListRenderItem<Message> = useCallback(
     ({ item }) => <AnimatedChatBubble message={item} />,
@@ -405,7 +449,7 @@ export default function ChatScreen(_props: Props) {
         }
       />
 
-      {inferring && (
+      {inferring && (messages[messages.length - 1]?.role !== 'guide' || !messages[messages.length - 1]?.text) && (
         <View style={styles.typingRow}>
           <View style={styles.typingBubble}>
             <ActivityIndicator size="small" color={Colors.secondary} />

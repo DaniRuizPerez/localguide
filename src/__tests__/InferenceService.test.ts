@@ -78,7 +78,7 @@ describe('InferenceService (with native module)', () => {
     const { InferenceService: IS } = require('../services/InferenceService');
     const svc = new IS();
     const result = await svc.runInference('What is near me?', { maxTokens: 256 });
-    expect(mockRunInference).toHaveBeenCalledWith('What is near me?', 256);
+    expect(mockRunInference).toHaveBeenCalledWith('What is near me?', 256, null);
     expect(result).toBe('You are near the Eiffel Tower.');
   });
 
@@ -86,7 +86,28 @@ describe('InferenceService (with native module)', () => {
     const { InferenceService: IS } = require('../services/InferenceService');
     const svc = new IS();
     await svc.runInference('test');
-    expect(mockRunInference).toHaveBeenCalledWith('test', 512);
+    expect(mockRunInference).toHaveBeenCalledWith('test', 512, null);
+  });
+
+  it('forwards options.imagePath to native runInference', async () => {
+    const { InferenceService: IS } = require('../services/InferenceService');
+    const svc = new IS();
+    await svc.runInference('What am I looking at?', {
+      maxTokens: 256,
+      imagePath: 'file:///tmp/photo.jpg',
+    });
+    expect(mockRunInference).toHaveBeenCalledWith(
+      'What am I looking at?',
+      256,
+      'file:///tmp/photo.jpg'
+    );
+  });
+
+  it('passes null imagePath when options.imagePath is null', async () => {
+    const { InferenceService: IS } = require('../services/InferenceService');
+    const svc = new IS();
+    await svc.runInference('text only', { imagePath: null });
+    expect(mockRunInference).toHaveBeenCalledWith('text only', 512, null);
   });
 
   it('calls unloadModel on dispose', async () => {
