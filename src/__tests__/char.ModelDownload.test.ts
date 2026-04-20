@@ -23,7 +23,22 @@ jest.mock('expo-file-system/legacy', () => ({
   createDownloadResumable: (...args: unknown[]) => mockCreateDownloadResumable(...args),
 }));
 
-global.fetch = jest.fn();
+// HEAD probe response shape: startDownload checks status + Content-Type before
+// reaching createDownloadResumable.
+function defaultHeadResponse() {
+  return {
+    status: 200,
+    url: 'https://cdn.example/resolved',
+    headers: {
+      get: (h: string) => (h === 'Content-Type' ? 'application/octet-stream' : null),
+    },
+  };
+}
+
+const mockFetch = jest.fn();
+global.fetch = mockFetch as typeof fetch;
+
+const BIG_FILE_INFO = { exists: true, size: 200_000_000 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -72,10 +87,13 @@ describe('Characterization: ModelDownloadService — download lifecycle', () => 
     jest.clearAllMocks();
     mockMakeDirectoryAsync.mockResolvedValue(undefined);
     mockDeleteAsync.mockResolvedValue(undefined);
+    // HEAD probe defaults to a clean 200 so startDownload flows through to
+    // createDownloadResumable. Individual tests can override as needed.
+    mockFetch.mockResolvedValue(defaultHeadResponse());
   });
 
   it('status transitions: idle → done on successful download', async () => {
-    mockGetInfoAsync.mockResolvedValue({ exists: true });
+    mockGetInfoAsync.mockResolvedValue(BIG_FILE_INFO);
     mockCreateDownloadResumable.mockReturnValue({
       downloadAsync: jest.fn().mockResolvedValue({ status: 200 }),
     });
@@ -86,18 +104,20 @@ describe('Characterization: ModelDownloadService — download lifecycle', () => 
   });
 
   it('status transitions: idle → error on non-200 response', async () => {
-    mockGetInfoAsync.mockResolvedValue({ exists: true });
+    mockGetInfoAsync.mockResolvedValue(BIG_FILE_INFO);
     mockCreateDownloadResumable.mockReturnValue({
       downloadAsync: jest.fn().mockResolvedValue({ status: 403 }),
     });
 
-    await svc.startDownload(jest.fn());
+    // The service now rethrows on non-200 status so the caller can surface the
+    // failure; status/error are still set on the instance before the throw.
+    await expect(svc.startDownload(jest.fn())).rejects.toThrow(/403/);
     expect(svc.status).toBe('error');
     expect(svc.error).toContain('403');
   });
 
   it('status transitions: idle → error on network throw', async () => {
-    mockGetInfoAsync.mockResolvedValue({ exists: true });
+    mockGetInfoAsync.mockResolvedValue(BIG_FILE_INFO);
     mockCreateDownloadResumable.mockReturnValue({
       downloadAsync: jest.fn().mockRejectedValue(new Error('network error')),
     });
@@ -108,7 +128,7 @@ describe('Characterization: ModelDownloadService — download lifecycle', () => 
   });
 
   it('status transitions: downloading → paused after pauseDownload()', async () => {
-    mockGetInfoAsync.mockResolvedValue({ exists: true });
+    mockGetInfoAsync.mockResolvedValue(BIG_FILE_INFO);
 
     let resolveDownload!: (v: { status: number }) => void;
     const downloadPromise = new Promise<{ status: number }>((res) => { resolveDownload = res; });
@@ -120,16 +140,18 @@ describe('Characterization: ModelDownloadService — download lifecycle', () => 
     });
 
     const downloadTask = svc.startDownload(jest.fn());
-    // Flush microtasks so the download initialises
-    await Promise.resolve();
-    await Promise.resolve();
+    // Flush enough microtasks for _ensureModelDir, HEAD fetch, delete, and
+    // createDownloadResumable to all resolve before downloadAsync hangs.
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve();
+    }
 
     await svc.pauseDownload();
     expect(svc.status).toBe('paused');
     expect(mockPauseAsync).toHaveBeenCalled();
 
     resolveDownload({ status: 200 });
-    await downloadTask;
+    await downloadTask.catch(() => {});
   });
 
   it('pauseDownload() is a no-op when not downloading', async () => {
@@ -140,8 +162,10 @@ describe('Characterization: ModelDownloadService — download lifecycle', () => 
 
   it('retryDownload() deletes partial file then status ends at done', async () => {
     mockGetInfoAsync
-      .mockResolvedValueOnce({ exists: true }) // deleteAsync check
-      .mockResolvedValueOnce({ exists: true }); // dir check inside startDownload
+      .mockResolvedValueOnce({ exists: true }) // retry's pre-delete probe
+      .mockResolvedValueOnce({ exists: true }) // _ensureModelDir in startDownload
+      .mockResolvedValueOnce({ exists: false }) // stale-file check (skip delete)
+      .mockResolvedValueOnce(BIG_FILE_INFO); // post-download size check
     mockCreateDownloadResumable.mockReturnValue({
       downloadAsync: jest.fn().mockResolvedValue({ status: 200 }),
     });
@@ -163,7 +187,8 @@ describe('Characterization: ModelDownloadService — progress callback contract'
   it('calls onProgress with {bytesDownloaded, bytesTotal, fraction}', async () => {
     const svc = new ModelDownloadService();
     jest.clearAllMocks();
-    mockGetInfoAsync.mockResolvedValue({ exists: true });
+    mockFetch.mockResolvedValue(defaultHeadResponse());
+    mockGetInfoAsync.mockResolvedValue(BIG_FILE_INFO);
 
     let capturedCb: ((p: any) => void) | undefined;
     mockCreateDownloadResumable.mockImplementation(
