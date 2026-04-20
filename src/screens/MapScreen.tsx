@@ -9,6 +9,7 @@ import { Type, Radii, Shadows, Spacing } from '../theme/tokens';
 import { softTactileMapStyle } from '../theme/mapStyle';
 import { poiService, type Poi } from '../services/PoiService';
 import { SoftButton } from '../components/SoftButton';
+import { t } from '../i18n';
 
 type Props = BottomTabScreenProps<RootTabParamList, 'Map'>;
 
@@ -50,7 +51,7 @@ export default function MapScreen(_props: Props) {
       <View style={styles.centered}>
         <ActivityIndicator size="large" color={Colors.primary} />
         <Text style={[Type.body, { color: Colors.textSecondary, marginTop: 12 }]}>
-          Getting your location…
+          {t('map.gettingLocation')}
         </Text>
       </View>
     );
@@ -61,10 +62,10 @@ export default function MapScreen(_props: Props) {
       <View style={styles.centered}>
         <Text style={styles.errorIcon}>📍</Text>
         <Text style={[Type.body, { color: Colors.error, textAlign: 'center', marginTop: 8 }]}>
-          {errorMessage ?? 'Location unavailable'}
+          {errorMessage ?? t('map.locationUnavailable')}
         </Text>
         <View style={{ marginTop: 16 }}>
-          <SoftButton label="Retry" onPress={refresh} size="md" />
+          <SoftButton label={t('map.retry')} onPress={refresh} size="md" />
         </View>
       </View>
     );
@@ -134,9 +135,11 @@ export default function MapScreen(_props: Props) {
 
       <View style={styles.sheet} pointerEvents="box-none">
         <View style={styles.sheetHandle} />
-        <Text style={[Type.title, { color: Colors.text }]}>Around you now</Text>
+        <Text style={[Type.title, { color: Colors.text }]}>{t('map.aroundYou')}</Text>
         <Text style={[Type.hint, { color: Colors.textTertiary, marginTop: 2 }]}>
-          {pois.length > 0 ? `${pois.length} stops your guide picked out` : 'Scanning for nearby stops…'}
+          {pois.length > 0
+            ? t('map.stopsPickedOut', { count: pois.length })
+            : t('map.scanning')}
         </Text>
         <ScrollView
           style={{ marginTop: 10, maxHeight: 160 }}
@@ -153,7 +156,7 @@ export default function MapScreen(_props: Props) {
                   {p.title}
                 </Text>
                 <Text style={[Type.hint, { color: Colors.textTertiary }]} numberOfLines={1}>
-                  {p.source === 'llm' ? 'AI suggested' : 'Wikipedia'}
+                  {p.source === 'llm' ? t('map.aiSuggested') : t('map.wikipedia')}
                 </Text>
               </View>
               <View style={styles.poiBadge}>

@@ -8,6 +8,7 @@ import MapScreen from '../screens/MapScreen';
 import { Colors } from '../theme/colors';
 import { Radii, Shadows } from '../theme/tokens';
 import { Wordmark } from '../components/Wordmark';
+import { t } from '../i18n';
 import type { GuideTopic } from '../services/LocalGuideService';
 
 export type RootTabParamList = {
@@ -84,7 +85,7 @@ export default function AppNavigator({ initialTopic }: AppNavigatorProps = {}) {
           component={ChatScreen}
           initialParams={initialTopic ? { initialTopic } : undefined}
           options={{
-            tabBarLabel: 'Chat',
+            tabBarLabel: t('nav.chat'),
             tabBarIcon: ({ focused }) => <TabIcon focused={focused} glyph="💬" />,
           }}
         />
@@ -92,7 +93,7 @@ export default function AppNavigator({ initialTopic }: AppNavigatorProps = {}) {
           name="Map"
           component={MapScreen}
           options={{
-            tabBarLabel: 'Map',
+            tabBarLabel: t('nav.map'),
             tabBarIcon: ({ focused }) => <TabIcon focused={focused} glyph="🗺" />,
           }}
         />

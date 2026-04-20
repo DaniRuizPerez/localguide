@@ -33,6 +33,7 @@ import { useProximityNarration } from '../hooks/useProximityNarration';
 import { Colors } from '../theme/colors';
 import { Type, Radii, Shadows } from '../theme/tokens';
 import { GuideAvatar } from '../components/GuideAvatar';
+import { t } from '../i18n';
 
 type Props = BottomTabScreenProps<RootTabParamList, 'Chat'>;
 
@@ -54,7 +55,7 @@ function LocationPill({
   gps: GPSContext | null;
   manualLocation: string | null;
 }) {
-  let name = 'Locating…';
+  let name = t('chat.locating');
   let dotColor: string = Colors.warning;
   if (status === 'ready' && gps) {
     name = gps.placeName ?? `${gps.latitude.toFixed(3)}, ${gps.longitude.toFixed(3)}`;
@@ -63,7 +64,7 @@ function LocationPill({
     name = manualLocation;
     dotColor = Colors.warning;
   } else if (status === 'denied' || status === 'error') {
-    name = 'No GPS';
+    name = t('chat.noGps');
     dotColor = Colors.error;
   }
   return (
@@ -90,14 +91,14 @@ function ManualLocationRow({
   return (
     <View style={styles.manualRow}>
       <Text style={[Type.bodySm, { color: Colors.error, marginBottom: 6 }]}>
-        GPS unavailable — enter a location to continue:
+        {t('chat.gpsUnavailable')}
       </Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <TextInput
           style={styles.manualInput}
           value={locationInput}
           onChangeText={setLocationInput}
-          placeholder="e.g. Times Square, NYC"
+          placeholder={t('chat.locationPlaceholder')}
           placeholderTextColor={Colors.textTertiary}
           returnKeyType="done"
           onSubmitEditing={() => {
@@ -117,12 +118,12 @@ function ManualLocationRow({
           }}
           disabled={!locationInput.trim()}
         >
-          <Text style={[Type.chip, { color: '#FFFFFF' }]}>SET</Text>
+          <Text style={[Type.chip, { color: '#FFFFFF' }]}>{t('chat.set')}</Text>
         </TouchableOpacity>
       </View>
       <TouchableOpacity onPress={onRefresh}>
         <Text style={[Type.bodySm, { color: Colors.error, marginTop: 6, textDecorationLine: 'underline' }]}>
-          Retry GPS
+          {t('chat.retryGps')}
         </Text>
       </TouchableOpacity>
     </View>
@@ -167,7 +168,7 @@ function AnimatedChatBubble({ message }: { message: Message }) {
         </Text>
         {message.durationMs != null && (
           <Text style={styles.bubbleMeta}>
-            {message.durationMs}MS · ON DEVICE
+            {message.durationMs}MS · {t('chat.onDevice')}
           </Text>
         )}
       </View>
@@ -523,8 +524,40 @@ export default function ChatScreen(props: Props) {
     gps,
     pois: nearbyPois,
     onNarrate: narratePoi,
-    enabled: speakResponses && !inferring,
+    // Proximity-driven narration is the Auto-Guide feature. Speak toggle is
+    // orthogonal (controls TTS output only); when Auto-Guide is off we never
+    // auto-narrate even if Speak is on, and when it's on we fire narrations
+    // even with Speak off (the user still sees them in the chat transcript).
+    enabled: autoGuide.enabled && !inferring,
   });
+
+  // Initial area narration when Auto-Guide toggles on. Covers both paths the
+  // user cares about: (a) user flips the switch while using the app — narrate
+  // immediately for the current location, and (b) the app launches with
+  // Auto-Guide already on and GPS arrives a moment later — narrate as soon
+  // as we have a fix. Fires exactly once per Auto-Guide session; proximity
+  // handles every subsequent trigger as the user walks.
+  const autoGuideWelcomedRef = useRef(false);
+  useEffect(() => {
+    if (!autoGuide.enabled) {
+      autoGuideWelcomedRef.current = false;
+      return;
+    }
+    if (autoGuideWelcomedRef.current) return;
+    if (!gps) return;
+    if (inferringRef.current) return;
+    autoGuideWelcomedRef.current = true;
+    const cue =
+      'Welcome the visitor to this area and give a brief overview of its character and what makes it worth exploring.';
+    const userMsg: Message = {
+      id: `${Date.now()}-autoguide-welcome`,
+      role: 'user',
+      text: 'Auto-Guide: introduce this area',
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    setInferring(true);
+    streamGuideResponse('text', cue, gps);
+  }, [autoGuide.enabled, gps, streamGuideResponse]);
 
   const sendMessage = useCallback(async () => {
     const query = input.trim();
@@ -615,11 +648,10 @@ export default function ChatScreen(props: Props) {
       {deviceTier === 'low' && !slowDeviceDismissed && (
         <View style={styles.slowDeviceBanner}>
           <Text style={[Type.bodySm, { flex: 1, color: '#8A4B00' }]}>
-            ⚡  Heads up: this device has limited memory, so the AI guide runs on CPU and
-            responses may be slow.
+            {t('chat.slowDevice')}
           </Text>
           <TouchableOpacity onPress={() => setSlowDeviceDismissed(true)} style={styles.slowDeviceDismiss}>
-            <Text style={[Type.chip, { color: '#8A4B00' }]}>GOT IT</Text>
+            <Text style={[Type.chip, { color: '#8A4B00' }]}>{t('chat.gotIt')}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -638,7 +670,7 @@ export default function ChatScreen(props: Props) {
       <View style={styles.controlsRow}>
         <View style={styles.controlItem}>
           <Text style={styles.controlLabel} numberOfLines={1}>
-            AUTO-GUIDE
+            {t('chat.autoGuide')}
           </Text>
           <Switch
             value={autoGuide.enabled}
@@ -649,7 +681,7 @@ export default function ChatScreen(props: Props) {
         </View>
         <View style={styles.controlItem}>
           <Text style={styles.controlLabel} numberOfLines={1}>
-            SPEAK
+            {t('chat.speak')}
           </Text>
           <Switch
             value={speakResponses}
@@ -663,7 +695,7 @@ export default function ChatScreen(props: Props) {
         </View>
         {autoGuide.enabled && autoGuide.isSpeaking && (
           <TouchableOpacity style={styles.stopSpeakBtn} onPress={() => speechService.stop()}>
-            <Text style={[Type.chip, { color: '#FFFFFF' }]}>STOP</Text>
+            <Text style={[Type.chip, { color: '#FFFFFF' }]}>{t('chat.stop')}</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -684,12 +716,10 @@ export default function ChatScreen(props: Props) {
           <View style={styles.emptyContainer}>
             <GuideAvatar size={48} />
             <Text style={[Type.title, { color: Colors.text, marginTop: 16, textAlign: 'center' }]}>
-              {autoGuide.enabled ? 'Auto-guide listening' : 'Ready when you are'}
+              {autoGuide.enabled ? t('chat.autoGuideListening') : t('app.ready')}
             </Text>
             <Text style={[Type.body, { color: Colors.textSecondary, marginTop: 6, textAlign: 'center' }]}>
-              {autoGuide.enabled
-                ? 'Walk around and your guide will speak when something interesting is nearby.'
-                : "Ask about what's near you, tap the camera, or enable Auto-Guide."}
+              {autoGuide.enabled ? t('chat.autoGuideHint') : t('chat.askHint')}
             </Text>
           </View>
         }
@@ -715,7 +745,7 @@ export default function ChatScreen(props: Props) {
             style={styles.input}
             value={input}
             onChangeText={setInput}
-            placeholder={voice.isListening ? 'Listening…' : "Ask about what's near you…"}
+            placeholder={voice.isListening ? t('chat.listening') : t('chat.placeholder')}
             placeholderTextColor={Colors.textTertiary}
             returnKeyType="send"
             onSubmitEditing={sendMessage}

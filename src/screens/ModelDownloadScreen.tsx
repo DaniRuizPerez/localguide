@@ -11,6 +11,7 @@ import { ProgressOrb } from '../components/ProgressOrb';
 import { PillowChip } from '../components/PillowChip';
 import { SoftButton } from '../components/SoftButton';
 import { Wordmark } from '../components/Wordmark';
+import { t } from '../i18n';
 
 interface Props {
   onDownloadComplete: () => void;
@@ -116,14 +117,14 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
     : 'idle';
 
   const primaryLabel = isError
-    ? 'Retry'
+    ? t('download.retry')
     : isDone
-    ? 'Start exploring'
+    ? t('download.startExploring')
     : isActive
-    ? 'Pause download'
+    ? t('download.pause')
     : isPaused
-    ? 'Resume download'
-    : 'Start download';
+    ? t('download.resume')
+    : t('download.start');
   const primaryAction = isError
     ? handleRetry
     : isDone
@@ -140,11 +141,9 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
         <Wordmark />
 
         <View style={styles.headingBlock}>
-          <Text style={[Type.h1, { color: Colors.text }]}>
-            Making a tiny brain{'\n'}for your pocket.
-          </Text>
+          <Text style={[Type.h1, { color: Colors.text }]}>{t('download.heading')}</Text>
           <Text style={[Type.body, { color: Colors.textSecondary, marginTop: 10 }]}>
-            {totalMb} MB · one-time download · no account. After this, Local Guide works wherever you go.
+            {t('download.subtitle', { mb: totalMb })}
           </Text>
         </View>
 
@@ -159,7 +158,7 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
         <View style={styles.chipsRow}>
           <PillowChip label={modelDownloadService.profile.displayName.split(' ')[0] + ' ' + modelDownloadService.profile.displayName.split(' ')[1]} />
           <PillowChip label="INT4" />
-          <PillowChip label="Wi-Fi only" />
+          <PillowChip label={t('download.wifiOnly')} />
         </View>
 
         {isError && errorMessage ? (

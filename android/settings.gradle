@@ -58,7 +58,7 @@ extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
 }
 expoAutolinking.useExpoModules()
 
-rootProject.name = 'Local Guide App'
+rootProject.name = 'Local Guide'
 
 expoAutolinking.useExpoVersionCatalog()
 

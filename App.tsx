@@ -18,6 +18,7 @@ import { TopicChips, type GuideTopic } from './src/components/TopicChips';
 import { GuideAvatar } from './src/components/GuideAvatar';
 import { Colors } from './src/theme/colors';
 import { Type } from './src/theme/tokens';
+import { t } from './src/i18n';
 
 type AppState = 'checking' | 'needs_download' | 'warming_up' | 'ready';
 
@@ -95,17 +96,15 @@ export default function App() {
         <View style={styles.loadingContainer}>
           <GuideAvatar size={64} />
           <ActivityIndicator size="large" color={Colors.primary} style={styles.spinner} />
-          <Text style={styles.title}>Getting your guide ready…</Text>
-          <Text style={styles.subtitle}>
-            Loading the on-device model and warming up so your first question is fast.
-            {'\n'}
-            This happens once per app launch.
-          </Text>
+          <Text style={styles.title}>{t('app.warmupTitle')}</Text>
+          <Text style={styles.subtitle}>{t('app.warmupSubtitle')}</Text>
 
-          <Text style={styles.topicsHeading}>WHILE YOU WAIT, PICK A TOPIC</Text>
+          <Text style={styles.topicsHeading}>{t('app.pickTopic')}</Text>
           <TopicChips selected={topic} onSelect={setTopic} />
 
-          {warmupError && <Text style={styles.errorText}>Warmup error: {warmupError}</Text>}
+          {warmupError && (
+            <Text style={styles.errorText}>{t('app.warmupError', { message: warmupError })}</Text>
+          )}
         </View>
         <StatusBar style="dark" />
       </SafeAreaProvider>

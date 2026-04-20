@@ -5,6 +5,7 @@ import {
   type StreamCallbacks,
   type StreamHandle,
 } from './InferenceService';
+import { localePromptDirective } from '../i18n';
 
 // Kept terse on purpose: prefill cost is O(prompt tokens), and on low-end CPU devices
 // (Pixel 3-class) every 100 tokens of system prompt adds ~0.5–1 s before the first
@@ -39,6 +40,13 @@ function topicFocusLine(topic: GuideTopic | undefined): string {
   return `\nFocus area: ${TOPIC_LABELS[topic]}. Lean your reply toward this topic unless the user asks about something else.`;
 }
 
+// Non-empty when the user's phone locale is not English. Prepended to every
+// narration prompt so Gemma speaks the visitor's language.
+function localeLine(): string {
+  const directive = localePromptDirective();
+  return directive ? `\n${directive}` : '';
+}
+
 function formatCoordinates(location: GPSContext | string): string {
   if (typeof location === 'string') return location;
   const accuracyNote = location.accuracy != null ? ` (±${Math.round(location.accuracy)}m)` : '';
@@ -60,7 +68,7 @@ function buildPrompt(location: GPSContext | string, userQuery: string, topic?: G
   const hasPlaceName = typeof location === 'string' || !!(location.placeName);
   const coordinatesLine = hasPlaceName ? '' : `Coordinates: ${formatCoordinates(location)}\n`;
   return (
-    `${SYSTEM_PROMPT}${topicFocusLine(topic)}\n` +
+    `${SYSTEM_PROMPT}${topicFocusLine(topic)}${localeLine()}\n` +
     `${placeLine(location)}` +
     `${coordinatesLine}` +
     `Cue: ${query}`
@@ -84,7 +92,7 @@ export interface GuideResponse {
 function buildImagePrompt(location: GPSContext | string, userQuery: string, topic?: GuideTopic): string {
   const query = userQuery.trim() || 'Narrate what is in this photo.';
   return (
-    `${SYSTEM_PROMPT}${topicFocusLine(topic)}\n` +
+    `${SYSTEM_PROMPT}${topicFocusLine(topic)}${localeLine()}\n` +
     `${placeLine(location)}` +
     `Coordinates: ${formatCoordinates(location)}\n` +
     `The visitor shared a photo from this spot. Identify what's in it and narrate its story — what it is, why it matters, the history and cultural background a local would share. Ground every claim in what's actually visible; use Place/Coordinates only to disambiguate. If image and location disagree, trust the image.\n` +

@@ -2,18 +2,27 @@ import React from 'react';
 import { ScrollView, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 import { PillowChip } from './PillowChip';
 import { Colors } from '../theme/colors';
+import { t } from '../i18n';
 import type { GuideTopic } from '../services/LocalGuideService';
 
 export type { GuideTopic };
 
-export const TOPIC_OPTIONS: { id: GuideTopic; emoji: string; label: string }[] = [
-  { id: 'everything', emoji: '✨', label: 'Everything' },
-  { id: 'history', emoji: '🏛', label: 'History' },
-  { id: 'nature', emoji: '🌿', label: 'Nature' },
-  { id: 'geography', emoji: '🗺', label: 'Geography' },
-  { id: 'food', emoji: '🍽', label: 'Food' },
-  { id: 'culture', emoji: '🎭', label: 'Culture' },
-];
+// Emoji stays per-topic; label is resolved at render time via i18n.
+const TOPIC_EMOJI: Record<GuideTopic, string> = {
+  everything: '✨',
+  history: '🏛',
+  nature: '🌿',
+  geography: '🗺',
+  food: '🍽',
+  culture: '🎭',
+};
+
+const TOPIC_ORDER: GuideTopic[] = ['everything', 'history', 'nature', 'geography', 'food', 'culture'];
+
+export const TOPIC_OPTIONS: { id: GuideTopic; emoji: string }[] = TOPIC_ORDER.map((id) => ({
+  id,
+  emoji: TOPIC_EMOJI[id],
+}));
 
 export function TopicChips({
   selected,
@@ -31,12 +40,12 @@ export function TopicChips({
       style={[styles.scroll, style]}
       contentContainerStyle={styles.row}
     >
-      {TOPIC_OPTIONS.map((t) => (
+      {TOPIC_OPTIONS.map((topic) => (
         <PillowChip
-          key={t.id}
-          label={`${t.emoji} ${t.label}`}
-          active={t.id === selected}
-          onPress={() => onSelect(t.id)}
+          key={topic.id}
+          label={`${topic.emoji} ${t(`topics.${topic.id}` as const)}`}
+          active={topic.id === selected}
+          onPress={() => onSelect(topic.id)}
         />
       ))}
     </ScrollView>
