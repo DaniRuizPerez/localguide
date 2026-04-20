@@ -70,7 +70,7 @@ describe('ChatScreen', () => {
     const { getByPlaceholderText, getByText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
-    expect(getByPlaceholderText('Ask about nearby places…')).toBeTruthy();
+    expect(getByPlaceholderText("Ask about what's near you…")).toBeTruthy();
     expect(getByText('↑')).toBeTruthy();
   });
 

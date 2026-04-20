@@ -1,12 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { useFonts, Fraunces_500Medium } from '@expo-google-fonts/fraunces';
+import {
+  Nunito_400Regular,
+  Nunito_500Medium,
+  Nunito_600SemiBold,
+  Nunito_700Bold,
+  Nunito_800ExtraBold,
+} from '@expo-google-fonts/nunito';
 import AppNavigator from './src/navigation/AppNavigator';
 import ModelDownloadScreen from './src/screens/ModelDownloadScreen';
 import { modelDownloadService, profileForTier } from './src/services/ModelDownloadService';
 import { inferenceService } from './src/services/InferenceService';
 import { TopicChips, type GuideTopic } from './src/components/TopicChips';
+import { GuideAvatar } from './src/components/GuideAvatar';
 import { Colors } from './src/theme/colors';
+import { Type } from './src/theme/tokens';
 
 type AppState = 'checking' | 'needs_download' | 'warming_up' | 'ready';
 
@@ -15,12 +26,18 @@ export default function App() {
   const [warmupError, setWarmupError] = useState<string | null>(null);
   const [topic, setTopic] = useState<GuideTopic>('everything');
 
+  const [fontsLoaded] = useFonts({
+    Fraunces_500Medium,
+    Nunito_400Regular,
+    Nunito_500Medium,
+    Nunito_600SemiBold,
+    Nunito_700Bold,
+    Nunito_800ExtraBold,
+  });
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // Pick the right model file for this device class BEFORE checking download
-      // state — LOW-tier devices get the ~580 MB Gemma 3 1B, MID/HIGH get the
-      // ~2.6 GB multimodal Gemma 4 E2B.
       try {
         const info = await inferenceService.getDeviceTier();
         const tier = info?.tier ?? 'mid';
@@ -32,7 +49,6 @@ export default function App() {
       const downloaded = await modelDownloadService.isModelDownloaded();
       if (cancelled) return;
       if (downloaded) {
-        // Drop the other tier's model if present — a device can only use one at a time.
         modelDownloadService.cleanupOtherProfiles().catch(() => {});
       }
       setAppState(downloaded ? 'warming_up' : 'needs_download');
@@ -60,24 +76,24 @@ export default function App() {
     };
   }, [appState]);
 
-  if (appState === 'checking') {
+  if (!fontsLoaded || appState === 'checking') {
     return null; // splash screen covers this briefly
   }
 
   if (appState === 'needs_download') {
     return (
-      <>
+      <SafeAreaProvider>
         <ModelDownloadScreen onDownloadComplete={() => setAppState('warming_up')} />
-        <StatusBar style="auto" />
-      </>
+        <StatusBar style="dark" />
+      </SafeAreaProvider>
     );
   }
 
   if (appState === 'warming_up') {
     return (
-      <>
+      <SafeAreaProvider>
         <View style={styles.loadingContainer}>
-          <Text style={styles.emoji}>🧭</Text>
+          <GuideAvatar size={64} />
           <ActivityIndicator size="large" color={Colors.primary} style={styles.spinner} />
           <Text style={styles.title}>Getting your guide ready…</Text>
           <Text style={styles.subtitle}>
@@ -86,23 +102,21 @@ export default function App() {
             This happens once per app launch.
           </Text>
 
-          <Text style={styles.topicsHeading}>While you wait, pick a topic</Text>
+          <Text style={styles.topicsHeading}>WHILE YOU WAIT, PICK A TOPIC</Text>
           <TopicChips selected={topic} onSelect={setTopic} />
 
-          {warmupError && (
-            <Text style={styles.errorText}>Warmup error: {warmupError}</Text>
-          )}
+          {warmupError && <Text style={styles.errorText}>Warmup error: {warmupError}</Text>}
         </View>
-        <StatusBar style="auto" />
-      </>
+        <StatusBar style="dark" />
+      </SafeAreaProvider>
     );
   }
 
   return (
-    <>
+    <SafeAreaProvider>
       <AppNavigator initialTopic={topic} />
-      <StatusBar style="auto" />
-    </>
+      <StatusBar style="dark" />
+    </SafeAreaProvider>
   );
 }
 
@@ -114,33 +128,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 32,
   },
-  emoji: { fontSize: 56, marginBottom: 16 },
-  spinner: { marginBottom: 20 },
+  spinner: { marginTop: 24, marginBottom: 20 },
   title: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.textPrimary,
+    ...Type.title,
+    color: Colors.text,
     marginBottom: 8,
     textAlign: 'center',
   },
   subtitle: {
-    fontSize: 14,
+    ...Type.body,
     color: Colors.textSecondary,
     textAlign: 'center',
-    lineHeight: 20,
   },
   topicsHeading: {
+    ...Type.metaUpper,
     marginTop: 32,
     marginBottom: 8,
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textSecondary,
+    color: Colors.textTertiary,
     textAlign: 'center',
   },
   errorText: {
+    ...Type.bodySm,
     marginTop: 20,
-    color: Colors.error ?? '#d33',
-    fontSize: 13,
+    color: Colors.error,
     textAlign: 'center',
   },
 });

@@ -1,28 +1,23 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-  Platform,
-} from 'react-native';
+import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   modelDownloadService,
   DownloadProgress,
 } from '../services/ModelDownloadService';
 import { Colors } from '../theme/colors';
+import { Type, Radii, Spacing } from '../theme/tokens';
+import { ProgressOrb } from '../components/ProgressOrb';
+import { PillowChip } from '../components/PillowChip';
+import { SoftButton } from '../components/SoftButton';
+import { Wordmark } from '../components/Wordmark';
 
 interface Props {
   onDownloadComplete: () => void;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes <= 0) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+function formatMb(bytes: number): number {
+  return Math.round(bytes / (1024 * 1024));
 }
 
 export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
@@ -36,14 +31,9 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
     'idle' | 'downloading' | 'paused' | 'done' | 'error'
   >('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [fetchingSize, setFetchingSize] = useState(false);
 
   useEffect(() => {
-    setFetchingSize(true);
-    modelDownloadService
-      .getRemoteFileSize()
-      .then((size) => setRemoteSize(size))
-      .finally(() => setFetchingSize(false));
+    modelDownloadService.getRemoteFileSize().then((size) => setRemoteSize(size));
   }, []);
 
   const handleProgress = useCallback((p: DownloadProgress) => {
@@ -101,262 +91,133 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
     }
   }, [handleProgress, onDownloadComplete]);
 
-  const progressPercent = Math.round(progress.fraction * 100);
+  const percent = Math.round(progress.fraction * 100);
+  const downloadedMb = formatMb(progress.bytesDownloaded);
+  const totalMb = remoteSize != null
+    ? formatMb(remoteSize)
+    : progress.bytesTotal > 0
+    ? formatMb(progress.bytesTotal)
+    : modelDownloadService.profile.approximateSizeMb;
+
   const isActive = downloadStatus === 'downloading';
   const isPaused = downloadStatus === 'paused';
   const isError = downloadStatus === 'error';
   const isIdle = downloadStatus === 'idle';
+  const isDone = downloadStatus === 'done';
+
+  const orbState: 'downloading' | 'paused' | 'complete' | 'error' | 'idle' = isError
+    ? 'error'
+    : isDone
+    ? 'complete'
+    : isActive
+    ? 'downloading'
+    : isPaused
+    ? 'paused'
+    : 'idle';
+
+  const primaryLabel = isError
+    ? 'Retry'
+    : isDone
+    ? 'Start exploring'
+    : isActive
+    ? 'Pause download'
+    : isPaused
+    ? 'Resume download'
+    : 'Start download';
+  const primaryAction = isError
+    ? handleRetry
+    : isDone
+    ? onDownloadComplete
+    : isActive
+    ? handlePause
+    : isPaused
+    ? handleResume
+    : handleStart;
 
   return (
-    <View style={styles.container}>
-      <View style={styles.logoRow}>
-        <Text style={styles.logoEmoji}>🧭</Text>
-        <Text style={styles.logoTitle}>Local Guide</Text>
-      </View>
+    <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
+      <ScrollView contentContainerStyle={styles.container} bounces={false}>
+        <Wordmark />
 
-      <Text style={styles.title}>Download AI Model</Text>
-      <Text style={styles.subtitle}>
-        The on-device AI model must be downloaded before you can use Local Guide.
-        Your conversations stay private — all inference runs on your device.
-      </Text>
-
-      <View style={styles.infoBox}>
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Model</Text>
-          <Text style={styles.infoValue}>{modelDownloadService.profile.displayName}</Text>
-        </View>
-        <View style={styles.infoDivider} />
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Storage Required</Text>
-          {fetchingSize ? (
-            <ActivityIndicator size="small" color={Colors.primary} />
-          ) : (
-            <Text style={styles.infoValue}>
-              {remoteSize != null
-                ? formatBytes(remoteSize)
-                : `~${modelDownloadService.profile.approximateSizeMb} MB`}
-            </Text>
-          )}
-        </View>
-        <View style={styles.infoDivider} />
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Source</Text>
-          <Text style={styles.infoValueSmall} numberOfLines={1}>
-            {modelDownloadService.profile.url}
+        <View style={styles.headingBlock}>
+          <Text style={[Type.h1, { color: Colors.text }]}>
+            Making a tiny brain{'\n'}for your pocket.
+          </Text>
+          <Text style={[Type.body, { color: Colors.textSecondary, marginTop: 10 }]}>
+            {totalMb} MB · one-time download · no account. After this, Local Guide works wherever you go.
           </Text>
         </View>
-      </View>
 
-      {(isActive || isPaused) && (
-        <View style={styles.progressContainer}>
-          <View style={styles.progressHeader}>
-            <Text style={styles.progressLabel}>Downloading…</Text>
-            <Text style={styles.progressPercent}>{progressPercent}%</Text>
-          </View>
-          <View style={styles.progressBarBg}>
-            <View style={[styles.progressBarFill, { width: `${progressPercent}%` as any }]} />
-          </View>
-          <Text style={styles.progressBytes}>
-            {formatBytes(progress.bytesDownloaded)}
-            {progress.bytesTotal > 0 ? ` of ${formatBytes(progress.bytesTotal)}` : ''}
-          </Text>
-        </View>
-      )}
-
-      {isError && errorMessage && (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{errorMessage}</Text>
-        </View>
-      )}
-
-      <View style={styles.buttonRow}>
-        {isIdle && (
-          <TouchableOpacity style={styles.primaryButton} onPress={handleStart}>
-            <Text style={styles.primaryButtonText}>Download Model</Text>
-          </TouchableOpacity>
-        )}
-
-        {isActive && (
-          <TouchableOpacity style={styles.secondaryButton} onPress={handlePause}>
-            <Text style={styles.secondaryButtonText}>Pause</Text>
-          </TouchableOpacity>
-        )}
-
-        {isPaused && (
-          <TouchableOpacity style={styles.primaryButton} onPress={handleResume}>
-            <Text style={styles.primaryButtonText}>Resume</Text>
-          </TouchableOpacity>
-        )}
-
-        {isError && (
-          <TouchableOpacity style={styles.primaryButton} onPress={handleRetry}>
-            <Text style={styles.primaryButtonText}>Retry Download</Text>
-          </TouchableOpacity>
-        )}
-
-        {isActive && (
-          <ActivityIndicator
-            size="small"
-            color={Colors.primary}
-            style={styles.spinner}
+        <View style={styles.orbWrap}>
+          <ProgressOrb
+            percent={percent}
+            label={`${downloadedMb} of ${totalMb} MB`}
+            state={orbState}
           />
-        )}
-      </View>
+        </View>
 
-      {Platform.OS === 'android' && (
-        <Text style={styles.platformNote}>
-          📶 Wi-Fi recommended — model may be several hundred MB.
-        </Text>
-      )}
-    </View>
+        <View style={styles.chipsRow}>
+          <PillowChip label={modelDownloadService.profile.displayName.split(' ')[0] + ' ' + modelDownloadService.profile.displayName.split(' ')[1]} />
+          <PillowChip label="INT4" />
+          <PillowChip label="Wi-Fi only" />
+        </View>
+
+        {isError && errorMessage ? (
+          <View style={styles.errorBox}>
+            <Text style={[Type.bodySm, { color: Colors.error }]}>{errorMessage}</Text>
+          </View>
+        ) : null}
+
+        <View style={styles.ctaWrap}>
+          <SoftButton
+            label={primaryLabel}
+            onPress={primaryAction}
+            variant="primary"
+            size="lg"
+          />
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    padding: 24,
-    justifyContent: 'center',
     backgroundColor: Colors.background,
   },
-  logoRow: {
-    flexDirection: 'row',
+  container: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 28,
+  },
+  headingBlock: {
+    marginTop: 26,
+  },
+  orbWrap: {
     alignItems: 'center',
-    marginBottom: 28,
+    marginTop: 28,
+    marginBottom: 18,
   },
-  logoEmoji: { fontSize: 36, marginRight: 10 },
-  logoTitle: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: Colors.primary,
-    letterSpacing: -0.5,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginBottom: 24,
-    lineHeight: 20,
-  },
-  infoBox: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  infoRow: {
+  chipsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  infoDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: Colors.borderLight,
-  },
-  infoLabel: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    fontWeight: '500',
-  },
-  infoValue: {
-    fontSize: 14,
-    color: Colors.textPrimary,
-    fontWeight: '600',
-  },
-  infoValueSmall: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-    maxWidth: '60%',
-    textAlign: 'right',
-  },
-  progressContainer: {
-    marginBottom: 20,
-  },
-  progressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  progressLabel: { fontSize: 13, color: Colors.textSecondary, fontWeight: '500' },
-  progressPercent: { fontSize: 13, color: Colors.primary, fontWeight: '700' },
-  progressBarBg: {
-    height: 8,
-    backgroundColor: Colors.surfaceAlt,
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginBottom: 6,
-  },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: Colors.primary,
-    borderRadius: 4,
-  },
-  progressBytes: {
-    fontSize: 12,
-    color: Colors.textTertiary,
+    gap: 8,
+    justifyContent: 'center',
+    marginBottom: Spacing.lg,
+    flexWrap: 'wrap',
   },
   errorBox: {
     backgroundColor: Colors.errorLight,
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 16,
+    borderRadius: Radii.md,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderWidth: 1,
-    borderColor: '#FECACA',
+    borderColor: '#F3C4C4',
+    marginBottom: Spacing.md,
   },
-  errorText: {
-    color: Colors.error,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  primaryButton: {
-    backgroundColor: Colors.primary,
-    borderRadius: 14,
-    paddingVertical: 15,
-    paddingHorizontal: 28,
-    shadowColor: Colors.primary,
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 4,
-  },
-  primaryButtonText: {
-    color: Colors.surface,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  secondaryButton: {
-    backgroundColor: Colors.surfaceAlt,
-    borderRadius: 14,
-    paddingVertical: 15,
-    paddingHorizontal: 28,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  secondaryButtonText: {
-    color: Colors.textPrimary,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  spinner: {
-    marginLeft: 8,
-  },
-  platformNote: {
-    marginTop: 20,
-    fontSize: 12,
-    color: Colors.textTertiary,
-    textAlign: 'center',
+  ctaWrap: {
+    marginTop: 'auto',
+    paddingTop: Spacing.lg,
   },
 });

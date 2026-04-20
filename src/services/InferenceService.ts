@@ -22,6 +22,12 @@ export interface GPSContext {
   latitude: number;
   longitude: number;
   accuracy?: number;
+  /**
+   * Human-readable place name (city / neighborhood) derived from reverse
+   * geocoding. Optional because geocoding is async — the GPS fix is usable
+   * without it, and the UI should degrade gracefully while it's null.
+   */
+  placeName?: string;
 }
 
 export interface StreamCallbacks {

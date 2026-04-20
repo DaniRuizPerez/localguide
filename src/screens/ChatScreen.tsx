@@ -21,12 +21,18 @@ import type { RootTabParamList } from '../navigation/AppNavigator';
 import { useLocation } from '../hooks/useLocation';
 import { useAutoGuide } from '../hooks/useAutoGuide';
 import { useVoiceInput } from '../hooks/useVoiceInput';
-import { localGuideService, type GuideTopic } from '../services/LocalGuideService';
+import { localGuideService, type GuideTopic, type ListPlacesTask } from '../services/LocalGuideService';
 import { TopicChips } from '../components/TopicChips';
+import { AttractionsChips } from '../components/AttractionsChips';
+import { RadiusSelector } from '../components/RadiusSelector';
 import { speechService } from '../services/SpeechService';
 import { SpeechChunker } from '../services/SpeechChunker';
 import { inferenceService, type GPSContext, type StreamHandle } from '../services/InferenceService';
+import { poiService, type Poi } from '../services/PoiService';
+import { useProximityNarration } from '../hooks/useProximityNarration';
 import { Colors } from '../theme/colors';
+import { Type, Radii, Shadows } from '../theme/tokens';
+import { GuideAvatar } from '../components/GuideAvatar';
 
 type Props = BottomTabScreenProps<RootTabParamList, 'Chat'>;
 
@@ -39,89 +45,88 @@ interface Message {
   durationMs?: number;
 }
 
-function LocationBanner({
+function LocationPill({
   status,
   gps,
-  errorMessage,
-  onRefresh,
   manualLocation,
-  onSetManualLocation,
 }: {
   status: string;
   gps: GPSContext | null;
-  errorMessage: string | null;
-  onRefresh: () => void;
   manualLocation: string | null;
+}) {
+  let name = 'Locating…';
+  let dotColor: string = Colors.warning;
+  if (status === 'ready' && gps) {
+    name = gps.placeName ?? `${gps.latitude.toFixed(3)}, ${gps.longitude.toFixed(3)}`;
+    dotColor = Colors.success;
+  } else if (manualLocation) {
+    name = manualLocation;
+    dotColor = Colors.warning;
+  } else if (status === 'denied' || status === 'error') {
+    name = 'No GPS';
+    dotColor = Colors.error;
+  }
+  return (
+    <View style={styles.locationPill}>
+      <View style={[styles.dot, { backgroundColor: dotColor }]} />
+      <Text style={[Type.metaUpper, { color: Colors.textSecondary }]} numberOfLines={1}>
+        {name}
+      </Text>
+    </View>
+  );
+}
+
+function ManualLocationRow({
+  onRefresh,
+  onSetManualLocation,
+  manualLocation,
+}: {
+  onRefresh: () => void;
   onSetManualLocation: (placeName: string) => void;
+  manualLocation: string | null;
 }) {
   const [locationInput, setLocationInput] = useState('');
-
-  if (status === 'ready' && gps) {
-    return (
-      <View style={styles.bannerReady}>
-        <Text style={styles.bannerReadyText}>
-          📍 {gps.latitude.toFixed(4)}, {gps.longitude.toFixed(4)}
-          {gps.accuracy != null ? `  ±${Math.round(gps.accuracy)}m` : ''}
+  if (manualLocation) return null;
+  return (
+    <View style={styles.manualRow}>
+      <Text style={[Type.bodySm, { color: Colors.error, marginBottom: 6 }]}>
+        GPS unavailable — enter a location to continue:
+      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <TextInput
+          style={styles.manualInput}
+          value={locationInput}
+          onChangeText={setLocationInput}
+          placeholder="e.g. Times Square, NYC"
+          placeholderTextColor={Colors.textTertiary}
+          returnKeyType="done"
+          onSubmitEditing={() => {
+            if (locationInput.trim()) {
+              onSetManualLocation(locationInput.trim());
+              setLocationInput('');
+            }
+          }}
+        />
+        <TouchableOpacity
+          style={[styles.manualSet, !locationInput.trim() && { opacity: 0.5 }]}
+          onPress={() => {
+            if (locationInput.trim()) {
+              onSetManualLocation(locationInput.trim());
+              setLocationInput('');
+            }
+          }}
+          disabled={!locationInput.trim()}
+        >
+          <Text style={[Type.chip, { color: '#FFFFFF' }]}>SET</Text>
+        </TouchableOpacity>
+      </View>
+      <TouchableOpacity onPress={onRefresh}>
+        <Text style={[Type.bodySm, { color: Colors.error, marginTop: 6, textDecorationLine: 'underline' }]}>
+          Retry GPS
         </Text>
-      </View>
-    );
-  }
-  if (status === 'requesting') {
-    return (
-      <View style={styles.bannerLoading}>
-        <ActivityIndicator size="small" color={Colors.primary} />
-        <Text style={[styles.bannerLoadingText, { marginLeft: 6 }]}>Getting location…</Text>
-      </View>
-    );
-  }
-  if (status === 'denied' || status === 'error') {
-    if (manualLocation) {
-      return (
-        <TouchableOpacity style={styles.bannerManual} onPress={() => onSetManualLocation('')}>
-          <Text style={styles.bannerManualText}>📍 {manualLocation} — tap to change</Text>
-        </TouchableOpacity>
-      );
-    }
-    return (
-      <View style={styles.bannerErrorFallback}>
-        <Text style={styles.bannerErrorText}>GPS unavailable — enter a location to continue:</Text>
-        <View style={styles.locationInputRow}>
-          <TextInput
-            style={styles.locationInput}
-            value={locationInput}
-            onChangeText={setLocationInput}
-            placeholder="e.g. Times Square, NYC"
-            placeholderTextColor={Colors.textTertiary}
-            returnKeyType="done"
-            onSubmitEditing={() => {
-              if (locationInput.trim()) {
-                onSetManualLocation(locationInput.trim());
-                setLocationInput('');
-              }
-            }}
-          />
-          <TouchableOpacity
-            style={[styles.locationSetBtn, !locationInput.trim() && styles.locationSetBtnDisabled]}
-            onPress={() => {
-              if (locationInput.trim()) {
-                onSetManualLocation(locationInput.trim());
-                setLocationInput('');
-              }
-            }}
-            disabled={!locationInput.trim()}
-          >
-            <Text style={styles.locationSetBtnText}>Set</Text>
-          </TouchableOpacity>
-        </View>
-        <TouchableOpacity onPress={onRefresh}>
-          <Text style={[styles.bannerErrorText, { marginTop: 4, textDecorationLine: 'underline' }]}>
-            Retry GPS
-          </Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-  return null;
+      </TouchableOpacity>
+    </View>
+  );
 }
 
 function AnimatedChatBubble({ message }: { message: Message }) {
@@ -145,8 +150,8 @@ function AnimatedChatBubble({ message }: { message: Message }) {
       ]}
     >
       {!isUser && (
-        <View style={styles.guideAvatar}>
-          <Text style={styles.guideAvatarText}>🧭</Text>
+        <View style={styles.avatarWrap}>
+          <GuideAvatar size={32} />
         </View>
       )}
       <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleGuide]}>
@@ -157,14 +162,56 @@ function AnimatedChatBubble({ message }: { message: Message }) {
             resizeMode="cover"
           />
         )}
-        <Text style={[styles.bubbleText, isUser ? styles.bubbleTextUser : styles.bubbleTextGuide]}>
+        <Text style={[isUser ? styles.bubbleTextUser : styles.bubbleTextGuide]}>
           {message.text}
         </Text>
         {message.durationMs != null && (
-          <Text style={styles.bubbleMeta}>{message.durationMs}ms · on-device</Text>
+          <Text style={styles.bubbleMeta}>
+            {message.durationMs}MS · ON DEVICE
+          </Text>
         )}
       </View>
     </Animated.View>
+  );
+}
+
+function TypingIndicator() {
+  const d1 = useRef(new Animated.Value(0.4)).current;
+  const d2 = useRef(new Animated.Value(0.4)).current;
+  const d3 = useRef(new Animated.Value(0.4)).current;
+  useEffect(() => {
+    const make = (v: Animated.Value, delay: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(v, { toValue: 1, duration: 300, useNativeDriver: true }),
+          Animated.timing(v, { toValue: 0.4, duration: 300, useNativeDriver: true }),
+        ])
+      );
+    const a = make(d1, 0);
+    const b = make(d2, 150);
+    const c = make(d3, 300);
+    a.start();
+    b.start();
+    c.start();
+    return () => {
+      a.stop();
+      b.stop();
+      c.stop();
+    };
+  }, [d1, d2, d3]);
+
+  return (
+    <View style={styles.bubbleRow}>
+      <View style={styles.avatarWrap}>
+        <GuideAvatar size={32} />
+      </View>
+      <View style={[styles.bubble, styles.bubbleGuide, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
+        <Animated.View style={[styles.typingDot, { opacity: d1 }]} />
+        <Animated.View style={[styles.typingDot, { opacity: d2 }]} />
+        <Animated.View style={[styles.typingDot, { opacity: d3 }]} />
+      </View>
+    </View>
   );
 }
 
@@ -195,17 +242,24 @@ export default function ChatScreen(props: Props) {
   const listRef = useRef<FlatList<Message>>(null);
   const speakResponsesRef = useRef(speakResponses);
   const streamRef = useRef<StreamHandle | null>(null);
+  const inferringRef = useRef(inferring);
+
+  const [nearbyPois, setNearbyPois] = useState<Poi[]>([]);
+  const [poisLoading, setPoisLoading] = useState(false);
+  const [poiRadiusMeters, setPoiRadiusMeters] = useState<number>(1000);
 
   useEffect(() => {
     speakResponsesRef.current = speakResponses;
   }, [speakResponses]);
 
+  useEffect(() => {
+    inferringRef.current = inferring;
+  }, [inferring]);
+
   const scrollToEnd = useCallback(() => {
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
   }, []);
 
-  // Start a streaming generation for `intent` (text or image), append tokens to a new guide
-  // message as they arrive, and pipe completed sentences to TTS so speech runs alongside text.
   const streamGuideResponse = useCallback(
     async (
       intent: 'text' | 'image',
@@ -236,6 +290,11 @@ export default function ChatScreen(props: Props) {
       });
 
       const start = Date.now();
+
+      if (llmFallbackTaskRef.current) {
+        await llmFallbackTaskRef.current.abort();
+        llmFallbackTaskRef.current = null;
+      }
 
       return new Promise<void>((resolve) => {
         const launch = async () => {
@@ -309,6 +368,7 @@ export default function ChatScreen(props: Props) {
   useEffect(() => {
     return () => {
       streamRef.current?.abort();
+      llmFallbackTaskRef.current?.abort();
       speechService.stop();
     };
   }, []);
@@ -351,6 +411,120 @@ export default function ChatScreen(props: Props) {
     speechService.stop();
     setInferring(false);
   }, []);
+
+  const narratePoi = useCallback(
+    async (poi: Poi) => {
+      const effectiveLocation: GPSContext | string | null =
+        (gps ?? autoGuide.latestGps) ?? manualLocation ?? null;
+      if (!effectiveLocation) return;
+      if (inferringRef.current) {
+        streamRef.current?.abort();
+        streamRef.current = null;
+        speechService.stop();
+      }
+      const cue = `Tell me about ${poi.title}.`;
+      const userMsg: Message = {
+        id: `${Date.now()}-poi-${poi.pageId}`,
+        role: 'user',
+        text: cue,
+      };
+      setMessages((prev) => [...prev, userMsg]);
+      setInferring(true);
+      await streamGuideResponse('text', cue, effectiveLocation);
+    },
+    [gps, autoGuide.latestGps, manualLocation, streamGuideResponse]
+  );
+
+  const llmPoiCacheRef = useRef<Map<string, { at: number; pois: Poi[] }>>(new Map());
+  const llmFallbackTaskRef = useRef<ListPlacesTask | null>(null);
+
+  useEffect(() => {
+    if (!gps) return;
+    let cancelled = false;
+
+    const cellKey = `${gps.latitude.toFixed(3)}_${gps.longitude.toFixed(3)}_${poiRadiusMeters}`;
+    const LLM_CACHE_TTL = 10 * 60 * 1000;
+
+    const haversine = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+      const R = 6371000;
+      const toRad = (d: number) => (d * Math.PI) / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(a));
+    };
+
+    setNearbyPois([]);
+    setPoisLoading(true);
+    poiService
+      .fetchNearby(gps.latitude, gps.longitude, poiRadiusMeters)
+      .then(async (pois) => {
+        if (cancelled) return;
+        if (pois.length > 0) {
+          const sorted = [...pois]
+            .map((p) => ({
+              ...p,
+              distanceMeters: haversine(gps.latitude, gps.longitude, p.latitude, p.longitude),
+            }))
+            .filter((p) => p.distanceMeters <= poiRadiusMeters)
+            .sort((a, b) => a.distanceMeters - b.distanceMeters);
+          if (sorted.length > 0) {
+            setNearbyPois(sorted);
+            return;
+          }
+        }
+
+        const cached = llmPoiCacheRef.current.get(cellKey);
+        if (cached && Date.now() - cached.at < LLM_CACHE_TTL) {
+          setNearbyPois(cached.pois);
+          return;
+        }
+        if (!inferenceService.isLoaded) return;
+        if (inferringRef.current) return;
+        if (llmFallbackTaskRef.current) {
+          await llmFallbackTaskRef.current.abort();
+          llmFallbackTaskRef.current = null;
+        }
+        const task = localGuideService.listNearbyPlaces(gps, poiRadiusMeters);
+        llmFallbackTaskRef.current = task;
+        try {
+          const names = await task.promise;
+          if (cancelled) return;
+          const llmPois: Poi[] = names.map((name, i) => ({
+            pageId: -(Date.now() + i),
+            title: name,
+            latitude: gps.latitude,
+            longitude: gps.longitude,
+            distanceMeters: 0,
+            source: 'llm' as const,
+          }));
+          llmPoiCacheRef.current.set(cellKey, { at: Date.now(), pois: llmPois });
+          setNearbyPois(llmPois);
+        } catch {
+          // aborted
+        } finally {
+          if (llmFallbackTaskRef.current === task) {
+            llmFallbackTaskRef.current = null;
+          }
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPoisLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gps && gps.latitude.toFixed(3), gps && gps.longitude.toFixed(3), poiRadiusMeters]);
+
+  useProximityNarration({
+    gps,
+    pois: nearbyPois,
+    onNarrate: narratePoi,
+    enabled: speakResponses && !inferring,
+  });
 
   const sendMessage = useCallback(async () => {
     const query = input.trim();
@@ -416,39 +590,56 @@ export default function ChatScreen(props: Props) {
     []
   );
 
+  const showTyping =
+    inferring &&
+    (messages[messages.length - 1]?.role !== 'guide' || !messages[messages.length - 1]?.text);
+
   return (
     <KeyboardAvoidingView
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={88}
     >
-      <LocationBanner
-        status={status}
-        gps={gps}
-        errorMessage={errorMessage}
-        onRefresh={refresh}
-        manualLocation={manualLocation}
-        onSetManualLocation={setManualLocation}
-      />
+      <View style={styles.header}>
+        <LocationPill status={status} gps={gps} manualLocation={manualLocation} />
+      </View>
+
+      {(status === 'denied' || status === 'error') && !gps && (
+        <ManualLocationRow
+          onRefresh={refresh}
+          onSetManualLocation={setManualLocation}
+          manualLocation={manualLocation}
+        />
+      )}
 
       {deviceTier === 'low' && !slowDeviceDismissed && (
         <View style={styles.slowDeviceBanner}>
-          <Text style={styles.slowDeviceText}>
-            ⚡  Heads up: this device has limited memory, so the AI guide runs on CPU
-            and responses may be slow. We've tuned the model for this hardware, but
-            expect a noticeable pause before answers start streaming.
+          <Text style={[Type.bodySm, { flex: 1, color: '#8A4B00' }]}>
+            ⚡  Heads up: this device has limited memory, so the AI guide runs on CPU and
+            responses may be slow.
           </Text>
           <TouchableOpacity onPress={() => setSlowDeviceDismissed(true)} style={styles.slowDeviceDismiss}>
-            <Text style={styles.slowDeviceDismissText}>Got it</Text>
+            <Text style={[Type.chip, { color: '#8A4B00' }]}>GOT IT</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      <TopicChips selected={topic} onSelect={setTopic} style={styles.topicsWrapper} />
+      <TopicChips selected={topic} onSelect={setTopic} />
+
+      <RadiusSelector value={poiRadiusMeters} onChange={setPoiRadiusMeters} />
+
+      <AttractionsChips
+        pois={nearbyPois.slice(0, 8)}
+        loading={poisLoading}
+        onSelect={narratePoi}
+        disabled={inferring}
+      />
 
       <View style={styles.controlsRow}>
         <View style={styles.controlItem}>
-          <Text style={styles.controlLabel}>Auto-Guide</Text>
+          <Text style={styles.controlLabel} numberOfLines={1}>
+            AUTO-GUIDE
+          </Text>
           <Switch
             value={autoGuide.enabled}
             onValueChange={autoGuide.toggle}
@@ -457,24 +648,29 @@ export default function ChatScreen(props: Props) {
           />
         </View>
         <View style={styles.controlItem}>
-          <Text style={styles.controlLabel}>Speak</Text>
+          <Text style={styles.controlLabel} numberOfLines={1}>
+            SPEAK
+          </Text>
           <Switch
             value={speakResponses}
-            onValueChange={setSpeakResponses}
+            onValueChange={(next) => {
+              setSpeakResponses(next);
+              if (!next) speechService.stop();
+            }}
             trackColor={{ false: Colors.border, true: Colors.primary }}
             thumbColor={Colors.surface}
           />
         </View>
         {autoGuide.enabled && autoGuide.isSpeaking && (
           <TouchableOpacity style={styles.stopSpeakBtn} onPress={() => speechService.stop()}>
-            <Text style={styles.stopSpeakText}>Stop</Text>
+            <Text style={[Type.chip, { color: '#FFFFFF' }]}>STOP</Text>
           </TouchableOpacity>
         )}
       </View>
 
       {autoGuide.error && (
-        <View style={styles.bannerError}>
-          <Text style={styles.bannerErrorText}>{autoGuide.error}</Text>
+        <View style={styles.errorBanner}>
+          <Text style={[Type.bodySm, { color: Colors.error }]}>{autoGuide.error}</Text>
         </View>
       )}
 
@@ -486,70 +682,68 @@ export default function ChatScreen(props: Props) {
         contentContainerStyle={styles.messageList}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyEmoji}>🧭</Text>
-            <Text style={styles.emptyHint}>
+            <GuideAvatar size={48} />
+            <Text style={[Type.title, { color: Colors.text, marginTop: 16, textAlign: 'center' }]}>
+              {autoGuide.enabled ? 'Auto-guide listening' : 'Ready when you are'}
+            </Text>
+            <Text style={[Type.body, { color: Colors.textSecondary, marginTop: 6, textAlign: 'center' }]}>
               {autoGuide.enabled
-                ? 'Auto-guide active. Walk around and your guide will speak when something interesting is nearby.'
-                : "Ask your local guide anything about what's around you, tap 📷 to take a photo, or enable Auto-Guide."}
+                ? 'Walk around and your guide will speak when something interesting is nearby.'
+                : "Ask about what's near you, tap the camera, or enable Auto-Guide."}
             </Text>
           </View>
         }
       />
 
-      {inferring && (messages[messages.length - 1]?.role !== 'guide' || !messages[messages.length - 1]?.text) && (
-        <View style={styles.typingRow}>
-          <View style={styles.typingBubble}>
-            <ActivityIndicator size="small" color={Colors.secondary} />
-            <Text style={styles.typingText}>Guide is thinking…</Text>
-          </View>
+      {showTyping && <TypingIndicator />}
+
+      <View style={styles.inputRowWrap}>
+        <View style={styles.inputCapsule}>
+          <TouchableOpacity
+            style={[styles.iconBtn, voice.isListening && styles.micBtnActive]}
+            onPress={voice.isListening ? voice.stopListening : voice.startListening}
+            disabled={inferring}
+          >
+            <Text style={styles.iconGlyph}>{voice.isListening ? '⏹' : '🎤'}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.iconBtn} onPress={takePicture} disabled={inferring}>
+            <Text style={styles.iconGlyph}>📷</Text>
+          </TouchableOpacity>
+
+          <TextInput
+            style={styles.input}
+            value={input}
+            onChangeText={setInput}
+            placeholder={voice.isListening ? 'Listening…' : "Ask about what's near you…"}
+            placeholderTextColor={Colors.textTertiary}
+            returnKeyType="send"
+            onSubmitEditing={sendMessage}
+            editable={!inferring && !voice.isListening}
+            multiline={false}
+          />
+          {inferring ? (
+            <TouchableOpacity
+              style={[styles.sendBtn, styles.stopBtn]}
+              onPress={stopStream}
+              accessibilityLabel="Stop generating"
+            >
+              <Text style={styles.sendBtnText}>■</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={[styles.sendBtn, !input.trim() && styles.sendBtnDisabled]}
+              onPress={sendMessage}
+              disabled={!input.trim()}
+              accessibilityLabel="Send"
+            >
+              <Text style={styles.sendBtnText}>↑</Text>
+            </TouchableOpacity>
+          )}
         </View>
-      )}
 
-      <View style={styles.inputRow}>
-        <TouchableOpacity
-          style={[styles.iconBtn, voice.isListening && styles.micBtnActive]}
-          onPress={voice.isListening ? voice.stopListening : voice.startListening}
-          disabled={inferring}
-        >
-          <Text style={styles.iconBtnText}>{voice.isListening ? '⏹' : '🎤'}</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.iconBtn}
-          onPress={takePicture}
-          disabled={inferring}
-        >
-          <Text style={styles.iconBtnText}>📷</Text>
-        </TouchableOpacity>
-
-        <TextInput
-          style={styles.input}
-          value={input}
-          onChangeText={setInput}
-          placeholder={voice.isListening ? 'Listening…' : 'Ask about nearby places…'}
-          placeholderTextColor={Colors.textTertiary}
-          returnKeyType="send"
-          onSubmitEditing={sendMessage}
-          editable={!inferring && !voice.isListening}
-          multiline={false}
-        />
-        {inferring ? (
-          <TouchableOpacity
-            style={[styles.sendBtn, styles.stopBtn]}
-            onPress={stopStream}
-            accessibilityLabel="Stop generating"
-          >
-            <Text style={styles.sendBtnText}>■</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            style={[styles.sendBtn, !input.trim() && styles.sendBtnDisabled]}
-            onPress={sendMessage}
-            disabled={!input.trim()}
-            accessibilityLabel="Send"
-          >
-            <Text style={styles.sendBtnText}>↑</Text>
-          </TouchableOpacity>
+        {inferring && (
+          <ActivityIndicator size="small" color={Colors.secondary} style={{ marginLeft: 8 }} />
         )}
       </View>
     </KeyboardAvoidingView>
@@ -558,79 +752,58 @@ export default function ChatScreen(props: Props) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.background },
-  bannerReady: {
-    backgroundColor: Colors.successLight,
-    paddingVertical: 7,
+  header: {
     paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 6,
     flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#BBF7D0',
+    justifyContent: 'flex-end',
   },
-  bannerReadyText: { fontSize: 12, color: Colors.success, fontWeight: '500' },
-  bannerLoading: {
-    backgroundColor: Colors.warningLight,
-    paddingVertical: 7,
-    paddingHorizontal: 14,
+  locationPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#FDE68A',
-  },
-  bannerLoadingText: { fontSize: 12, color: Colors.warning, fontWeight: '500' },
-  bannerError: {
-    backgroundColor: Colors.errorLight,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#FECACA',
-  },
-  bannerErrorFallback: {
-    backgroundColor: Colors.errorLight,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#FECACA',
-  },
-  bannerManual: {
-    backgroundColor: '#FFF8E1',
-    paddingVertical: 7,
-    paddingHorizontal: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#FDE68A',
-  },
-  bannerManualText: { fontSize: 12, color: '#92400E', fontWeight: '500' },
-  locationInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  locationInput: {
-    flex: 1,
     backgroundColor: Colors.surface,
-    borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 5,
+    borderRadius: Radii.md,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+    gap: 6,
+    ...Shadows.softOutset,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  manualRow: {
+    backgroundColor: Colors.errorLight,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(198,70,70,0.25)',
+  },
+  manualInput: {
+    flex: 1,
+    backgroundColor: Colors.surface,
+    borderRadius: Radii.md,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     fontSize: 13,
-    color: Colors.textPrimary,
-    borderWidth: StyleSheet.hairlineWidth,
+    color: Colors.text,
+    borderWidth: 1,
     borderColor: Colors.border,
-    marginRight: 6,
   },
-  locationSetBtn: {
+  manualSet: {
     backgroundColor: Colors.primary,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    borderRadius: Radii.md,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
   },
-  locationSetBtnDisabled: { backgroundColor: Colors.disabled },
-  locationSetBtnText: { color: Colors.surface, fontWeight: '600', fontSize: 13 },
-  bannerErrorText: { fontSize: 12, color: Colors.error, fontWeight: '500' },
   slowDeviceBanner: {
-    backgroundColor: '#FFF4E5',
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    backgroundColor: '#FBEBD0',
+    borderBottomWidth: 1,
     borderBottomColor: '#F4C27A',
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -638,180 +811,172 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  slowDeviceText: {
-    flex: 1,
-    fontSize: 12,
-    color: '#8A4B00',
-    lineHeight: 16,
-  },
   slowDeviceDismiss: {
     backgroundColor: '#F4C27A',
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 8,
-  },
-  slowDeviceDismissText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#8A4B00',
-  },
-  topicsWrapper: {
-    backgroundColor: Colors.surface,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.borderLight ?? Colors.border,
+    borderRadius: Radii.md,
   },
   controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 8,
-    backgroundColor: Colors.surface,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border,
+    backgroundColor: Colors.background,
+    gap: 14,
+    flexWrap: 'wrap',
   },
   controlItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 18,
+    gap: 6,
+    flexShrink: 0,
   },
   controlLabel: {
-    fontSize: 13,
+    fontFamily: 'Nunito_700Bold',
+    fontSize: 10,
+    letterSpacing: 0.8,
     color: Colors.textSecondary,
-    marginRight: 7,
-    fontWeight: '500',
+    flexShrink: 0,
   },
   stopSpeakBtn: {
     backgroundColor: Colors.error,
-    borderRadius: 12,
+    borderRadius: Radii.md,
     paddingHorizontal: 12,
-    paddingVertical: 5,
+    paddingVertical: 6,
+    marginLeft: 'auto',
   },
-  stopSpeakText: { color: Colors.surface, fontSize: 12, fontWeight: '600' },
-  messageList: { padding: 16, paddingBottom: 8 },
+  errorBanner: {
+    backgroundColor: Colors.errorLight,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(198,70,70,0.25)',
+  },
+  messageList: {
+    padding: 14,
+    paddingTop: 10,
+    paddingBottom: 8,
+    gap: 12,
+  },
   emptyContainer: {
     alignItems: 'center',
-    marginTop: 80,
+    marginTop: 60,
     paddingHorizontal: 32,
   },
-  emptyEmoji: { fontSize: 48, marginBottom: 16 },
-  emptyHint: {
-    textAlign: 'center',
-    color: Colors.textSecondary,
-    fontSize: 15,
-    lineHeight: 22,
+  bubbleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    marginBottom: 10,
   },
-  bubbleRow: { marginVertical: 5, flexDirection: 'row', alignItems: 'flex-end' },
   bubbleRowUser: { justifyContent: 'flex-end' },
   bubbleRowGuide: { justifyContent: 'flex-start' },
-  guideAvatar: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: Colors.secondaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 8,
-    borderWidth: 1,
-    borderColor: Colors.guideBubbleBorder,
-  },
-  guideAvatarText: { fontSize: 16 },
+  avatarWrap: { marginRight: 8 },
   bubble: {
-    maxWidth: '78%',
-    borderRadius: 18,
+    maxWidth: '82%',
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 11,
   },
   bubbleUser: {
-    backgroundColor: Colors.userBubble,
+    backgroundColor: Colors.primary,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderBottomLeftRadius: 18,
     borderBottomRightRadius: 4,
-    shadowColor: Colors.primary,
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    shadowColor: Colors.primaryDark,
+    shadowOffset: { width: 2, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 3,
   },
   bubbleGuide: {
-    backgroundColor: Colors.guideBubble,
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
     borderBottomLeftRadius: 4,
+    borderBottomRightRadius: 18,
     borderWidth: 1,
-    borderColor: Colors.guideBubbleBorder,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
+    borderColor: Colors.borderLight,
+    ...Shadows.softOutset,
   },
   bubbleImage: {
     width: 200,
     height: 150,
-    borderRadius: 12,
+    borderRadius: Radii.md,
     marginBottom: 8,
   },
-  bubbleText: { fontSize: 15, lineHeight: 21 },
-  bubbleTextUser: { color: Colors.userBubbleText },
-  bubbleTextGuide: { color: Colors.guideBubbleText },
-  bubbleMeta: { fontSize: 10, color: Colors.textTertiary, marginTop: 4, opacity: 0.8 },
-  typingRow: {
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    alignItems: 'flex-start',
+  bubbleTextUser: {
+    ...Type.body,
+    color: '#FFFFFF',
   },
-  typingBubble: {
+  bubbleTextGuide: {
+    ...Type.body,
+    color: Colors.text,
+  },
+  bubbleMeta: {
+    ...Type.metaUpper,
+    color: Colors.textTertiary,
+    marginTop: 6,
+    opacity: 0.9,
+  },
+  typingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.primary,
+  },
+  inputRowWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.guideBubble,
-    borderRadius: 16,
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: Colors.guideBubbleBorder,
+    paddingTop: 10,
+    paddingBottom: 14,
+    backgroundColor: Colors.background,
   },
-  typingText: { marginLeft: 8, fontSize: 13, color: Colors.secondary, fontWeight: '500' },
-  inputRow: {
+  inputCapsule: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
     backgroundColor: Colors.surface,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.border,
+    borderRadius: Radii.xl,
+    paddingLeft: 8,
+    paddingRight: 6,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+    gap: 4,
+    ...Shadows.softOutset,
   },
   iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.micInactive,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: Colors.background,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
   },
   micBtnActive: {
-    backgroundColor: Colors.micActive,
+    backgroundColor: Colors.error,
   },
-  iconBtnText: { fontSize: 18 },
+  iconGlyph: { fontSize: 14 },
   input: {
     flex: 1,
-    backgroundColor: Colors.background,
-    borderRadius: 22,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    fontSize: 15,
-    color: Colors.textPrimary,
-    marginRight: 8,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    paddingHorizontal: 6,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: Colors.text,
   },
   sendBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: Colors.primary,
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
+    shadowColor: Colors.primaryDark,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
     elevation: 3,
   },
   sendBtnDisabled: {
@@ -820,8 +985,13 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   stopBtn: {
-    backgroundColor: Colors.error ?? '#d33',
-    shadowColor: Colors.error ?? '#d33',
+    backgroundColor: Colors.error,
+    shadowColor: '#7F2424',
   },
-  sendBtnText: { color: Colors.surface, fontWeight: '700', fontSize: 20, lineHeight: 24 },
+  sendBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 16,
+    lineHeight: 18,
+  },
 });

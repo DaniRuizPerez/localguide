@@ -278,15 +278,24 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
             return
         }
 
-        try {
-            val contents = buildContents(prompt, imagePath)
-            currentEngine.createConversation().use { conversation ->
-                val response = conversation.sendMessage(contents)
-                val text = extractText(response)
-                promise.resolve(text)
+        // The engine only allows one live Session OR Conversation at a time —
+        // starting a Conversation while a streaming Session is open throws
+        // "FAILED_PRECONDITION: a session already exists". Aborting the active
+        // stream synchronously closes whatever it held, and dispatching the
+        // actual work through inferenceExecutor serializes this call behind
+        // any in-flight streaming generation (the executor is single-threaded).
+        abortActiveStream()
+        inferenceExecutor.execute {
+            try {
+                val contents = buildContents(prompt, imagePath)
+                currentEngine.createConversation().use { conversation ->
+                    val response = conversation.sendMessage(contents)
+                    val text = extractText(response)
+                    promise.resolve(text)
+                }
+            } catch (e: Exception) {
+                promise.reject("INFERENCE_ERROR", "Inference failed: ${e.message}", e)
             }
-        } catch (e: Exception) {
-            promise.reject("INFERENCE_ERROR", "Inference failed: ${e.message}", e)
         }
     }
 
@@ -324,6 +333,8 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
         requestId: String,
         promise: Promise,
     ) {
+        // Build inputs outside the executor so we can fail fast with a reject
+        // — this is just string manipulation, no engine interaction.
         val inputs: List<InputData> = try {
             buildTextInputData(prompt)
         } catch (e: Exception) {
@@ -331,100 +342,100 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
             return
         }
 
-        val session: Session = try {
-            // topK is tier-scaled: fewer softmax candidates = faster per-token sampling,
-            // measurable on CPU and a small win on GPU. Low-RAM tier uses topK=10 for
-            // aggressive speed, high-tier uses topK=40 for richer output. topP/temp stay
-            // near defaults so quality doesn't collapse.
-            engine.createSession(
-                SessionConfig(SamplerConfig(topK = activeTier.topK, topP = 0.95, temperature = 0.8, seed = 0))
-            )
-        } catch (e: Exception) {
-            promise.reject("INFERENCE_ERROR", "Failed to create session: ${e.message}", e)
-            return
-        }
-
-        val handle = StreamHandle(
-            requestId = requestId,
-            cancel = { try { session.cancelProcess() } catch (_: Throwable) {} },
-            close = { try { session.close() } catch (_: Throwable) {} },
-        )
-        activeStream.set(handle)
-        promise.resolve(null)
-
+        // All engine interaction (createSession + generateContentStream) runs
+        // on the single-threaded executor so it serializes behind any in-flight
+        // runInference/runInferenceStream call. Creating the session on the
+        // module thread (the previous design) raced with executor tasks that
+        // hadn't finished unwinding from generate, causing
+        // "FAILED_PRECONDITION: a session already exists".
         inferenceExecutor.execute {
-            val callback = object : ResponseCallback {
-                // Gemma decodes its end-of-turn marker to the literal string "<end_of_turn>".
-                // Depending on tokenizer behaviour, it can arrive either as one whole chunk
-                // or split across several onNext calls (e.g. "<end", "_of_turn>"). We keep
-                // a sliding buffer of the last (EOS.length - 1) chars held back so a partial
-                // match at the tail is never emitted; when the full marker assembles we
-                // trim it, emit what came before, cancel the session, and stop.
-                private val pending = StringBuilder()
-                private var eosSeen = false
-
-                override fun onNext(response: String) {
-                    if (eosSeen) return
-                    if (activeStream.get()?.requestId != requestId) return
-                    if (response.isEmpty()) return
-
-                    pending.append(response)
-
-                    val eosIdx = pending.indexOf(EOS_TOKEN)
-                    if (eosIdx != -1) {
-                        eosSeen = true
-                        val before = pending.substring(0, eosIdx)
-                        if (before.isNotEmpty()) emitToken(requestId, before)
-                        pending.setLength(0)
-                        // Settle the stream ourselves before cancelling so a cancel-
-                        // triggered onError/onDone below is swallowed by the
-                        // compareAndSet (handle != activeStream → no-op).
-                        if (activeStream.compareAndSet(handle, null)) {
-                            try { session.cancelProcess() } catch (_: Throwable) {}
-                            handle.close()
-                            emitDone(requestId)
-                        }
-                        return
-                    }
-
-                    // Hold back the last (EOS.length - 1) chars in case they're the start
-                    // of a cross-chunk EOS; emit everything before that.
-                    val holdback = EOS_TOKEN.length - 1
-                    val safeLen = pending.length - holdback
-                    if (safeLen > 0) {
-                        emitToken(requestId, pending.substring(0, safeLen))
-                        pending.delete(0, safeLen)
-                    }
-                }
-
-                override fun onDone() {
-                    // No EOS marker appeared — flush any held-back tail so we don't
-                    // truncate the last few chars of a natural completion.
-                    if (!eosSeen && pending.isNotEmpty()) {
-                        emitToken(requestId, pending.toString())
-                        pending.setLength(0)
-                    }
-                    if (activeStream.compareAndSet(handle, null)) {
-                        handle.close()
-                        emitDone(requestId)
-                    }
-                }
-
-                override fun onError(throwable: Throwable) {
-                    if (activeStream.compareAndSet(handle, null)) {
-                        handle.close()
-                        emitError(requestId, throwable.message ?: throwable.javaClass.simpleName)
-                    }
-                }
+            val session: Session = try {
+                engine.createSession(
+                    SessionConfig(SamplerConfig(topK = activeTier.topK, topP = 0.95, temperature = 0.8, seed = 0))
+                )
+            } catch (e: Exception) {
+                promise.reject("INFERENCE_ERROR", "Failed to create session: ${e.message}", e)
+                return@execute
             }
 
+            val handle = StreamHandle(
+                requestId = requestId,
+                cancel = { try { session.cancelProcess() } catch (_: Throwable) {} },
+                close = {},  // close happens in the finally block below, on this same thread.
+            )
+            activeStream.set(handle)
+            promise.resolve(null)
+
             try {
-                session.generateContentStream(inputs, callback)
-            } catch (e: Throwable) {
-                if (activeStream.compareAndSet(handle, null)) {
-                    handle.close()
-                    emitError(requestId, e.message ?: e.javaClass.simpleName)
+                val callback = object : ResponseCallback {
+                    // Gemma decodes its end-of-turn marker to the literal string "<end_of_turn>".
+                    // Depending on tokenizer behaviour, it can arrive either as one whole chunk
+                    // or split across several onNext calls (e.g. "<end", "_of_turn>"). We keep
+                    // a sliding buffer of the last (EOS.length - 1) chars held back so a partial
+                    // match at the tail is never emitted; when the full marker assembles we
+                    // trim it, emit what came before, cancel the session, and stop.
+                    private val pending = StringBuilder()
+                    private var eosSeen = false
+
+                    override fun onNext(response: String) {
+                        if (eosSeen) return
+                        if (activeStream.get()?.requestId != requestId) return
+                        if (response.isEmpty()) return
+
+                        pending.append(response)
+
+                        val eosIdx = pending.indexOf(EOS_TOKEN)
+                        if (eosIdx != -1) {
+                            eosSeen = true
+                            val before = pending.substring(0, eosIdx)
+                            if (before.isNotEmpty()) emitToken(requestId, before)
+                            pending.setLength(0)
+                            if (activeStream.compareAndSet(handle, null)) {
+                                try { session.cancelProcess() } catch (_: Throwable) {}
+                                emitDone(requestId)
+                            }
+                            return
+                        }
+
+                        val holdback = EOS_TOKEN.length - 1
+                        val safeLen = pending.length - holdback
+                        if (safeLen > 0) {
+                            emitToken(requestId, pending.substring(0, safeLen))
+                            pending.delete(0, safeLen)
+                        }
+                    }
+
+                    override fun onDone() {
+                        if (!eosSeen && pending.isNotEmpty()) {
+                            emitToken(requestId, pending.toString())
+                            pending.setLength(0)
+                        }
+                        if (activeStream.compareAndSet(handle, null)) {
+                            emitDone(requestId)
+                        }
+                    }
+
+                    override fun onError(throwable: Throwable) {
+                        if (activeStream.compareAndSet(handle, null)) {
+                            emitError(requestId, throwable.message ?: throwable.javaClass.simpleName)
+                        }
+                    }
                 }
+
+                try {
+                    session.generateContentStream(inputs, callback)
+                } catch (e: Throwable) {
+                    if (activeStream.compareAndSet(handle, null)) {
+                        emitError(requestId, e.message ?: e.javaClass.simpleName)
+                    }
+                }
+            } finally {
+                // Close on the executor thread, after generate has fully returned.
+                // This is the one-and-only place the session gets closed, which
+                // guarantees LiteRT-LM sees the close on the same thread that
+                // created the session and before the next executor task runs.
+                try { session.close() } catch (_: Throwable) {}
+                activeStream.compareAndSet(handle, null)
             }
         }
     }
@@ -436,33 +447,40 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
         imagePath: String,
         promise: Promise,
     ) {
-        val contents: Contents = try {
-            buildContents(prompt, imagePath)
-        } catch (e: Exception) {
-            promise.reject("INFERENCE_ERROR", "Failed to build contents: ${e.message}", e)
-            return
-        }
-
-        val conversation: Conversation = try {
-            engine.createConversation()
-        } catch (e: Exception) {
-            promise.reject("INFERENCE_ERROR", "Failed to create conversation: ${e.message}", e)
-            return
-        }
-
-        val handle = StreamHandle(
-            requestId = requestId,
-            cancel = { try { conversation.cancelProcess() } catch (_: Throwable) {} },
-            close = { try { conversation.close() } catch (_: Throwable) {} },
-        )
-        activeStream.set(handle)
-        promise.resolve(null)
-
+        // See startSessionStream for the rationale — createConversation must
+        // run on the executor thread to serialize with any in-flight engine
+        // work, otherwise the engine slot collides.
         inferenceExecutor.execute {
+            val contents: Contents = try {
+                buildContents(prompt, imagePath)
+            } catch (e: Exception) {
+                promise.reject("INFERENCE_ERROR", "Failed to build contents: ${e.message}", e)
+                return@execute
+            }
+
+            val conversation: Conversation = try {
+                engine.createConversation()
+            } catch (e: Exception) {
+                promise.reject("INFERENCE_ERROR", "Failed to create conversation: ${e.message}", e)
+                return@execute
+            }
+
+            // sendMessageAsync is non-blocking, so we can't close the conversation
+            // in a try/finally around the call — that would close before the
+            // async callbacks fire. Instead the conversation closes itself when
+            // onDone / onError land (LiteRT-LM fires those on its own callback
+            // thread AFTER the underlying generation has fully released the
+            // engine slot, so close from there is safe).
+            val handle = StreamHandle(
+                requestId = requestId,
+                cancel = { try { conversation.cancelProcess() } catch (_: Throwable) {} },
+                close = { try { conversation.close() } catch (_: Throwable) {} },
+            )
+            activeStream.set(handle)
+            promise.resolve(null)
+
             // MessageCallback.onMessage fires per-chunk with the incremental delta
             // (not the cumulative message), so emit extractText(message) directly.
-            // Diffing against a running offset — the natural cumulative-stream pattern —
-            // slices each chunk and produces garbled output.
             val callback = object : MessageCallback {
                 override fun onMessage(message: Message) {
                     if (activeStream.get()?.requestId != requestId) return
@@ -546,6 +564,12 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
     private fun abortActiveStream() {
         val handle = activeStream.getAndSet(null) ?: return
         handle.cancel()
+        // handle.close is a no-op for Session streams (the executor's finally
+        // closes them on the thread that owns them — cross-thread close was
+        // what caused "FAILED_PRECONDITION: a session already exists"). For
+        // Conversation streams it still does the real close because the
+        // sendMessageAsync callback may not fire after cancel in every case
+        // and we'd otherwise leak the conversation.
         handle.close()
     }
 

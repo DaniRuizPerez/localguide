@@ -136,7 +136,7 @@ describe('Characterization: ChatScreen — initial render', () => {
     const { getByPlaceholderText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
-    expect(getByPlaceholderText('Ask about nearby places…')).toBeTruthy();
+    expect(getByPlaceholderText("Ask about what's near you…")).toBeTruthy();
   });
 
   it('renders a Send button', () => {
@@ -150,14 +150,14 @@ describe('Characterization: ChatScreen — initial render', () => {
     const { getByText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
-    expect(getByText('Auto-Guide')).toBeTruthy();
+    expect(getByText('AUTO-GUIDE')).toBeTruthy();
   });
 
   it('renders the Speak toggle label', () => {
     const { getByText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
-    expect(getByText('Speak')).toBeTruthy();
+    expect(getByText('SPEAK')).toBeTruthy();
   });
 
   it('shows empty-state hint when no messages', () => {
@@ -165,7 +165,7 @@ describe('Characterization: ChatScreen — initial render', () => {
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
     // Both the empty hint and Auto-Guide label contain these words; at least one match expected
-    expect(getAllByText(/Ask your local guide|Auto-Guide/i).length).toBeGreaterThan(0);
+    expect(getAllByText(/Ask about what's near you|AUTO-GUIDE/i).length).toBeGreaterThan(0);
   });
 
   it('Send button does not trigger inference when input is empty', async () => {
@@ -193,7 +193,7 @@ describe('Characterization: ChatScreen — sending a message', () => {
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
 
-    const input = getByPlaceholderText('Ask about nearby places…');
+    const input = getByPlaceholderText("Ask about what's near you…");
     fireEvent.changeText(input, 'What is near me?');
     await act(async () => {
       fireEvent.press(getByText('↑'));
@@ -207,7 +207,7 @@ describe('Characterization: ChatScreen — sending a message', () => {
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
 
-    const input = getByPlaceholderText('Ask about nearby places…');
+    const input = getByPlaceholderText("Ask about what's near you…");
     fireEvent.changeText(input, 'What is near me?');
     fireEvent.press(getByText('↑'));
 
@@ -219,7 +219,7 @@ describe('Characterization: ChatScreen — sending a message', () => {
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
 
-    fireEvent.changeText(getByPlaceholderText('Ask about nearby places…'), 'test query');
+    fireEvent.changeText(getByPlaceholderText("Ask about what's near you…"), 'test query');
     await act(async () => { fireEvent.press(getByText('↑')); });
 
     expect(mockAsk).toHaveBeenCalledWith(
@@ -236,7 +236,7 @@ describe('Characterization: ChatScreen — sending a message', () => {
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
 
-    fireEvent.changeText(getByPlaceholderText('Ask about nearby places…'), 'speak test');
+    fireEvent.changeText(getByPlaceholderText("Ask about what's near you…"), 'speak test');
     await act(async () => { fireEvent.press(getByText('↑')); });
 
     await waitFor(() =>
@@ -251,7 +251,7 @@ describe('Characterization: ChatScreen — sending a message', () => {
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
 
-    fireEvent.changeText(getByPlaceholderText('Ask about nearby places…'), 'crash test');
+    fireEvent.changeText(getByPlaceholderText("Ask about what's near you…"), 'crash test');
     fireEvent.press(getByText('↑'));
 
     expect(await findByText(/something went wrong/i)).toBeTruthy();
@@ -262,7 +262,7 @@ describe('Characterization: ChatScreen — sending a message', () => {
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
 
-    const input = getByPlaceholderText('Ask about nearby places…');
+    const input = getByPlaceholderText("Ask about what's near you…");
     fireEvent.changeText(input, 'clear me');
     await act(async () => { fireEvent.press(getByText('↑')); });
 
@@ -286,7 +286,7 @@ describe('Characterization: ChatScreen — no location available', () => {
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
 
-    fireEvent.changeText(getByPlaceholderText('Ask about nearby places…'), 'where am I?');
+    fireEvent.changeText(getByPlaceholderText("Ask about what's near you…"), 'where am I?');
     fireEvent.press(getByText('↑'));
 
     const matches = await findAllByText(/Location not available yet|GPS unavailable/i);
@@ -304,7 +304,7 @@ describe('Characterization: ChatScreen — message rendering', () => {
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
 
-    const input = getByPlaceholderText('Ask about nearby places…');
+    const input = getByPlaceholderText("Ask about what's near you…");
     fireEvent.changeText(input, 'Hello');
 
     await act(async () => { fireEvent.press(getByText('↑')); });

@@ -1,48 +1,57 @@
+// "Soft Tactile" palette for Local Guide.
+// Warm peach + cream claymorphic direction.
 export const Colors = {
-  // Brand
-  primary: '#E8750A',
-  primaryLight: '#FFF3E0',
-  primaryDark: '#B85A00',
-  secondary: '#1E7A6E',
-  secondaryLight: '#EFF8F7',
+  // ─── Brand ─────────────────────────────────────────────
+  primary: '#E8845C',
+  primaryLight: '#FBE4D7',
+  primaryDark: '#B8623A',
 
-  // Backgrounds
-  background: '#F8F5F0',
-  surface: '#FFFFFF',
-  surfaceAlt: '#F0EBE4',
+  // ─── Secondary (sage) ──────────────────────────────────
+  secondary: '#6B8E7A',
+  secondaryLight: '#DDE8DF',
 
-  // Text
-  textPrimary: '#1A1210',
-  textSecondary: '#6B7280',
-  textTertiary: '#9CA3AF',
+  // ─── Neutrals (warm cream scale) ───────────────────────
+  background: '#F5E8D8',
+  surface: '#FFF7EB',
+  surfaceAlt: '#EBDCC4',
+  border: '#E0CDB0',
+  borderLight: '#EFE0C5',
 
-  // Status
-  success: '#16A34A',
-  successLight: '#DCFCE7',
-  error: '#DC2626',
-  errorLight: '#FEE2E2',
-  warning: '#D97706',
-  warningLight: '#FEF3C7',
+  // ─── Text ──────────────────────────────────────────────
+  text: '#3D2B1F',
+  textPrimary: '#3D2B1F',
+  textSecondary: '#8A7260',
+  textTertiary: '#BFA890',
 
-  // Borders
-  border: '#E5DDD4',
-  borderLight: '#F0EAE2',
+  // ─── Status ────────────────────────────────────────────
+  success: '#4EA374',
+  successLight: '#DDE8DF',
+  error: '#C64646',
+  errorLight: '#F6D8D8',
+  warning: '#E8A84E',
+  warningLight: '#FBEBD0',
 
-  // Chat bubbles
-  userBubble: '#E8750A',
+  // ─── Map overlays ──────────────────────────────────────
+  mapBackground: '#F5EBDF',
+  mapPark: '#C6DBB5',
+  mapWater: '#BFD6E0',
+  mapStreet: '#E8D5BE',
+  mapParkLabel: '#4E6B3B',
+
+  // ─── Legacy aliases (keep existing imports working) ────
+  userBubble: '#E8845C',
   userBubbleText: '#FFFFFF',
-  guideBubble: '#EFF8F7',
-  guideBubbleText: '#1A1210',
-  guideBubbleBorder: '#C5E8E4',
+  guideBubble: '#FFF7EB',
+  guideBubbleText: '#3D2B1F',
+  guideBubbleBorder: '#EFE0C5',
+  tabActive: '#E8845C',
+  tabInactive: '#BFA890',
+  tabBar: '#FFF7EB',
+  disabled: '#EBDCC4',
+  disabledText: '#BFA890',
+  micActive: '#C64646',
+  micInactive: '#EBDCC4',
 
-  // Tab bar
-  tabActive: '#E8750A',
-  tabInactive: '#9CA3AF',
-  tabBar: '#FFFFFF',
-
-  // Interactive
-  disabled: '#D1CBC3',
-  disabledText: '#9CA3AF',
-  micActive: '#DC2626',
-  micInactive: '#F0EBE4',
+  white: '#FFFFFF',
+  black: '#000000',
 } as const;
