@@ -7,10 +7,9 @@ import LiteRTModule, {
   type LiteRTErrorEvent,
   type LiteRTTokenEvent,
 } from '../native/LiteRTModule';
-import { MODEL_LOCAL_PATH } from './ModelDownloadService';
+import { modelDownloadService } from './ModelDownloadService';
 import * as FileSystem from 'expo-file-system/legacy';
 
-const MODEL_ASSET_NAME = 'gemma3-1b-it-int4.task';
 const DEFAULT_MAX_TOKENS = 512;
 
 export interface InferenceOptions {
@@ -52,14 +51,17 @@ export class InferenceService {
 
     this.loading = true;
     try {
-      const localInfo = await FileSystem.getInfoAsync(MODEL_LOCAL_PATH);
-      if (localInfo.exists && localInfo.size !== undefined && localInfo.size > 0) {
-        await LiteRTModule.loadModelFromPath(MODEL_LOCAL_PATH);
-        console.log('[InferenceService] Gemma model loaded from local storage');
-      } else {
-        await LiteRTModule.loadModel(MODEL_ASSET_NAME);
-        console.log('[InferenceService] Gemma model loaded from bundled assets');
+      const localPath = modelDownloadService.localPath;
+      const profile = modelDownloadService.profile;
+      const localInfo = await FileSystem.getInfoAsync(localPath);
+      if (!localInfo.exists || localInfo.size === undefined || localInfo.size === 0) {
+        throw new Error(
+          `Model file missing at ${localPath}. Expected ${profile.displayName}. ` +
+            `Open the app through the download screen to fetch it.`
+        );
       }
+      await LiteRTModule.loadModelFromPath(localPath, profile.multimodal);
+      console.log(`[InferenceService] Loaded ${profile.displayName} from ${localPath}`);
       this.loaded = true;
     } finally {
       this.loading = false;
@@ -159,6 +161,16 @@ export class InferenceService {
 
   get isLoaded(): boolean {
     return this.loaded;
+  }
+
+  async getDeviceTier(): Promise<{
+    tier: 'low' | 'mid' | 'high';
+    cpuThreads: number;
+    attemptGpu: boolean;
+    totalRamMb: number;
+  } | null> {
+    if (!LiteRTModule) return null;
+    return LiteRTModule.getDeviceTier();
   }
 
   private getEmitter(): NativeEventEmitter {

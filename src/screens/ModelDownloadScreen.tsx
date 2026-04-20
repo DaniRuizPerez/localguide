@@ -10,7 +10,6 @@ import {
 import {
   modelDownloadService,
   DownloadProgress,
-  MODEL_DOWNLOAD_URL,
 } from '../services/ModelDownloadService';
 import { Colors } from '../theme/colors';
 
@@ -124,7 +123,7 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
       <View style={styles.infoBox}>
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Model</Text>
-          <Text style={styles.infoValue}>Gemma 4 E2B IT (INT4)</Text>
+          <Text style={styles.infoValue}>{modelDownloadService.profile.displayName}</Text>
         </View>
         <View style={styles.infoDivider} />
         <View style={styles.infoRow}>
@@ -133,7 +132,9 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
             <ActivityIndicator size="small" color={Colors.primary} />
           ) : (
             <Text style={styles.infoValue}>
-              {remoteSize != null ? formatBytes(remoteSize) : 'Unknown'}
+              {remoteSize != null
+                ? formatBytes(remoteSize)
+                : `~${modelDownloadService.profile.approximateSizeMb} MB`}
             </Text>
           )}
         </View>
@@ -141,7 +142,7 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Source</Text>
           <Text style={styles.infoValueSmall} numberOfLines={1}>
-            {MODEL_DOWNLOAD_URL}
+            {modelDownloadService.profile.url}
           </Text>
         </View>
       </View>

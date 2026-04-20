@@ -79,7 +79,9 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
                     }
                 }
             }
-            loadEngine(modelFile.absolutePath)
+            // Legacy asset-loader path: assumes the bundled model is multimodal
+            // (Gemma 4 E2B). Runtime downloads always go through loadModelFromPath.
+            loadEngine(modelFile.absolutePath, multimodal = true)
             promise.resolve(null)
         } catch (e: Exception) {
             promise.reject("LOAD_ERROR", "Failed to load LiteRT-LM model: ${e.message}", e)
@@ -87,7 +89,7 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
     }
 
     @ReactMethod
-    fun loadModelFromPath(absolutePath: String, promise: Promise) {
+    fun loadModelFromPath(absolutePath: String, multimodal: Boolean, promise: Promise) {
         try {
             val cleanPath = if (absolutePath.startsWith("file://")) {
                 absolutePath.substring(7)
@@ -96,7 +98,7 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
             }
 
             val file = File(cleanPath)
-            android.util.Log.d("LiteRTModule", "Loading model from: $cleanPath")
+            android.util.Log.d("LiteRTModule", "Loading model from: $cleanPath (multimodal=$multimodal)")
             android.util.Log.d("LiteRTModule", "File exists: ${file.exists()}, size: ${file.length()} bytes")
 
             if (!file.exists()) {
@@ -109,7 +111,7 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
                 return
             }
 
-            loadEngine(cleanPath)
+            loadEngine(cleanPath, multimodal)
             promise.resolve(null)
         } catch (e: Exception) {
             android.util.Log.e("LiteRTModule", "Load error", e)
@@ -117,7 +119,7 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
         }
     }
 
-    private fun loadEngine(modelPath: String) {
+    private fun loadEngine(modelPath: String, multimodal: Boolean) {
         engine?.close()
 
         val totalRamBytes = deviceTotalRamBytes()
@@ -138,32 +140,53 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
             .coerceAtLeast(2)
             .coerceAtMost(tier.cpuThreads)
 
-        fun cpuConfig() = EngineConfig(
-            modelPath = modelPath,
-            backend = Backend.CPU(cpuThreads),
-            visionBackend = Backend.CPU(),
-            maxNumImages = 1,
-            maxNumTokens = tier.maxTokens,
-            cacheDir = cacheDir,
-        )
+        // Text-only models (e.g. Gemma 3 1B) have no TF_LITE_VISION_ENCODER
+        // section, so configuring visionBackend / maxNumImages makes the runtime
+        // fail with "NOT_FOUND: TF_LITE_VISION_ENCODER not found in the model."
+        // Only wire vision when the caller says the model actually has it.
+        fun cpuConfig() = if (multimodal) {
+            EngineConfig(
+                modelPath = modelPath,
+                backend = Backend.CPU(cpuThreads),
+                visionBackend = Backend.CPU(),
+                maxNumImages = 1,
+                maxNumTokens = tier.maxTokens,
+                cacheDir = cacheDir,
+            )
+        } else {
+            EngineConfig(
+                modelPath = modelPath,
+                backend = Backend.CPU(cpuThreads),
+                maxNumTokens = tier.maxTokens,
+                cacheDir = cacheDir,
+            )
+        }
 
         android.util.Log.i(
             "LiteRTModule",
             "Device RAM: ${totalRamBytes / (1024 * 1024)} MB; " +
                 "tier=${tier.tierName} maxTokens=${tier.maxTokens} " +
-                "topK=${tier.topK} cpuThreads=$cpuThreads attemptGpu=${tier.attemptGpu}"
+                "topK=${tier.topK} cpuThreads=$cpuThreads attemptGpu=${tier.attemptGpu} " +
+                "multimodal=$multimodal"
         )
 
         engine = if (tier.attemptGpu) {
             try {
-                val gpuEngine = Engine(EngineConfig(
-                    modelPath = modelPath,
-                    backend = Backend.GPU(),
-                    visionBackend = Backend.CPU(),
-                    maxNumImages = 1,
-                    maxNumTokens = tier.maxTokens,
-                    cacheDir = cacheDir,
-                ))
+                val gpuEngine = Engine(
+                    if (multimodal) EngineConfig(
+                        modelPath = modelPath,
+                        backend = Backend.GPU(),
+                        visionBackend = Backend.CPU(),
+                        maxNumImages = 1,
+                        maxNumTokens = tier.maxTokens,
+                        cacheDir = cacheDir,
+                    ) else EngineConfig(
+                        modelPath = modelPath,
+                        backend = Backend.GPU(),
+                        maxNumTokens = tier.maxTokens,
+                        cacheDir = cacheDir,
+                    )
+                )
                 gpuEngine.initialize()
                 android.util.Log.i("LiteRTModule", "Engine loaded with GPU backend (${tier.tierName} tier)")
                 gpuEngine
@@ -573,6 +596,20 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
     @ReactMethod
     fun isModelLoaded(promise: Promise) {
         promise.resolve(engine != null)
+    }
+
+    // Returns "low" | "mid" | "high" based on device RAM. Safe to call before the
+    // engine has been loaded — the tier is pure-function of RAM.
+    @ReactMethod
+    fun getDeviceTier(promise: Promise) {
+        val tier = selectDeviceTier(deviceTotalRamBytes())
+        val map = Arguments.createMap().apply {
+            putString("tier", tier.tierName)
+            putInt("cpuThreads", tier.cpuThreads)
+            putBoolean("attemptGpu", tier.attemptGpu)
+            putDouble("totalRamMb", (deviceTotalRamBytes() / (1024.0 * 1024.0)))
+        }
+        promise.resolve(map)
     }
 
     @ReactMethod

@@ -23,8 +23,12 @@ export interface LiteRTNativeModule {
    * Load the model from an absolute file path on device storage.
    * Use this when the model has been downloaded to the device at runtime.
    * @param absolutePath - full local filesystem path to the .task model file
+   * @param multimodal - true for models with a vision encoder (Gemma 4 E2B);
+   *   false for text-only models (Gemma 3 1B). Mis-setting this to true on a
+   *   text-only model fails engine creation with "TF_LITE_VISION_ENCODER not
+   *   found in the model".
    */
-  loadModelFromPath(absolutePath: string): Promise<void>;
+  loadModelFromPath(absolutePath: string, multimodal: boolean): Promise<void>;
 
   /**
    * Run a single-turn inference with the given prompt.
@@ -52,6 +56,19 @@ export interface LiteRTNativeModule {
    * Returns true if the model is currently loaded and ready.
    */
   isModelLoaded(): Promise<boolean>;
+
+  /**
+   * Returns the perf tier chosen for this device based on total RAM.
+   * "low" = ≤ 4 GB (CPU, slow inference warning shown in UI),
+   * "mid" = 4–6 GB (CPU, balanced), "high" = ≥ 6 GB (attempts GPU).
+   * Safe to call before the model has been loaded.
+   */
+  getDeviceTier(): Promise<{
+    tier: 'low' | 'mid' | 'high';
+    cpuThreads: number;
+    attemptGpu: boolean;
+    totalRamMb: number;
+  }>;
 
   /**
    * Unload the model and free device memory.

@@ -1,11 +1,45 @@
 import * as FileSystem from 'expo-file-system/legacy';
 
-export const MODEL_DOWNLOAD_URL =
-  'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm';
+// Each device tier gets its own model. Small phones (<4 GB RAM) get Gemma 3 1B
+// (~580 MB, text-only) so inference is actually usable; bigger phones get the
+// multimodal Gemma 4 E2B. The runtime accepts both `.litertlm` and `.task` formats.
+export type ModelProfileId = 'gemma-3-1b' | 'gemma-4-e2b';
 
-export const MODEL_FILE_NAME = 'gemma-4-E2B-it.litertlm';
+export interface ModelProfile {
+  id: ModelProfileId;
+  displayName: string;
+  url: string;
+  fileName: string;
+  approximateSizeMb: number;
+  multimodal: boolean;
+}
+
+export const MODEL_PROFILES: Record<ModelProfileId, ModelProfile> = {
+  'gemma-3-1b': {
+    id: 'gemma-3-1b',
+    displayName: 'Gemma 3 1B IT (INT4, text-only)',
+    url: 'https://huggingface.co/litert-community/Gemma3-1B-IT/resolve/main/gemma3-1b-it-int4.litertlm',
+    fileName: 'gemma3-1b-it-int4.litertlm',
+    approximateSizeMb: 584,
+    multimodal: false,
+  },
+  'gemma-4-e2b': {
+    id: 'gemma-4-e2b',
+    displayName: 'Gemma 4 E2B IT (INT4, multimodal)',
+    url: 'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm',
+    fileName: 'gemma-4-E2B-it.litertlm',
+    approximateSizeMb: 2600,
+    multimodal: true,
+  },
+};
+
+// Match LiteRTModule.DeviceTier. LOW gets the lightweight text-only model so
+// Pixel-3-class hardware can actually keep up.
+export function profileForTier(tier: 'low' | 'mid' | 'high'): ModelProfile {
+  return tier === 'low' ? MODEL_PROFILES['gemma-3-1b'] : MODEL_PROFILES['gemma-4-e2b'];
+}
+
 export const MODEL_DIR = `${FileSystem.documentDirectory}models/`;
-export const MODEL_LOCAL_PATH = `${MODEL_DIR}${MODEL_FILE_NAME}`;
 
 export type DownloadStatus = 'idle' | 'checking' | 'downloading' | 'paused' | 'done' | 'error';
 
@@ -18,6 +52,9 @@ export interface DownloadProgress {
 export type ProgressCallback = (progress: DownloadProgress) => void;
 
 export class ModelDownloadService {
+  // Default to the multimodal 2B model; App.tsx resolves the real profile based
+  // on device tier and calls `setActiveProfile` before any download starts.
+  private activeProfile: ModelProfile = MODEL_PROFILES['gemma-4-e2b'];
   private downloadResumable: FileSystem.DownloadResumable | null = null;
   private _status: DownloadStatus = 'idle';
   private _error: string | null = null;
@@ -30,9 +67,36 @@ export class ModelDownloadService {
     return this._error;
   }
 
+  get profile(): ModelProfile {
+    return this.activeProfile;
+  }
+
+  get localPath(): string {
+    return `${MODEL_DIR}${this.activeProfile.fileName}`;
+  }
+
+  setActiveProfile(profile: ModelProfile): void {
+    if (profile.id === this.activeProfile.id) return;
+    this.activeProfile = profile;
+    // Any in-flight download handle is for the previous profile; drop it.
+    this.downloadResumable = null;
+    this._status = 'idle';
+    this._error = null;
+  }
+
   async isModelDownloaded(): Promise<boolean> {
-    const info = await FileSystem.getInfoAsync(MODEL_LOCAL_PATH);
+    const info = await FileSystem.getInfoAsync(this.localPath);
     return info.exists && info.size !== undefined && info.size > 0;
+  }
+
+  // HuggingFace auth header for gated repos (e.g. litert-community/Gemma3-1B-IT).
+  // The Bearer token only needs to ride on the initial HEAD to huggingface.co;
+  // the redirect target (xethub CDN) carries its own signed query string and
+  // rejects unrelated auth headers, so we strip before passing finalUrl to the
+  // download resumable.
+  private _hfAuthHeaders(): Record<string, string> {
+    const token = process.env.EXPO_PUBLIC_HF_TOKEN;
+    return token ? { Authorization: `Bearer ${token}` } : {};
   }
 
   /**
@@ -41,7 +105,10 @@ export class ModelDownloadService {
    */
   async getRemoteFileSize(): Promise<number | null> {
     try {
-      const response = await fetch(MODEL_DOWNLOAD_URL, { method: 'HEAD' });
+      const response = await fetch(this.activeProfile.url, {
+        method: 'HEAD',
+        headers: this._hfAuthHeaders(),
+      });
       const contentLength = response.headers.get('Content-Length');
       return contentLength ? parseInt(contentLength, 10) : null;
     } catch {
@@ -56,26 +123,49 @@ export class ModelDownloadService {
     await this._ensureModelDir();
 
     try {
-      // 1. Resolve redirect and check content
-      const headResponse = await fetch(MODEL_DOWNLOAD_URL, { method: 'HEAD' });
-      const finalUrl = headResponse.url;
+      const authHeaders = this._hfAuthHeaders();
+
+      // 1. Probe with a HEAD so we can surface a clear error for gated/HTML
+      // responses BEFORE starting the actual file download. We only use this
+      // for error classification — we don't rely on `headResponse.url` for
+      // redirect resolution because React Native's fetch doesn't reliably
+      // expose the post-redirect URL on HEAD requests (that was causing 401s
+      // when the original HF URL got passed back to the downloader without
+      // the Bearer token). The native downloader below will follow the 302
+      // to xethub itself, and OkHttp strips the Authorization header on
+      // cross-host redirects so the Bearer never leaks to the CDN.
+      const headResponse = await fetch(this.activeProfile.url, {
+        method: 'HEAD',
+        headers: authHeaders,
+      });
       const contentType = headResponse.headers.get('Content-Type');
 
+      if (headResponse.status === 401 || headResponse.status === 403) {
+        const hasToken = !!process.env.EXPO_PUBLIC_HF_TOKEN;
+        throw new Error(
+          hasToken
+            ? `HuggingFace rejected the auth token (status ${headResponse.status}). Make sure EXPO_PUBLIC_HF_TOKEN is a valid read token and you've accepted the Gemma license on ${this.activeProfile.url.split('/resolve/')[0]}.`
+            : `This model repo is gated. Accept the Gemma license on ${this.activeProfile.url.split('/resolve/')[0]}, create a HuggingFace read token, and set EXPO_PUBLIC_HF_TOKEN before rebuilding.`
+        );
+      }
+
       if (contentType?.includes('text/html')) {
-        throw new Error('The download URL returned an HTML page instead of a model file. The link might be expired or restricted.');
+        throw new Error('The download URL returned an HTML page instead of a model file. The link might be expired or gated — accepting the Gemma license on the HuggingFace repo and using an auth token may be required.');
       }
 
       // 2. Clear any existing corrupted file
-      const info = await FileSystem.getInfoAsync(MODEL_LOCAL_PATH);
+      const target = this.localPath;
+      const info = await FileSystem.getInfoAsync(target);
       if (info.exists) {
-        await FileSystem.deleteAsync(MODEL_LOCAL_PATH, { idempotent: true });
+        await FileSystem.deleteAsync(target, { idempotent: true });
       }
 
-      // 3. Start the actual download using the resolved URL
+      // 3. Start the actual download from the original HF URL so the native
+      // downloader can attach the Authorization header on the initial request.
       this.downloadResumable = FileSystem.createDownloadResumable(
-        finalUrl,
-        MODEL_LOCAL_PATH,
-        {},
+        this.activeProfile.url,
+        target,
+        { headers: authHeaders },
         (downloadProgress) => {
           const { totalBytesWritten, totalBytesExpectedToWrite } = downloadProgress;
           onProgress({
@@ -92,7 +182,7 @@ export class ModelDownloadService {
       const result = await this.downloadResumable.downloadAsync();
 
       if (result && (result.status === 200 || result.status === 206)) {
-        const finalInfo = await FileSystem.getInfoAsync(MODEL_LOCAL_PATH);
+        const finalInfo = await FileSystem.getInfoAsync(target);
         const actualSize = finalInfo.exists ? (finalInfo.size ?? 0) : 0;
         const MIN_SIZE = 100 * 1024 * 1024;
 
@@ -110,7 +200,7 @@ export class ModelDownloadService {
       this._error = err instanceof Error ? err.message : String(err);
       // Cleanup bad file on error
       try {
-        await FileSystem.deleteAsync(MODEL_LOCAL_PATH, { idempotent: true });
+        await FileSystem.deleteAsync(this.localPath, { idempotent: true });
       } catch {}
       throw err;
     }
@@ -150,9 +240,9 @@ export class ModelDownloadService {
   async retryDownload(onProgress: ProgressCallback): Promise<void> {
     this.downloadResumable = null;
     // Delete partial file if present
-    const info = await FileSystem.getInfoAsync(MODEL_LOCAL_PATH);
+    const info = await FileSystem.getInfoAsync(this.localPath);
     if (info.exists) {
-      await FileSystem.deleteAsync(MODEL_LOCAL_PATH, { idempotent: true });
+      await FileSystem.deleteAsync(this.localPath, { idempotent: true });
     }
     this._status = 'idle';
     this._error = null;
@@ -160,9 +250,30 @@ export class ModelDownloadService {
   }
 
   async deleteModel(): Promise<void> {
-    await FileSystem.deleteAsync(MODEL_LOCAL_PATH, { idempotent: true });
+    await FileSystem.deleteAsync(this.localPath, { idempotent: true });
     this.downloadResumable = null;
     this._status = 'idle';
+  }
+
+  /**
+   * Removes any model files in MODEL_DIR that don't match the active profile.
+   * Useful when switching tiers (e.g. reinstall on different device class) so
+   * we don't keep 2.6 GB of Gemma 4 on disk after downgrading to Gemma 3.
+   */
+  async cleanupOtherProfiles(): Promise<void> {
+    try {
+      const dirInfo = await FileSystem.getInfoAsync(MODEL_DIR);
+      if (!dirInfo.exists) return;
+      const entries = await FileSystem.readDirectoryAsync(MODEL_DIR);
+      const keep = this.activeProfile.fileName;
+      for (const name of entries) {
+        if (name !== keep) {
+          await FileSystem.deleteAsync(`${MODEL_DIR}${name}`, { idempotent: true });
+        }
+      }
+    } catch (err) {
+      console.warn('[ModelDownloadService] cleanup failed:', err);
+    }
   }
 
   private async _ensureModelDir(): Promise<void> {
@@ -174,3 +285,10 @@ export class ModelDownloadService {
 }
 
 export const modelDownloadService = new ModelDownloadService();
+
+// ── Back-compat exports ────────────────────────────────────────────────────
+// Some call sites still reference the old constants. These now reflect the
+// ACTIVE profile — don't rely on them as module-level constants anymore.
+export const MODEL_DOWNLOAD_URL = modelDownloadService.profile.url;
+export const MODEL_FILE_NAME = modelDownloadService.profile.fileName;
+export const MODEL_LOCAL_PATH = modelDownloadService.localPath;

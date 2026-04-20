@@ -3,8 +3,9 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AppNavigator from './src/navigation/AppNavigator';
 import ModelDownloadScreen from './src/screens/ModelDownloadScreen';
-import { modelDownloadService } from './src/services/ModelDownloadService';
+import { modelDownloadService, profileForTier } from './src/services/ModelDownloadService';
 import { inferenceService } from './src/services/InferenceService';
+import { TopicChips, type GuideTopic } from './src/components/TopicChips';
 import { Colors } from './src/theme/colors';
 
 type AppState = 'checking' | 'needs_download' | 'warming_up' | 'ready';
@@ -12,11 +13,33 @@ type AppState = 'checking' | 'needs_download' | 'warming_up' | 'ready';
 export default function App() {
   const [appState, setAppState] = useState<AppState>('checking');
   const [warmupError, setWarmupError] = useState<string | null>(null);
+  const [topic, setTopic] = useState<GuideTopic>('everything');
 
   useEffect(() => {
-    modelDownloadService.isModelDownloaded().then((downloaded) => {
+    let cancelled = false;
+    (async () => {
+      // Pick the right model file for this device class BEFORE checking download
+      // state — LOW-tier devices get the ~580 MB Gemma 3 1B, MID/HIGH get the
+      // ~2.6 GB multimodal Gemma 4 E2B.
+      try {
+        const info = await inferenceService.getDeviceTier();
+        const tier = info?.tier ?? 'mid';
+        modelDownloadService.setActiveProfile(profileForTier(tier));
+      } catch {
+        // getDeviceTier is best-effort; leave the default profile.
+      }
+      if (cancelled) return;
+      const downloaded = await modelDownloadService.isModelDownloaded();
+      if (cancelled) return;
+      if (downloaded) {
+        // Drop the other tier's model if present — a device can only use one at a time.
+        modelDownloadService.cleanupOtherProfiles().catch(() => {});
+      }
       setAppState(downloaded ? 'warming_up' : 'needs_download');
-    });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -62,6 +85,10 @@ export default function App() {
             {'\n'}
             This happens once per app launch.
           </Text>
+
+          <Text style={styles.topicsHeading}>While you wait, pick a topic</Text>
+          <TopicChips selected={topic} onSelect={setTopic} />
+
           {warmupError && (
             <Text style={styles.errorText}>Warmup error: {warmupError}</Text>
           )}
@@ -73,7 +100,7 @@ export default function App() {
 
   return (
     <>
-      <AppNavigator />
+      <AppNavigator initialTopic={topic} />
       <StatusBar style="auto" />
     </>
   );
@@ -101,6 +128,14 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     textAlign: 'center',
     lineHeight: 20,
+  },
+  topicsHeading: {
+    marginTop: 32,
+    marginBottom: 8,
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+    textAlign: 'center',
   },
   errorText: {
     marginTop: 20,

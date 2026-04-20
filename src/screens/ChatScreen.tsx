@@ -4,7 +4,6 @@ import {
   Text,
   TextInput,
   FlatList,
-  ScrollView,
   TouchableOpacity,
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -23,9 +22,10 @@ import { useLocation } from '../hooks/useLocation';
 import { useAutoGuide } from '../hooks/useAutoGuide';
 import { useVoiceInput } from '../hooks/useVoiceInput';
 import { localGuideService, type GuideTopic } from '../services/LocalGuideService';
+import { TopicChips } from '../components/TopicChips';
 import { speechService } from '../services/SpeechService';
 import { SpeechChunker } from '../services/SpeechChunker';
-import type { GPSContext, StreamHandle } from '../services/InferenceService';
+import { inferenceService, type GPSContext, type StreamHandle } from '../services/InferenceService';
 import { Colors } from '../theme/colors';
 
 type Props = BottomTabScreenProps<RootTabParamList, 'Chat'>;
@@ -168,60 +168,30 @@ function AnimatedChatBubble({ message }: { message: Message }) {
   );
 }
 
-const TOPIC_OPTIONS: { id: GuideTopic; emoji: string; label: string }[] = [
-  { id: 'everything', emoji: '✨', label: 'Everything' },
-  { id: 'history', emoji: '🏛️', label: 'History' },
-  { id: 'nature', emoji: '🌿', label: 'Nature' },
-  { id: 'geography', emoji: '🗺️', label: 'Geography' },
-  { id: 'food', emoji: '🍽️', label: 'Food' },
-  { id: 'culture', emoji: '🎭', label: 'Culture' },
-];
-
-function TopicChips({
-  selected,
-  onSelect,
-}: {
-  selected: GuideTopic;
-  onSelect: (topic: GuideTopic) => void;
-}) {
-  return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      style={styles.topicsScroll}
-      contentContainerStyle={styles.topicsRow}
-    >
-      {TOPIC_OPTIONS.map((t) => {
-        const active = t.id === selected;
-        return (
-          <TouchableOpacity
-            key={t.id}
-            onPress={() => onSelect(t.id)}
-            style={[styles.topicChip, active && styles.topicChipActive]}
-            accessibilityRole="button"
-            accessibilityState={{ selected: active }}
-          >
-            <Text style={[styles.topicChipText, active && styles.topicChipTextActive]}>
-              {t.emoji} {t.label}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
-    </ScrollView>
-  );
-}
-
-export default function ChatScreen(_props: Props) {
+export default function ChatScreen(props: Props) {
   const { gps, status, errorMessage, refresh, manualLocation, setManualLocation } = useLocation();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [inferring, setInferring] = useState(false);
   const [speakResponses, setSpeakResponses] = useState(true);
-  const [topic, setTopic] = useState<GuideTopic>('everything');
+  const [topic, setTopic] = useState<GuideTopic>(props.route.params?.initialTopic ?? 'everything');
   const topicRef = useRef<GuideTopic>(topic);
   useEffect(() => {
     topicRef.current = topic;
   }, [topic]);
+
+  const [deviceTier, setDeviceTier] = useState<'low' | 'mid' | 'high' | null>(null);
+  const [slowDeviceDismissed, setSlowDeviceDismissed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    inferenceService.getDeviceTier().then((info) => {
+      if (cancelled || !info) return;
+      setDeviceTier(info.tier);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const listRef = useRef<FlatList<Message>>(null);
   const speakResponsesRef = useRef(speakResponses);
   const streamRef = useRef<StreamHandle | null>(null);
@@ -461,7 +431,20 @@ export default function ChatScreen(_props: Props) {
         onSetManualLocation={setManualLocation}
       />
 
-      <TopicChips selected={topic} onSelect={setTopic} />
+      {deviceTier === 'low' && !slowDeviceDismissed && (
+        <View style={styles.slowDeviceBanner}>
+          <Text style={styles.slowDeviceText}>
+            ⚡  Heads up: this device has limited memory, so the AI guide runs on CPU
+            and responses may be slow. We've tuned the model for this hardware, but
+            expect a noticeable pause before answers start streaming.
+          </Text>
+          <TouchableOpacity onPress={() => setSlowDeviceDismissed(true)} style={styles.slowDeviceDismiss}>
+            <Text style={styles.slowDeviceDismissText}>Got it</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <TopicChips selected={topic} onSelect={setTopic} style={styles.topicsWrapper} />
 
       <View style={styles.controlsRow}>
         <View style={styles.controlItem}>
@@ -645,38 +628,37 @@ const styles = StyleSheet.create({
   locationSetBtnDisabled: { backgroundColor: Colors.disabled },
   locationSetBtnText: { color: Colors.surface, fontWeight: '600', fontSize: 13 },
   bannerErrorText: { fontSize: 12, color: Colors.error, fontWeight: '500' },
-  topicsScroll: {
+  slowDeviceBanner: {
+    backgroundColor: '#FFF4E5',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#F4C27A',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  slowDeviceText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#8A4B00',
+    lineHeight: 16,
+  },
+  slowDeviceDismiss: {
+    backgroundColor: '#F4C27A',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  slowDeviceDismissText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8A4B00',
+  },
+  topicsWrapper: {
     backgroundColor: Colors.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.borderLight ?? Colors.border,
-  },
-  topicsRow: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  topicChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: Colors.surfaceAlt ?? Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  topicChipActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  topicChipText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: Colors.textSecondary,
-  },
-  topicChipTextActive: {
-    color: Colors.surface,
-    fontWeight: '600',
   },
   controlsRow: {
     flexDirection: 'row',

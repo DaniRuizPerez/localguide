@@ -8,14 +8,16 @@ import {
 
 // Kept terse on purpose: prefill cost is O(prompt tokens), and on low-end CPU devices
 // (Pixel 3-class) every 100 tokens of system prompt adds ~0.5–1 s before the first
-// response token appears. This condenses the prior ~400-token prompt to ~90 tokens
-// while preserving the load-bearing rules (offline, coords-not-names, no invented
-// specifics, conversational tone). If we need richer instructions later, do it via
+// response token appears. Load-bearing rules: offline, coords-not-names, no invented
+// specifics, narrator (not chat). If we need richer instructions later, do it via
 // response post-processing rather than adding to the system prompt.
-const SYSTEM_PROMPT = `You are an offline local tourist guide. Reply in 2–5 warm, conversational sentences in the user's language.
+const SYSTEM_PROMPT = `You are an offline local tourist guide narrating a visitor's tour — not chatting with them. Share substantive, interesting knowledge (history, culture, architecture, traditions, the "why" behind things) in the user's language.
 Rules:
+- Open with a fact, detail, or story. Never greet, never ask questions, never offer follow-ups ("let me know…", "would you like…").
+- 3–6 sentences of flowing narration, not a list.
 - You have GPS coordinates, not a place name. If you don't clearly recognize the area, speak in general terms — never guess the city.
-- Never invent specific names, addresses, hours, prices, or distances. If asked, say you can't verify offline and offer general guidance.
+- Never invent specific names, addresses, hours, prices, or distances. Phrase uncertain specifics generically ("a celebrated local architect", not a fabricated name).
+- No live data — no "today", "now", weather, or current events.
 - Stay on local topics (landmarks, history, culture, food, walking, etiquette); briefly decline anything else.`;
 
 // Topic the user wants the guide to focus on. "everything" means no bias.
@@ -43,8 +45,8 @@ function formatLocation(location: GPSContext | string): string {
 
 function buildPrompt(location: GPSContext | string, userQuery: string, topic?: GuideTopic): string {
   const coords = formatLocation(location);
-  const query = userQuery.trim() || 'Tell me something interesting about where I am.';
-  return `${SYSTEM_PROMPT}${topicFocusLine(topic)}\nGPS: ${coords}\nUser: ${query}`;
+  const query = userQuery.trim() || 'Narrate what is interesting about this spot.';
+  return `${SYSTEM_PROMPT}${topicFocusLine(topic)}\nGPS: ${coords}\nCue: ${query}`;
 }
 
 export interface GuideResponse {
@@ -55,12 +57,12 @@ export interface GuideResponse {
 
 function buildImagePrompt(location: GPSContext | string, userQuery: string, topic?: GuideTopic): string {
   const coords = formatLocation(location);
-  const query = userQuery.trim() || 'What am I looking at here?';
+  const query = userQuery.trim() || 'Narrate what is in this photo.';
   return (
     `${SYSTEM_PROMPT}${topicFocusLine(topic)}\n` +
     `GPS: ${coords}\n` +
-    `A photo was taken at this spot. Describe what is actually visible in the image and ground every claim in it. Use GPS only to disambiguate. Follow the rules above.\n` +
-    `User: ${query}`
+    `The visitor shared a photo from this spot. Identify what's in it and narrate its story — what it is, why it matters, the history and cultural background a local would share. Ground every claim in what's actually visible; use GPS only to disambiguate. If image and GPS disagree, trust the image.\n` +
+    `Cue: ${query}`
   );
 }
 
