@@ -37,6 +37,8 @@ function TabIcon({ focused, glyph }: { focused: boolean; glyph: string }) {
 }
 
 export default function AppNavigator({ initialTopic }: AppNavigatorProps = {}) {
+  const insets = useSafeAreaInsets();
+  const tabBottomPad = Math.max(insets.bottom, 10);
   return (
     <NavigationContainer>
       <Tab.Navigator
@@ -60,14 +62,17 @@ export default function AppNavigator({ initialTopic }: AppNavigatorProps = {}) {
           tabBarStyle: {
             backgroundColor: Colors.surface,
             borderTopWidth: 0,
-            paddingTop: 6,
+            paddingTop: 8,
+            paddingBottom: tabBottomPad,
+            height: 56 + tabBottomPad,
             ...Shadows.tabBar,
           },
           tabBarLabelStyle: {
             fontFamily: 'Nunito_700Bold',
             fontSize: 11,
             letterSpacing: 0.3,
-            marginTop: 2,
+            marginTop: 4,
+            paddingBottom: 2,
           },
           tabBarIconStyle: {
             marginBottom: 0,

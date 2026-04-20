@@ -6,6 +6,23 @@ jest.mock('../native/LiteRTModule', () => ({
   default: undefined,
 }));
 
+// ModelDownloadService is touched during initialize(); stub it so we don't
+// pull in expo-file-system's real document directory resolution.
+jest.mock('../services/ModelDownloadService', () => ({
+  modelDownloadService: {
+    localPath: '/tmp/model.litertlm',
+    profile: {
+      multimodal: true,
+      displayName: 'Test Model',
+      fileName: 'model.litertlm',
+    },
+  },
+}));
+
+jest.mock('expo-file-system/legacy', () => ({
+  getInfoAsync: jest.fn().mockResolvedValue({ exists: true, size: 1_000_000 }),
+}));
+
 describe('InferenceService (mock mode)', () => {
   let service: InferenceService;
 
@@ -47,7 +64,7 @@ describe('InferenceService (mock mode)', () => {
 });
 
 describe('InferenceService (with native module)', () => {
-  const mockLoadModel = jest.fn().mockResolvedValue(undefined);
+  const mockLoadModelFromPath = jest.fn().mockResolvedValue(undefined);
   const mockRunInference = jest.fn().mockResolvedValue('You are near the Eiffel Tower.');
   const mockUnloadModel = jest.fn().mockResolvedValue(undefined);
 
@@ -56,22 +73,35 @@ describe('InferenceService (with native module)', () => {
     jest.doMock('../native/LiteRTModule', () => ({
       __esModule: true,
       default: {
-        loadModel: mockLoadModel,
+        loadModelFromPath: mockLoadModelFromPath,
         runInference: mockRunInference,
         isModelLoaded: jest.fn().mockResolvedValue(true),
         unloadModel: mockUnloadModel,
       },
     }));
-    mockLoadModel.mockClear();
+    jest.doMock('../services/ModelDownloadService', () => ({
+      modelDownloadService: {
+        localPath: '/tmp/model.litertlm',
+        profile: {
+          multimodal: true,
+          displayName: 'Test Model',
+          fileName: 'model.litertlm',
+        },
+      },
+    }));
+    jest.doMock('expo-file-system/legacy', () => ({
+      getInfoAsync: jest.fn().mockResolvedValue({ exists: true, size: 1_000_000 }),
+    }));
+    mockLoadModelFromPath.mockClear();
     mockRunInference.mockClear();
     mockUnloadModel.mockClear();
   });
 
-  it('calls loadModel on initialize', async () => {
+  it('calls loadModelFromPath on initialize with local path and multimodal flag', async () => {
     const { InferenceService: IS } = require('../services/InferenceService');
     const svc = new IS();
     await svc.initialize();
-    expect(mockLoadModel).toHaveBeenCalledWith('gemma3-1b-it-int4.task');
+    expect(mockLoadModelFromPath).toHaveBeenCalledWith('/tmp/model.litertlm', true);
   });
 
   it('calls runInference with prompt and maxTokens', async () => {
