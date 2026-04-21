@@ -34,9 +34,15 @@ export const MODEL_PROFILES: Record<ModelProfileId, ModelProfile> = {
 };
 
 // Match LiteRTModule.DeviceTier. LOW gets the lightweight text-only model so
-// Pixel-3-class hardware can actually keep up.
-export function profileForTier(tier: 'low' | 'mid' | 'high'): ModelProfile {
-  return tier === 'low' ? MODEL_PROFILES['gemma-3-1b'] : MODEL_PROFILES['gemma-4-e2b'];
+// Pixel-3-class hardware can actually keep up. Mirrors the `multimodal`
+// FeatureFlag from deviceTier.ts — if a tier can't run the multimodal model,
+// it gets the text-only profile.
+import { featuresForTier, type DeviceTier } from './deviceTier';
+
+export function profileForTier(tier: DeviceTier): ModelProfile {
+  return featuresForTier(tier).multimodal
+    ? MODEL_PROFILES['gemma-4-e2b']
+    : MODEL_PROFILES['gemma-3-1b'];
 }
 
 export const MODEL_DIR = `${FileSystem.documentDirectory}models/`;

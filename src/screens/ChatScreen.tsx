@@ -20,10 +20,11 @@ import { useGuideStream } from '../hooks/useGuideStream';
 import { useNearbyPois } from '../hooks/useNearbyPois';
 import { useProximityNarration } from '../hooks/useProximityNarration';
 import { useDwellDetection } from '../hooks/useDwellDetection';
+import { useFeatureTier } from '../hooks/useFeatureTier';
 import { localGuideService, type GuideTopic } from '../services/LocalGuideService';
 import { speechService } from '../services/SpeechService';
 import { guidePrefs } from '../services/GuidePrefs';
-import { inferenceService, type GPSContext } from '../services/InferenceService';
+import type { GPSContext } from '../services/InferenceService';
 import type { Poi } from '../services/PoiService';
 import type { Message } from '../types/chat';
 import { TopicChips } from '../components/TopicChips';
@@ -62,7 +63,7 @@ export default function ChatScreen(props: Props) {
   const [quizOpen, setQuizOpen] = useState(false);
   const [slowDeviceDismissed, setSlowDeviceDismissed] = useState(false);
   const [hallucinationDismissed, setHallucinationDismissed] = useState(false);
-  const [deviceTier, setDeviceTier] = useState<'low' | 'mid' | 'high' | null>(null);
+  const { features } = useFeatureTier();
   const [hiddenGems, setHiddenGems] = useState<boolean>(guidePrefs.get().hiddenGems);
   const [dismissedDwellIds, setDismissedDwellIds] = useState<Set<number>>(new Set());
 
@@ -80,17 +81,6 @@ export default function ChatScreen(props: Props) {
   useEffect(() => {
     speakRef.current = speakResponses;
   }, [speakResponses]);
-
-  useEffect(() => {
-    let cancelled = false;
-    inferenceService.getDeviceTier().then((info) => {
-      if (cancelled || !info) return;
-      setDeviceTier(info.tier);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const listRef = useRef<FlatList<Message>>(null);
   const scrollToEnd = useCallback(
@@ -236,7 +226,7 @@ export default function ChatScreen(props: Props) {
         />
       )}
 
-      {deviceTier === 'low' && !slowDeviceDismissed && (
+      {features?.slowInference && !slowDeviceDismissed && (
         <DismissBanner text={t('chat.slowDevice')} onDismiss={() => setSlowDeviceDismissed(true)} />
       )}
 
