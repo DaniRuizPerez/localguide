@@ -30,6 +30,22 @@ jest.mock('@react-native-community/slider', () => {
 import { VoiceRateControls } from '../components/VoiceRateControls';
 import { narrationPrefs } from '../services/NarrationPrefs';
 
+// The sheet now carries every Chat-screen setting, not just voice/rate, so
+// tests need to pass the full prop bag. Shared defaults so each render stays
+// readable — override individual keys in a test with {...defaults, ...}.
+const defaultProps = {
+  visible: true as boolean,
+  onClose: () => {},
+  autoGuide: false,
+  onAutoGuideChange: () => {},
+  speak: true,
+  onSpeakChange: () => {},
+  hiddenGems: false,
+  onHiddenGemsChange: () => {},
+  radiusMeters: 1000,
+  onRadiusChange: () => {},
+};
+
 describe('VoiceRateControls', () => {
   beforeEach(() => {
     mockGetAvailableVoices.mockReset();
@@ -38,7 +54,7 @@ describe('VoiceRateControls', () => {
 
   it('renders rate slider reflecting current prefs', async () => {
     mockGetAvailableVoices.mockResolvedValue([]);
-    const { getByTestId } = render(<VoiceRateControls visible={true} onClose={() => {}} />);
+    const { getByTestId } = render(<VoiceRateControls {...defaultProps} />);
     const slider = getByTestId('rate-slider');
     expect(slider.props.value).toBeCloseTo(0.95);
     expect(slider.props.minimumValue).toBeCloseTo(0.6);
@@ -53,7 +69,7 @@ describe('VoiceRateControls', () => {
     ]);
 
     const { findByText, queryByText } = render(
-      <VoiceRateControls visible={true} onClose={() => {}} />
+      <VoiceRateControls {...defaultProps} />
     );
 
     expect(await findByText('Voice A')).toBeTruthy();
@@ -67,7 +83,7 @@ describe('VoiceRateControls', () => {
     ]);
 
     const { findByText } = render(
-      <VoiceRateControls visible={true} onClose={() => {}} />
+      <VoiceRateControls {...defaultProps} />
     );
     const chip = await findByText('Voice A');
     await act(async () => {
@@ -83,7 +99,7 @@ describe('VoiceRateControls', () => {
 
     narrationPrefs.setVoice('en-us-x-a');
 
-    const { findByText } = render(<VoiceRateControls visible={true} onClose={() => {}} />);
+    const { findByText } = render(<VoiceRateControls {...defaultProps} />);
     const defaultChip = await findByText('System default');
     await act(async () => {
       fireEvent.press(defaultChip);
@@ -93,7 +109,7 @@ describe('VoiceRateControls', () => {
 
   it('persists the slider value on sliding complete', async () => {
     mockGetAvailableVoices.mockResolvedValue([]);
-    const { getByTestId } = render(<VoiceRateControls visible={true} onClose={() => {}} />);
+    const { getByTestId } = render(<VoiceRateControls {...defaultProps} />);
     await act(async () => {
       getByTestId('rate-slider').props.onSlidingComplete(1.25);
     });
@@ -104,14 +120,14 @@ describe('VoiceRateControls', () => {
     mockGetAvailableVoices.mockResolvedValue([
       { identifier: 'ja-jp-x-a', name: 'Voice A', language: 'ja-JP' },
     ]);
-    const { findByText } = render(<VoiceRateControls visible={true} onClose={() => {}} />);
+    const { findByText } = render(<VoiceRateControls {...defaultProps} />);
     expect(await findByText(/No matching voices/i)).toBeTruthy();
   });
 
   it('calls onClose when the Done button is pressed', async () => {
     mockGetAvailableVoices.mockResolvedValue([]);
     const onClose = jest.fn();
-    const { getByText } = render(<VoiceRateControls visible={true} onClose={onClose} />);
+    const { getByText } = render(<VoiceRateControls {...defaultProps} onClose={onClose} />);
     await waitFor(() => getByText('Done'));
     fireEvent.press(getByText('Done'));
     expect(onClose).toHaveBeenCalled();

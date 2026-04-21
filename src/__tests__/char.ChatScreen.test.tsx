@@ -153,26 +153,26 @@ describe('Characterization: ChatScreen — initial render', () => {
     expect(getByText('↑')).toBeTruthy();
   });
 
-  it('renders the Auto-Guide toggle label', () => {
+  it('shows the Plan-my-day and Quiz CTAs on the Home empty state', () => {
+    // Post-Option-A IA: Auto-Guide / Speak / Hidden-Gems toggles moved into
+    // the settings sheet behind the gear. The Home state surfaces the two
+    // primary destinations (Plan-my-day, Quiz) as the user's first choice
+    // instead of toggle chrome.
+    const { getByTestId } = render(
+      <ChatScreen navigation={mockNavigation} route={chatRoute} />
+    );
+    expect(getByTestId('home-plan-day')).toBeTruthy();
+    expect(getByTestId('home-quiz')).toBeTruthy();
+  });
+
+  it('shows the Home greeting when no messages', () => {
     const { getByText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
-    expect(getByText('AUTO-GUIDE')).toBeTruthy();
-  });
-
-  it('renders the Speak toggle label', () => {
-    const { getByText } = render(
-      <ChatScreen navigation={mockNavigation} route={chatRoute} />
-    );
-    expect(getByText('SPEAK')).toBeTruthy();
-  });
-
-  it('shows empty-state hint when no messages', () => {
-    const { getAllByText } = render(
-      <ChatScreen navigation={mockNavigation} route={chatRoute} />
-    );
-    // Both the empty hint and Auto-Guide label contain these words; at least one match expected
-    expect(getAllByText(/Ask about what's near you|AUTO-GUIDE/i).length).toBeGreaterThan(0);
+    // Home state greets the visitor with a time-of-day line and the "Want to
+    // wander?" prompt. One of the three greetings always matches.
+    expect(getByText(/Good (morning|afternoon|evening|night)/i)).toBeTruthy();
+    expect(getByText(/Want to wander\?/)).toBeTruthy();
   });
 
   it('Send button does not trigger inference when input is empty', async () => {

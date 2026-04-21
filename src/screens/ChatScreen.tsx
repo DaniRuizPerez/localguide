@@ -21,19 +21,16 @@ import { useNearbyPois } from '../hooks/useNearbyPois';
 import { useProximityNarration } from '../hooks/useProximityNarration';
 import { useDwellDetection } from '../hooks/useDwellDetection';
 import { useFeatureTier } from '../hooks/useFeatureTier';
-import { localGuideService, type GuideTopic } from '../services/LocalGuideService';
+import { type GuideTopic } from '../services/LocalGuideService';
 import { speechService } from '../services/SpeechService';
 import { guidePrefs } from '../services/GuidePrefs';
 import type { GPSContext } from '../services/InferenceService';
 import type { Poi } from '../services/PoiService';
 import type { Message } from '../types/chat';
 import { TopicChips } from '../components/TopicChips';
-import { AttractionsChips } from '../components/AttractionsChips';
-import { RadiusSelector } from '../components/RadiusSelector';
 import { DwellBanner } from '../components/DwellBanner';
 import { Colors } from '../theme/colors';
-import { Type } from '../theme/tokens';
-import { NarrationLengthPicker } from '../components/NarrationLengthPicker';
+import { Radii, Type } from '../theme/tokens';
 import { VoiceRateControls } from '../components/VoiceRateControls';
 import { PlaybackControls } from '../components/PlaybackControls';
 import { ItineraryModal } from '../components/ItineraryModal';
@@ -42,8 +39,8 @@ import { ChatHeader } from '../components/ChatHeader';
 import { MessageList } from '../components/MessageList';
 import { ManualLocationRow } from '../components/ManualLocationRow';
 import { ChatInputBar } from '../components/ChatInputBar';
-import { ChatControlsRow } from '../components/ChatControlsRow';
 import { TypingIndicator } from '../components/ChatBubble';
+import { HomeState } from '../components/HomeState';
 import { t } from '../i18n';
 
 type Props = BottomTabScreenProps<RootTabParamList, 'Chat'>;
@@ -58,11 +55,10 @@ export default function ChatScreen(props: Props) {
   const [topic, setTopic] = useState<GuideTopic>(props.route.params?.initialTopic ?? 'everything');
   const [speakResponses, setSpeakResponses] = useState(true);
   const [poiRadiusMeters, setPoiRadiusMeters] = useState(1000);
-  const [narrationSettingsOpen, setNarrationSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [itineraryOpen, setItineraryOpen] = useState(false);
   const [quizOpen, setQuizOpen] = useState(false);
-  const [slowDeviceDismissed, setSlowDeviceDismissed] = useState(false);
-  const [hallucinationDismissed, setHallucinationDismissed] = useState(false);
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
   const { features } = useFeatureTier();
   const [hiddenGems, setHiddenGems] = useState<boolean>(guidePrefs.get().hiddenGems);
   const [dismissedDwellIds, setDismissedDwellIds] = useState<Set<number>>(new Set());
@@ -96,7 +92,7 @@ export default function ChatScreen(props: Props) {
     onScroll: scrollToEnd,
   });
 
-  const { pois, loading: poisLoading } = useNearbyPois(gps, poiRadiusMeters, { hiddenGems });
+  const { pois } = useNearbyPois(gps, poiRadiusMeters, { hiddenGems });
 
   const autoGuide = useAutoGuide((text, autoGps) => {
     messages.addGuideMessage(text, autoGps);
@@ -118,15 +114,24 @@ export default function ChatScreen(props: Props) {
     [effectiveLocation, inferring, stop, messages, stream]
   );
 
-  const handleVoiceResult = useCallback(
-    async (transcript: string) => {
-      if (!effectiveLocation) return;
-      messages.addUserMessage(transcript);
-      await stream({ intent: 'text', query: transcript, location: effectiveLocation });
+  const sendText = useCallback(
+    async (query: string) => {
+      const trimmed = query.trim();
+      if (!trimmed) return;
+      if (!effectiveLocation) {
+        messages.addGuideMessage(
+          'Location not available yet. Please wait or enter a location above.',
+          ''
+        );
+        return;
+      }
+      messages.addUserMessage(trimmed);
+      await stream({ intent: 'text', query: trimmed, location: effectiveLocation });
     },
     [effectiveLocation, messages, stream]
   );
 
+  const handleVoiceResult = useCallback((transcript: string) => sendText(transcript), [sendText]);
   const voice = useVoiceInput(handleVoiceResult);
 
   // Proximity narration (walking past a POI) — only while Auto-Guide is on.
@@ -155,17 +160,12 @@ export default function ChatScreen(props: Props) {
     stream({ intent: 'text', query: AUTO_GUIDE_WELCOME_CUE, location: gps });
   }, [autoGuide.enabled, gps, inferring, messages, stream]);
 
-  const sendMessage = useCallback(async () => {
-    const query = input.trim();
-    if (!query || inferring) return;
-    if (!effectiveLocation) {
-      messages.addGuideMessage('Location not available yet. Please wait or enter a location above.', '');
-      return;
-    }
-    messages.addUserMessage(query);
+  const sendFromInput = useCallback(async () => {
+    if (inferring) return;
+    const query = input;
     setInput('');
-    await stream({ intent: 'text', query, location: effectiveLocation });
-  }, [input, inferring, effectiveLocation, messages, stream]);
+    await sendText(query);
+  }, [input, inferring, sendText]);
 
   const takePicture = useCallback(async () => {
     if (inferring) return;
@@ -202,6 +202,17 @@ export default function ChatScreen(props: Props) {
 
   const lastMsg = messages.messages[messages.messages.length - 1];
   const showTyping = inferring && (lastMsg?.role !== 'guide' || !lastMsg.text);
+  const hasMessages = messages.messages.length > 0;
+
+  // Coalesce slow-device + hallucination warnings into one dismissible
+  // notice shown once, above the input. Priority: slow-device first (it's
+  // tier-specific), else hallucination.
+  const noticeText =
+    features?.slowInference === true
+      ? t('chat.slowDevice')
+      : !hasMessages
+        ? null // skip the generic hallucination warning on the Home state to keep it clean
+        : t('app.hallucinationWarning');
 
   return (
     <KeyboardAvoidingView
@@ -213,9 +224,7 @@ export default function ChatScreen(props: Props) {
         status={status}
         gps={gps}
         manualLocation={manualLocation}
-        busy={inferring}
-        onIdentifyPress={takePicture}
-        onSettingsPress={() => setNarrationSettingsOpen(true)}
+        onSettingsPress={() => setSettingsOpen(true)}
       />
 
       {(status === 'denied' || status === 'error') && !gps && (
@@ -226,63 +235,70 @@ export default function ChatScreen(props: Props) {
         />
       )}
 
-      {features?.slowInference && !slowDeviceDismissed && (
-        <DismissBanner text={t('chat.slowDevice')} onDismiss={() => setSlowDeviceDismissed(true)} />
-      )}
+      {hasMessages ? (
+        <>
+          {/* One contextual strip — topic filter. Radius, length, voice hide in ⚙. */}
+          <TopicChips selected={topic} onSelect={setTopic} />
 
-      {!hallucinationDismissed && (
-        <DismissBanner
-          text={t('app.hallucinationWarning')}
-          onDismiss={() => setHallucinationDismissed(true)}
+          <MessageList
+            ref={listRef}
+            messages={messages.messages}
+            autoGuideEnabled={autoGuide.enabled}
+          />
+
+          {showTyping && <TypingIndicator />}
+
+          {autoGuide.error && (
+            <View style={styles.errorBanner}>
+              <Text style={[Type.bodySm, { color: Colors.error }]}>{autoGuide.error}</Text>
+            </View>
+          )}
+
+          {visibleDwell && (
+            <DwellBanner
+              poi={visibleDwell.poi}
+              onAccept={() => {
+                dismissDwell(visibleDwell.poi.pageId);
+                narratePoi(visibleDwell.poi);
+              }}
+              onDismiss={() => dismissDwell(visibleDwell.poi.pageId)}
+            />
+          )}
+
+          {noticeText && !noticeDismissed && (
+            <NoticeCard text={noticeText} onDismiss={() => setNoticeDismissed(true)} />
+          )}
+
+          <PlaybackControls />
+        </>
+      ) : (
+        <HomeState
+          placeName={gps?.placeName ?? manualLocation}
+          radiusMeters={poiRadiusMeters}
+          pois={pois}
+          onPlanDay={() => setItineraryOpen(true)}
+          onQuiz={() => setQuizOpen(true)}
+          onAsk={(q) => sendText(q)}
+          onNarratePoi={narratePoi}
+          onChangeRadius={() => setSettingsOpen(true)}
+          disabled={inferring}
         />
       )}
 
-      <TopicChips selected={topic} onSelect={setTopic} />
-      <NarrationLengthPicker />
-
-      <View style={styles.itineraryCtaRow}>
-        <TouchableOpacity
-          style={styles.itineraryCta}
-          onPress={() => setItineraryOpen(true)}
-          accessibilityLabel={t('itinerary.openButton')}
-          testID="plan-day-btn"
-        >
-          <Text style={styles.itineraryGlyph}>🗺</Text>
-          <Text style={styles.itineraryLabel}>{t('itinerary.openButton')}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.itineraryCta}
-          onPress={() => setQuizOpen(true)}
-          accessibilityLabel={t('quiz.openButton')}
-          testID="quiz-btn"
-        >
-          <Text style={styles.itineraryGlyph}>🎯</Text>
-          <Text style={styles.itineraryLabel}>{t('quiz.openButton')}</Text>
-        </TouchableOpacity>
-      </View>
-
-      <RadiusSelector value={poiRadiusMeters} onChange={setPoiRadiusMeters} />
+      <ChatInputBar
+        input={input}
+        onChangeInput={setInput}
+        onSend={sendFromInput}
+        onStop={stop}
+        onCameraPress={takePicture}
+        onMicToggle={voice.isListening ? voice.stopListening : voice.startListening}
+        inferring={inferring}
+        isListening={voice.isListening}
+      />
 
       <VoiceRateControls
-        visible={narrationSettingsOpen}
-        onClose={() => setNarrationSettingsOpen(false)}
-      />
-      <ItineraryModal
-        visible={itineraryOpen}
-        onClose={() => setItineraryOpen(false)}
-        location={effectiveLocation}
-        nearbyPois={pois}
-      />
-      <QuizModal visible={quizOpen} onClose={() => setQuizOpen(false)} nearbyPois={pois} />
-
-      <AttractionsChips
-        pois={pois.slice(0, 8)}
-        loading={poisLoading}
-        onSelect={narratePoi}
-        disabled={inferring}
-      />
-
-      <ChatControlsRow
+        visible={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
         autoGuide={autoGuide.enabled}
         onAutoGuideChange={autoGuide.toggle}
         speak={speakResponses}
@@ -292,55 +308,29 @@ export default function ChatScreen(props: Props) {
         }}
         hiddenGems={hiddenGems}
         onHiddenGemsChange={(next) => guidePrefs.setHiddenGems(next)}
+        radiusMeters={poiRadiusMeters}
+        onRadiusChange={setPoiRadiusMeters}
       />
-
-      <PlaybackControls />
-
-      {autoGuide.error && (
-        <View style={styles.errorBanner}>
-          <Text style={[Type.bodySm, { color: Colors.error }]}>{autoGuide.error}</Text>
-        </View>
-      )}
-
-      {visibleDwell && (
-        <DwellBanner
-          poi={visibleDwell.poi}
-          onAccept={() => {
-            dismissDwell(visibleDwell.poi.pageId);
-            narratePoi(visibleDwell.poi);
-          }}
-          onDismiss={() => dismissDwell(visibleDwell.poi.pageId)}
-        />
-      )}
-
-      <MessageList
-        ref={listRef}
-        messages={messages.messages}
-        autoGuideEnabled={autoGuide.enabled}
+      <ItineraryModal
+        visible={itineraryOpen}
+        onClose={() => setItineraryOpen(false)}
+        location={effectiveLocation}
+        nearbyPois={pois}
       />
-
-      {showTyping && <TypingIndicator />}
-
-      <ChatInputBar
-        input={input}
-        onChangeInput={setInput}
-        onSend={sendMessage}
-        onStop={stop}
-        onCameraPress={takePicture}
-        onMicToggle={voice.isListening ? voice.stopListening : voice.startListening}
-        inferring={inferring}
-        isListening={voice.isListening}
-      />
+      <QuizModal visible={quizOpen} onClose={() => setQuizOpen(false)} nearbyPois={pois} />
     </KeyboardAvoidingView>
   );
 }
 
-function DismissBanner({ text, onDismiss }: { text: string; onDismiss: () => void }) {
+function NoticeCard({ text, onDismiss }: { text: string; onDismiss: () => void }) {
   return (
-    <View style={styles.slowDeviceBanner}>
-      <Text style={[Type.bodySm, { flex: 1, color: '#8A4B00' }]}>{text}</Text>
-      <TouchableOpacity onPress={onDismiss} style={styles.slowDeviceDismiss}>
-        <Text style={[Type.chip, { color: '#8A4B00' }]}>{t('chat.gotIt')}</Text>
+    <View style={styles.notice}>
+      <Text style={styles.noticeGlyph}>ⓘ</Text>
+      <Text style={styles.noticeText} numberOfLines={2}>
+        {text}
+      </Text>
+      <TouchableOpacity onPress={onDismiss} style={styles.noticeDismiss} accessibilityLabel={t('chat.gotIt')}>
+        <Text style={styles.noticeDismissGlyph}>✕</Text>
       </TouchableOpacity>
     </View>
   );
@@ -348,22 +338,6 @@ function DismissBanner({ text, onDismiss }: { text: string; onDismiss: () => voi
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.background },
-  slowDeviceBanner: {
-    backgroundColor: '#FBEBD0',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F4C27A',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  slowDeviceDismiss: {
-    backgroundColor: '#F4C27A',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-  },
   errorBanner: {
     backgroundColor: Colors.errorLight,
     paddingVertical: 8,
@@ -371,29 +345,40 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(198,70,70,0.25)',
   },
-  itineraryCtaRow: {
-    paddingHorizontal: 14,
-    paddingVertical: 4,
-    flexDirection: 'row',
-    gap: 8,
-  },
-  itineraryCta: {
+  notice: {
+    marginHorizontal: 14,
+    marginTop: 4,
+    marginBottom: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: Radii.md,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    backgroundColor: Colors.secondaryLight,
-    borderRadius: 14,
+    gap: 8,
+    backgroundColor: 'rgba(251,235,208,0.6)',
     borderWidth: 1,
-    borderColor: 'rgba(78,163,116,0.25)',
+    borderColor: 'rgba(244,194,122,0.5)',
   },
-  itineraryGlyph: {
-    fontSize: 14,
+  noticeGlyph: {
+    fontSize: 12,
+    color: '#8A4B00',
   },
-  itineraryLabel: {
-    fontFamily: 'Nunito_700Bold',
-    fontSize: 11,
-    color: Colors.secondary,
+  noticeText: {
+    flex: 1,
+    ...Type.hint,
+    color: '#8A4B00',
+    lineHeight: 14,
+  },
+  noticeDismiss: {
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noticeDismissGlyph: {
+    ...Type.chip,
+    color: '#8A4B00',
+    opacity: 0.7,
   },
 });
+

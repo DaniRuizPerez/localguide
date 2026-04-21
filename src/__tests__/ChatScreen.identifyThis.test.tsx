@@ -8,6 +8,11 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 
 jest.mock('../native/LiteRTModule', () => ({ __esModule: true, default: undefined }));
 
+jest.mock('expo-task-manager', () => ({
+  defineTask: jest.fn(),
+  isTaskRegisteredAsync: jest.fn().mockResolvedValue(false),
+}));
+
 const mockRequestCameraPerm = jest.fn().mockResolvedValue({ status: 'granted' });
 const mockLaunchCamera = jest.fn().mockResolvedValue({ canceled: true });
 
@@ -32,11 +37,6 @@ jest.mock('expo-speech', () => ({
   speak: jest.fn(),
   stop: jest.fn(),
   isSpeakingAsync: jest.fn().mockResolvedValue(false),
-}));
-
-jest.mock('expo-task-manager', () => ({
-  defineTask: jest.fn(),
-  isTaskRegisteredAsync: jest.fn().mockResolvedValue(false),
 }));
 
 jest.mock('expo-location', () => ({
@@ -92,7 +92,10 @@ jest.mock('../hooks/useLocation', () => ({
 
 import ChatScreen from '../screens/ChatScreen';
 
-describe('ChatScreen D1 — identify-this header button', () => {
+describe('ChatScreen D1 — identify-this camera entry', () => {
+  // After the Option-A Chat IA redesign, the labeled "What is this?" button
+  // moved out of the header. The camera action now lives only inside the
+  // input capsule (testID "camera-btn") — same functionality, less clutter.
   beforeEach(() => {
     const { useLocation } = require('../hooks/useLocation');
     useLocation.mockReturnValue(defaultLocationState);
@@ -100,12 +103,11 @@ describe('ChatScreen D1 — identify-this header button', () => {
     mockLaunchCamera.mockClear();
   });
 
-  it('renders a labeled "What is this?" button in the header', () => {
-    const { getByTestId, getByText } = render(
+  it('renders a camera button inside the input capsule', () => {
+    const { getByTestId } = render(
       <ChatScreen navigation={{} as any} route={{ key: 'Chat', name: 'Chat' } as any} />
     );
-    expect(getByTestId('identify-this-btn')).toBeTruthy();
-    expect(getByText('What is this?')).toBeTruthy();
+    expect(getByTestId('camera-btn')).toBeTruthy();
   });
 
   it('opens the camera when pressed', async () => {
@@ -113,7 +115,7 @@ describe('ChatScreen D1 — identify-this header button', () => {
       <ChatScreen navigation={{} as any} route={{ key: 'Chat', name: 'Chat' } as any} />
     );
     await act(async () => {
-      fireEvent.press(getByTestId('identify-this-btn'));
+      fireEvent.press(getByTestId('camera-btn'));
     });
     expect(mockRequestCameraPerm).toHaveBeenCalled();
     expect(mockLaunchCamera).toHaveBeenCalled();

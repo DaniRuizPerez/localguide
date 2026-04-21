@@ -23,6 +23,11 @@ export interface Poi {
    * or the API dropped the prop).
    */
   articleLength?: number;
+  /**
+   * Wikipedia's one-line short description (e.g. "public park in Manhattan").
+   * Populated for 'wikipedia' entries, absent for 'llm' entries.
+   */
+  description?: string;
 }
 
 export interface FetchOptions {
@@ -195,6 +200,7 @@ export const poiService = {
             distanceMeters: distanceMeters(latitude, longitude, lat, lon),
             source: 'wikipedia' as const,
             articleLength: typeof p.length === 'number' ? p.length : undefined,
+            description: p.description,
           };
         });
       // Cache the pre-ranked pool so we can re-rank cheaply if the toggle

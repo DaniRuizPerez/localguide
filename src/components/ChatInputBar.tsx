@@ -36,7 +36,13 @@ export function ChatInputBar({
           <Text style={styles.iconGlyph}>{isListening ? '⏹' : '🎤'}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.iconBtn} onPress={onCameraPress} disabled={inferring}>
+        <TouchableOpacity
+          style={styles.iconBtn}
+          onPress={onCameraPress}
+          disabled={inferring}
+          accessibilityLabel={t('chat.identifyThis')}
+          testID="camera-btn"
+        >
           <Text style={styles.iconGlyph}>📷</Text>
         </TouchableOpacity>
 

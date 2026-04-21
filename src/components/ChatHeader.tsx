@@ -9,10 +9,7 @@ interface Props {
   status: string;
   gps: GPSContext | null;
   manualLocation: string | null;
-  onIdentifyPress: () => void;
   onSettingsPress: () => void;
-  /** Disables the camera CTA while an inference is in flight. */
-  busy: boolean;
 }
 
 function LocationPill({
@@ -46,35 +43,16 @@ function LocationPill({
   );
 }
 
-export function ChatHeader({
-  status,
-  gps,
-  manualLocation,
-  onIdentifyPress,
-  onSettingsPress,
-  busy,
-}: Props) {
+export function ChatHeader({ status, gps, manualLocation, onSettingsPress }: Props) {
   return (
     <View style={styles.header}>
       <LocationPill status={status} gps={gps} manualLocation={manualLocation} />
       <TouchableOpacity
-        style={styles.identifyBtn}
-        onPress={onIdentifyPress}
-        disabled={busy}
-        accessibilityLabel={t('chat.identifyThis')}
-        accessibilityRole="button"
-        testID="identify-this-btn"
-      >
-        <Text style={styles.identifyGlyph}>📷</Text>
-        <Text style={styles.identifyLabel} numberOfLines={1}>
-          {t('chat.identifyThis')}
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity
         style={styles.settingsBtn}
         onPress={onSettingsPress}
-        accessibilityLabel={t('narration.settingsButton')}
+        accessibilityLabel={t('settings.title')}
         accessibilityRole="button"
+        testID="settings-btn"
       >
         <Text style={styles.settingsGlyph}>⚙</Text>
       </TouchableOpacity>
@@ -89,7 +67,7 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     gap: 8,
   },
   locationPill: {
@@ -123,24 +101,5 @@ const styles = StyleSheet.create({
   settingsGlyph: {
     fontSize: 16,
     color: Colors.textSecondary,
-  },
-  identifyBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: Radii.md,
-    backgroundColor: Colors.primary,
-    borderWidth: 1,
-    borderColor: Colors.primary,
-    ...Shadows.chipActiveHard,
-  },
-  identifyGlyph: {
-    fontSize: 12,
-  },
-  identifyLabel: {
-    ...Type.chip,
-    color: '#FFFFFF',
   },
 });
