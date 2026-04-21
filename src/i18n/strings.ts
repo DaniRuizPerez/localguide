@@ -35,6 +35,12 @@ export const EN = {
     identifyThis: 'What is this?',
     hiddenGems: 'HIDDEN GEMS',
   },
+  compass: {
+    accessibilityLabel: 'Compass pointing toward {label}',
+    guideMeTo: 'Guide me to {label}',
+    tapToClear: 'Tap to clear compass',
+    noSensor: 'NO COMPASS',
+  },
   map: {
     aroundYou: 'Around you now',
     stopsPickedOut: '{count} stops your guide picked out',

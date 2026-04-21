@@ -9,6 +9,7 @@ import { Type, Radii, Shadows, Spacing } from '../theme/tokens';
 import { softTactileMapStyle } from '../theme/mapStyle';
 import { poiService, type Poi } from '../services/PoiService';
 import { SoftButton } from '../components/SoftButton';
+import { CompassArrow } from '../components/CompassArrow';
 import { t } from '../i18n';
 
 type Props = BottomTabScreenProps<RootTabParamList, 'Map'>;
@@ -20,6 +21,7 @@ export default function MapScreen(_props: Props) {
   const mapRef = useRef<MapView>(null);
   const didInitialCenter = useRef(false);
   const [pois, setPois] = useState<Poi[]>([]);
+  const [compassTarget, setCompassTarget] = useState<Poi | null>(null);
 
   useEffect(() => {
     if (!gps || didInitialCenter.current) return;
@@ -141,33 +143,65 @@ export default function MapScreen(_props: Props) {
             ? t('map.stopsPickedOut', { count: pois.length })
             : t('map.scanning')}
         </Text>
+
+        {compassTarget && gps && compassTarget.source !== 'llm' && (
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => setCompassTarget(null)}
+            accessibilityHint={t('compass.tapToClear')}
+            style={{ marginTop: 10 }}
+          >
+            <CompassArrow
+              targetLat={compassTarget.latitude}
+              targetLon={compassTarget.longitude}
+              userLat={gps.latitude}
+              userLon={gps.longitude}
+              label={compassTarget.title}
+            />
+          </TouchableOpacity>
+        )}
+
         <ScrollView
           style={{ marginTop: 10, maxHeight: 160 }}
           contentContainerStyle={{ gap: 6 }}
           showsVerticalScrollIndicator={false}
         >
-          {pois.map((p) => (
-            <View key={`row-${p.source}-${p.pageId}`} style={styles.poiRow}>
-              <View style={styles.poiIcon}>
-                <Text style={{ fontSize: 14 }}>{p.source === 'llm' ? '🧠' : '📍'}</Text>
-              </View>
-              <View style={{ flex: 1, marginLeft: 10 }}>
-                <Text style={[Type.poi, { color: Colors.text }]} numberOfLines={1}>
-                  {p.title}
-                </Text>
-                <Text style={[Type.hint, { color: Colors.textTertiary }]} numberOfLines={1}>
-                  {p.source === 'llm' ? t('map.aiSuggested') : t('map.wikipedia')}
-                </Text>
-              </View>
-              <View style={styles.poiBadge}>
-                <Text style={[Type.chip, { color: Colors.primary }]}>
-                  {p.distanceMeters < 1000
-                    ? `${Math.round(p.distanceMeters)} m`
-                    : `${(p.distanceMeters / 1000).toFixed(1)} km`}
-                </Text>
-              </View>
-            </View>
-          ))}
+          {pois.map((p) => {
+            const isTarget = compassTarget?.pageId === p.pageId;
+            const canGuide = p.source !== 'llm';
+            return (
+              <TouchableOpacity
+                key={`row-${p.source}-${p.pageId}`}
+                style={[styles.poiRow, isTarget && styles.poiRowActive]}
+                onPress={() => {
+                  if (!canGuide) return;
+                  setCompassTarget(isTarget ? null : p);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={t('compass.guideMeTo', { label: p.title })}
+                activeOpacity={canGuide ? 0.7 : 1}
+              >
+                <View style={styles.poiIcon}>
+                  <Text style={{ fontSize: 14 }}>{p.source === 'llm' ? '🧠' : '📍'}</Text>
+                </View>
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text style={[Type.poi, { color: Colors.text }]} numberOfLines={1}>
+                    {p.title}
+                  </Text>
+                  <Text style={[Type.hint, { color: Colors.textTertiary }]} numberOfLines={1}>
+                    {p.source === 'llm' ? t('map.aiSuggested') : t('map.wikipedia')}
+                  </Text>
+                </View>
+                <View style={styles.poiBadge}>
+                  <Text style={[Type.chip, { color: Colors.primary }]}>
+                    {p.distanceMeters < 1000
+                      ? `${Math.round(p.distanceMeters)} m`
+                      : `${(p.distanceMeters / 1000).toFixed(1)} km`}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       </View>
     </View>
@@ -305,6 +339,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 6,
     borderRadius: Radii.md,
+  },
+  poiRowActive: {
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    backgroundColor: 'rgba(232,132,92,0.08)',
   },
   poiIcon: {
     width: 34,
