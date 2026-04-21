@@ -100,6 +100,8 @@ export const EN = {
   timeline: {
     title: 'Timeline',
     generating: 'Building timeline…',
+    empty: 'Not enough reliable history for this spot offline — try again online for richer data.',
+    openButton: 'Timeline',
   },
   quiz: {
     title: 'Local trivia',

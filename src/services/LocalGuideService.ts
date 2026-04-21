@@ -183,6 +183,63 @@ export interface ItineraryTask {
   abort: () => Promise<void>;
 }
 
+export interface TimelineEvent {
+  year: string;
+  event: string;
+}
+
+export interface TimelineTask {
+  promise: Promise<TimelineEvent[]>;
+  abort: () => Promise<void>;
+}
+
+function buildTimelinePrompt(poiTitle: string, location: GPSContext | string | null): string {
+  const directive = localePromptDirective();
+  const localeLine = directive ? `\n${directive}` : '';
+  const placeHint =
+    location && typeof location !== 'string' && location.placeName
+      ? `\nContext: in ${location.placeName}.`
+      : typeof location === 'string'
+      ? `\nContext: in ${location}.`
+      : '';
+  return (
+    `You are a history-focused local guide. Produce a concise vertical timeline ` +
+    `of notable events for this place, from earliest to most recent.${localeLine}\n` +
+    `Place: ${poiTitle}${placeHint}\n\n` +
+    `Output 4–8 entries, strictly in this format:\n` +
+    `YEAR — event description (one sentence)\n\n` +
+    `Rules:\n` +
+    `- Use a real year, century, or well-known period as YEAR (e.g. "1793", "1880s", "12th century").\n` +
+    `- If you are not confident about a specific year, write the period instead.\n` +
+    `- Never invent events. If you have fewer than 4 reliable entries, output only the ones you are confident in.\n` +
+    `- No bullets, no numbering, no intro, no closing remarks.`
+  );
+}
+
+function parseTimeline(text: string): TimelineEvent[] {
+  const events: TimelineEvent[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    // Expect "YEAR — event". Also accept bullets / numbering the model adds
+    // despite instructions.
+    const cleaned = line.replace(/^[\s•\-*]+/, '').replace(/^\d+[.)]\s*/, '');
+    const match = cleaned.match(/^(.+?)\s*[—\-–]\s*(.+)$/);
+    if (!match) continue;
+    const year = match[1].trim();
+    const event = match[2].trim();
+    // Reject entries where "year" is clearly not a year/period (no digits and
+    // no century word).
+    if (!year) continue;
+    if (!/\d/.test(year) && !/(century|period|era|dynasty|age|bc|bce|ad|ce)/i.test(year)) {
+      continue;
+    }
+    if (!event) continue;
+    events.push({ year, event });
+  }
+  return events.slice(0, 10);
+}
+
 function buildItineraryPrompt(
   location: GPSContext | string,
   durationHours: number,
@@ -361,6 +418,57 @@ export const localGuideService = {
             },
           },
           { maxTokens: 400 }
+        )
+        .then((handle) => {
+          if (settled) {
+            handle.abort();
+            return;
+          }
+          handleRef = handle;
+        })
+        .catch((err) => {
+          settled = true;
+          reject(err instanceof Error ? err : new Error(String(err)));
+        });
+    });
+
+    return {
+      promise,
+      abort: async () => {
+        if (handleRef) await handleRef.abort();
+        settled = true;
+      },
+    };
+  },
+
+  /**
+   * Streams a historical timeline for a POI. Resolves with parsed
+   * year/event pairs. Abortable.
+   */
+  buildTimeline(poiTitle: string, location: GPSContext | string | null): TimelineTask {
+    const prompt = buildTimelinePrompt(poiTitle, location);
+    let handleRef: StreamHandle | null = null;
+    let settled = false;
+
+    const promise = new Promise<TimelineEvent[]>((resolve, reject) => {
+      let fullText = '';
+      inferenceService
+        .runInferenceStream(
+          prompt,
+          {
+            onToken: (delta) => {
+              fullText += delta;
+            },
+            onDone: () => {
+              settled = true;
+              resolve(parseTimeline(fullText));
+            },
+            onError: (message) => {
+              settled = true;
+              reject(new Error(message));
+            },
+          },
+          { maxTokens: 350 }
         )
         .then((handle) => {
           if (settled) {

@@ -10,6 +10,7 @@ import { softTactileMapStyle } from '../theme/mapStyle';
 import { poiService, type Poi } from '../services/PoiService';
 import { SoftButton } from '../components/SoftButton';
 import { CompassArrow } from '../components/CompassArrow';
+import { TimelineModal } from '../components/TimelineModal';
 import { breadcrumbTrail } from '../services/BreadcrumbTrail';
 import { useBreadcrumbTrail } from '../hooks/useBreadcrumbTrail';
 import { t } from '../i18n';
@@ -24,6 +25,7 @@ export default function MapScreen(_props: Props) {
   const didInitialCenter = useRef(false);
   const [pois, setPois] = useState<Poi[]>([]);
   const [compassTarget, setCompassTarget] = useState<Poi | null>(null);
+  const [timelinePoi, setTimelinePoi] = useState<Poi | null>(null);
   const trail = useBreadcrumbTrail();
 
   // Record every GPS fix into the breadcrumb buffer. The service itself
@@ -227,11 +229,29 @@ export default function MapScreen(_props: Props) {
                       : `${(p.distanceMeters / 1000).toFixed(1)} km`}
                   </Text>
                 </View>
+                <TouchableOpacity
+                  style={styles.timelineIcon}
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    setTimelinePoi(p);
+                  }}
+                  accessibilityLabel={t('timeline.openButton')}
+                  testID={`timeline-${p.pageId}`}
+                >
+                  <Text style={{ fontSize: 14 }}>📜</Text>
+                </TouchableOpacity>
               </TouchableOpacity>
             );
           })}
         </ScrollView>
       </View>
+
+      <TimelineModal
+        visible={timelinePoi != null}
+        onClose={() => setTimelinePoi(null)}
+        poiTitle={timelinePoi?.title ?? null}
+        location={gps}
+      />
     </View>
   );
 }
@@ -392,5 +412,16 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: Radii.sm,
     marginLeft: Spacing.sm,
+  },
+  timelineIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 6,
   },
 });
