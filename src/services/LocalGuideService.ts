@@ -6,6 +6,7 @@ import {
   type StreamHandle,
 } from './InferenceService';
 import { runParsedStream, type AbortableTask } from './streamTask';
+import { buildNarratorPrompt, formatCoordinates } from './promptBuilder';
 import { localePromptDirective } from '../i18n';
 import { narrationPrefs, narrationLengthDirective, type NarrationLength } from './NarrationPrefs';
 import { guidePrefs, HIDDEN_GEMS_DIRECTIVE } from './GuidePrefs';
@@ -38,34 +39,13 @@ const TOPIC_LABELS: Record<GuideTopic, string> = {
   culture: 'culture, customs, and everyday life',
 };
 
-function topicFocusLine(topic: GuideTopic | undefined): string {
-  if (!topic || topic === 'everything') return '';
-  return `\nFocus area: ${TOPIC_LABELS[topic]}. Lean your reply toward this topic unless the user asks about something else.`;
+function topicFocusDirective(topic: GuideTopic | undefined): string | false {
+  if (!topic || topic === 'everything') return false;
+  return `Focus area: ${TOPIC_LABELS[topic]}. Lean your reply toward this topic unless the user asks about something else.`;
 }
 
-// Non-empty when the user's phone locale is not English. Prepended to every
-// narration prompt so Gemma speaks the visitor's language.
-function localeLine(): string {
-  const directive = localePromptDirective();
-  return directive ? `\n${directive}` : '';
-}
-
-// User-tuned narration length. Appended so it wins over the default
-// "3-6 sentences" rule in SYSTEM_PROMPT when they conflict.
-function lengthLine(length?: NarrationLength): string {
-  const effective = length ?? narrationPrefs.get().length;
-  return `\n${narrationLengthDirective(effective)}`;
-}
-
-function formatCoordinates(location: GPSContext | string): string {
-  if (typeof location === 'string') return location;
-  const accuracyNote = location.accuracy != null ? ` (±${Math.round(location.accuracy)}m)` : '';
-  return `${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}${accuracyNote}`;
-}
-
-function placeLine(location: GPSContext | string): string {
-  if (typeof location === 'string') return `Place: ${location}\n`;
-  return location.placeName ? `Place: ${location.placeName}\n` : '';
+function lengthDirective(length?: NarrationLength): string {
+  return narrationLengthDirective(length ?? narrationPrefs.get().length);
 }
 
 function buildPrompt(
@@ -74,28 +54,12 @@ function buildPrompt(
   topic?: GuideTopic,
   length?: NarrationLength
 ): string {
-  // When we have a resolved place name, we OMIT the coordinates line entirely
-  // — Gemma 3 1B tends to parrot numbers back into the narration even when told
-  // not to, and coordinates add nothing beyond the place name. When we don't
-  // have a place name, coords are the only location signal we have, so we keep
-  // them and rely on the system prompt to suppress verbalization.
-  const query = userQuery.trim() || 'Narrate what is interesting about this place.';
-  const hasPlaceName = typeof location === 'string' || !!(location.placeName);
-  const coordinatesLine = hasPlaceName ? '' : `Coordinates: ${formatCoordinates(location)}\n`;
-  return (
-    `${SYSTEM_PROMPT}${topicFocusLine(topic)}${localeLine()}${lengthLine(length)}\n` +
-    `${placeLine(location)}` +
-    `${coordinatesLine}` +
-    `Cue: ${query}`
-  );
-}
-
-// Keep the legacy name as an alias so nothing else that references it breaks;
-// the public surface is still "formatLocation" for the LLM-list prompt builder.
-function formatLocation(location: GPSContext | string): string {
-  if (typeof location === 'string') return location;
-  const coords = formatCoordinates(location);
-  return location.placeName ? `${location.placeName} (${coords})` : coords;
+  return buildNarratorPrompt({
+    system: SYSTEM_PROMPT,
+    directives: [topicFocusDirective(topic), localePromptDirective(), lengthDirective(length)],
+    place: location,
+    cue: userQuery.trim() || 'Narrate what is interesting about this place.',
+  });
 }
 
 export interface GuideResponse {
@@ -110,14 +74,18 @@ function buildImagePrompt(
   topic?: GuideTopic,
   length?: NarrationLength
 ): string {
-  const query = userQuery.trim() || 'Narrate what is in this photo.';
-  return (
-    `${SYSTEM_PROMPT}${topicFocusLine(topic)}${localeLine()}${lengthLine(length)}\n` +
-    `${placeLine(location)}` +
-    `Coordinates: ${formatCoordinates(location)}\n` +
-    `The visitor shared a photo from this spot. Identify what's in it and narrate its story — what it is, why it matters, the history and cultural background a local would share. Ground every claim in what's actually visible; use Place/Coordinates only to disambiguate. If image and location disagree, trust the image.\n` +
-    `Cue: ${query}`
-  );
+  return buildNarratorPrompt({
+    system: SYSTEM_PROMPT,
+    directives: [topicFocusDirective(topic), localePromptDirective(), lengthDirective(length)],
+    place: location,
+    // Image path needs coords even when we have a place name — the model
+    // uses them to disambiguate when the photo contents and named place
+    // disagree.
+    omitCoordsWithPlace: false,
+    extraContext:
+      "The visitor shared a photo from this spot. Identify what's in it and narrate its story — what it is, why it matters, the history and cultural background a local would share. Ground every claim in what's actually visible; use Place/Coordinates only to disambiguate. If image and location disagree, trust the image.",
+    cue: userQuery.trim() || 'Narrate what is in this photo.',
+  });
 }
 
 // Prompt for the offline nearby-places fallback. Intentionally sidesteps the
@@ -129,20 +97,23 @@ function buildNearbyPlacesPrompt(
   radiusMeters: number,
   hiddenGems: boolean
 ): string {
-  const radiusLabel = radiusMeters >= 1000
-    ? `${(radiusMeters / 1000).toFixed(radiusMeters % 1000 === 0 ? 0 : 1)} km`
-    : `${radiusMeters} m`;
-  const hiddenGemsLine = hiddenGems ? `\n${HIDDEN_GEMS_DIRECTIVE}` : '';
-  return (
-    `You are a local tourist expert helping a traveler find sights worth visiting.${hiddenGemsLine}\n` +
-    `${placeLine(location)}` +
-    `Coordinates: ${formatCoordinates(location)}\n` +
-    `Task: list 6 TOURIST-WORTHY places WITHIN ${radiusLabel} of the visitor — a specific named attraction a traveler would actually go see.\n` +
-    `Allowed categories: landmarks, historic sites, famous buildings, parks, gardens, plazas, museums, art galleries, universities, libraries, theaters, monuments, scenic viewpoints, notable neighborhoods.\n` +
-    `NEVER include: chain stores (7-Eleven, Starbucks, McDonald's), gas stations, supermarkets, convenience stores, ZIP codes, highways, streets, administrative areas (countries, states, counties), generic schools, bus or metro stations, corporate headquarters.\n` +
-    `Real places only; do not invent. If you don't know what's near this place, output nothing.\n` +
-    `Output ONLY the place names, one per line. No numbering. No bullets. No descriptions. No intro or closing text.`
-  );
+  const radiusLabel =
+    radiusMeters >= 1000
+      ? `${(radiusMeters / 1000).toFixed(radiusMeters % 1000 === 0 ? 0 : 1)} km`
+      : `${radiusMeters} m`;
+  return buildNarratorPrompt({
+    system: 'You are a local tourist expert helping a traveler find sights worth visiting.',
+    directives: [hiddenGems && HIDDEN_GEMS_DIRECTIVE],
+    place: location,
+    // The radius task needs coords to anchor even when we have a place name.
+    omitCoordsWithPlace: false,
+    extraContext:
+      `Task: list 6 TOURIST-WORTHY places WITHIN ${radiusLabel} of the visitor — a specific named attraction a traveler would actually go see.\n` +
+      `Allowed categories: landmarks, historic sites, famous buildings, parks, gardens, plazas, museums, art galleries, universities, libraries, theaters, monuments, scenic viewpoints, notable neighborhoods.\n` +
+      `NEVER include: chain stores (7-Eleven, Starbucks, McDonald's), gas stations, supermarkets, convenience stores, ZIP codes, highways, streets, administrative areas (countries, states, counties), generic schools, bus or metro stations, corporate headquarters.\n` +
+      `Real places only; do not invent. If you don't know what's near this place, output nothing.\n` +
+      `Output ONLY the place names, one per line. No numbering. No bullets. No descriptions. No intro or closing text.`,
+  });
 }
 
 function parsePlaceList(text: string): string[] {
@@ -194,25 +165,25 @@ export interface QuizQuestion {
 export type QuizTask = AbortableTask<QuizQuestion[]>;
 
 function buildQuizPrompt(nearbyTitles: string[], count: number): string {
-  const directive = localePromptDirective();
-  const localeLine = directive ? `\n${directive}` : '';
   const placesLine = nearbyTitles.length
     ? nearbyTitles.slice(0, 8).join(', ')
     : '(no specific list — use any widely-known facts about this area)';
-  return (
-    `You are writing a short local-trivia quiz for a visitor walking near these places: ${placesLine}.${localeLine}\n\n` +
-    `Write exactly ${count} multiple-choice questions. Each question has 4 options labelled A, B, C, D, and ONE correct answer. ` +
-    `Mix easy and medium difficulty. Ground questions in real, verifiable facts (history, geography, culture, architecture). ` +
-    `Never invent facts. If you are not sure about a place, use a well-established general-knowledge fact about the area.\n\n` +
-    `Output strictly in this format, with a blank line between questions:\n` +
-    `Q: <question>\n` +
-    `A: <option>\n` +
-    `B: <option>\n` +
-    `C: <option>\n` +
-    `D: <option>\n` +
-    `Correct: A\n` +
-    `(no intro, no explanations, no closing remarks)`
-  );
+  return buildNarratorPrompt({
+    system: `You are writing a short local-trivia quiz for a visitor walking near these places: ${placesLine}.`,
+    directives: [localePromptDirective()],
+    extraContext:
+      `Write exactly ${count} multiple-choice questions. Each question has 4 options labelled A, B, C, D, and ONE correct answer. ` +
+      `Mix easy and medium difficulty. Ground questions in real, verifiable facts (history, geography, culture, architecture). ` +
+      `Never invent facts. If you are not sure about a place, use a well-established general-knowledge fact about the area.\n\n` +
+      `Output strictly in this format, with a blank line between questions:\n` +
+      `Q: <question>\n` +
+      `A: <option>\n` +
+      `B: <option>\n` +
+      `C: <option>\n` +
+      `D: <option>\n` +
+      `Correct: A\n` +
+      `(no intro, no explanations, no closing remarks)`,
+  });
 }
 
 function parseQuiz(text: string): QuizQuestion[] {
@@ -248,26 +219,28 @@ function parseQuiz(text: string): QuizQuestion[] {
 }
 
 function buildTimelinePrompt(poiTitle: string, location: GPSContext | string | null): string {
-  const directive = localePromptDirective();
-  const localeLine = directive ? `\n${directive}` : '';
   const placeHint =
     location && typeof location !== 'string' && location.placeName
-      ? `\nContext: in ${location.placeName}.`
+      ? `Context: in ${location.placeName}.`
       : typeof location === 'string'
-      ? `\nContext: in ${location}.`
-      : '';
-  return (
-    `You are a history-focused local guide. Produce a concise vertical timeline ` +
-    `of notable events for this place, from earliest to most recent.${localeLine}\n` +
-    `Place: ${poiTitle}${placeHint}\n\n` +
-    `Output 4–8 entries, strictly in this format:\n` +
-    `YEAR — event description (one sentence)\n\n` +
-    `Rules:\n` +
-    `- Use a real year, century, or well-known period as YEAR (e.g. "1793", "1880s", "12th century").\n` +
-    `- If you are not confident about a specific year, write the period instead.\n` +
-    `- Never invent events. If you have fewer than 4 reliable entries, output only the ones you are confident in.\n` +
-    `- No bullets, no numbering, no intro, no closing remarks.`
-  );
+      ? `Context: in ${location}.`
+      : false;
+  return buildNarratorPrompt({
+    system:
+      'You are a history-focused local guide. Produce a concise vertical timeline of notable events for this place, from earliest to most recent.',
+    directives: [localePromptDirective()],
+    // Timeline POI doesn't have real coords — pass the POI title as the Place.
+    place: poiTitle,
+    extraContext:
+      (placeHint ? `${placeHint}\n\n` : '') +
+      `Output 4–8 entries, strictly in this format:\n` +
+      `YEAR — event description (one sentence)\n\n` +
+      `Rules:\n` +
+      `- Use a real year, century, or well-known period as YEAR (e.g. "1793", "1880s", "12th century").\n` +
+      `- If you are not confident about a specific year, write the period instead.\n` +
+      `- Never invent events. If you have fewer than 4 reliable entries, output only the ones you are confident in.\n` +
+      `- No bullets, no numbering, no intro, no closing remarks.`,
+  });
 }
 
 function parseTimeline(text: string): TimelineEvent[] {
@@ -299,26 +272,27 @@ function buildItineraryPrompt(
   durationHours: number,
   nearbyTitles: string[]
 ): string {
-  const directive = localePromptDirective();
-  const localeLine = directive ? `\n${directive}` : '';
   // Feed the model real nearby POIs so it doesn't hallucinate, but also let
   // it drop or reorder them based on what actually fits the time budget.
   const optionList = nearbyTitles.length
     ? nearbyTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')
     : '(no list available — choose what makes sense near this place)';
   const count = durationHours <= 1.5 ? 3 : durationHours <= 5 ? 5 : 7;
-  return (
-    `You are a local tour planner helping a visitor with ${durationHours} hour(s) near ` +
-    `${typeof location === 'string' ? location : location.placeName ?? formatCoordinates(location)}.${localeLine}\n\n` +
-    `Candidate stops (real places, ordered by proximity):\n${optionList}\n\n` +
-    `Pick ${count} stops total in the best visit order for someone walking between them. ` +
-    `Account for walking time and ~15 min at each stop. Drop the candidates that don't fit; ` +
-    `prefer a coherent route (no backtracking) over ticking every box.\n` +
-    `Output strictly in this format, one line per stop:\n` +
-    `1. STOP NAME — one-sentence reason to visit\n` +
-    `2. STOP NAME — one-sentence reason to visit\n` +
-    `(no header, no intro, no summary, no bullets other than the numbered list)`
-  );
+  const placeRef =
+    typeof location === 'string' ? location : location.placeName ?? formatCoordinates(location);
+  return buildNarratorPrompt({
+    system: `You are a local tour planner helping a visitor with ${durationHours} hour(s) near ${placeRef}.`,
+    directives: [localePromptDirective()],
+    extraContext:
+      `Candidate stops (real places, ordered by proximity):\n${optionList}\n\n` +
+      `Pick ${count} stops total in the best visit order for someone walking between them. ` +
+      `Account for walking time and ~15 min at each stop. Drop the candidates that don't fit; ` +
+      `prefer a coherent route (no backtracking) over ticking every box.\n` +
+      `Output strictly in this format, one line per stop:\n` +
+      `1. STOP NAME — one-sentence reason to visit\n` +
+      `2. STOP NAME — one-sentence reason to visit\n` +
+      `(no header, no intro, no summary, no bullets other than the numbered list)`,
+  });
 }
 
 function parseItinerary(text: string): ItineraryStop[] {
