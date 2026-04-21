@@ -64,6 +64,12 @@ export const EN = {
     pause: 'Pause',
     resume: 'Resume',
     skip: 'Skip',
+    settingsTitle: 'Narration',
+    settingsButton: 'Voice & speed',
+    lengthSection: 'LENGTH',
+    voiceSystemDefault: 'System default',
+    voiceNoneAvailable: 'No matching voices installed on this device.',
+    done: 'Done',
   },
   itinerary: {
     title: 'I have {hours} hour(s)',

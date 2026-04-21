@@ -34,6 +34,7 @@ import { Colors } from '../theme/colors';
 import { Type, Radii, Shadows } from '../theme/tokens';
 import { GuideAvatar } from '../components/GuideAvatar';
 import { NarrationLengthPicker } from '../components/NarrationLengthPicker';
+import { VoiceRateControls } from '../components/VoiceRateControls';
 import { t } from '../i18n';
 
 type Props = BottomTabScreenProps<RootTabParamList, 'Chat'>;
@@ -249,6 +250,7 @@ export default function ChatScreen(props: Props) {
   const [nearbyPois, setNearbyPois] = useState<Poi[]>([]);
   const [poisLoading, setPoisLoading] = useState(false);
   const [poiRadiusMeters, setPoiRadiusMeters] = useState<number>(1000);
+  const [narrationSettingsOpen, setNarrationSettingsOpen] = useState(false);
 
   useEffect(() => {
     speakResponsesRef.current = speakResponses;
@@ -636,6 +638,14 @@ export default function ChatScreen(props: Props) {
     >
       <View style={styles.header}>
         <LocationPill status={status} gps={gps} manualLocation={manualLocation} />
+        <TouchableOpacity
+          style={styles.settingsBtn}
+          onPress={() => setNarrationSettingsOpen(true)}
+          accessibilityLabel={t('narration.settingsButton')}
+          accessibilityRole="button"
+        >
+          <Text style={styles.settingsGlyph}>⚙</Text>
+        </TouchableOpacity>
       </View>
 
       {(status === 'denied' || status === 'error') && !gps && (
@@ -662,6 +672,11 @@ export default function ChatScreen(props: Props) {
       <NarrationLengthPicker />
 
       <RadiusSelector value={poiRadiusMeters} onChange={setPoiRadiusMeters} />
+
+      <VoiceRateControls
+        visible={narrationSettingsOpen}
+        onClose={() => setNarrationSettingsOpen(false)}
+      />
 
       <AttractionsChips
         pois={nearbyPois.slice(0, 8)}
@@ -792,6 +807,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
+    gap: 8,
+  },
+  settingsBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Shadows.softOutset,
+  },
+  settingsGlyph: {
+    fontSize: 16,
+    color: Colors.textSecondary,
   },
   locationPill: {
     flexDirection: 'row',

@@ -1,5 +1,6 @@
 import * as Speech from 'expo-speech';
 import { currentSpeechTag } from '../i18n';
+import { narrationPrefs } from './NarrationPrefs';
 
 let speaking = false;
 const queue: string[] = [];
@@ -8,6 +9,21 @@ const queue: string[] = [];
 // and used by every speak() call. Rate clamped to a sensible walking-tour range.
 let narrationRate = 0.95;
 let narrationVoice: string | undefined;
+
+// Bridge user prefs (persisted) → the live TTS options used for every utterance.
+// Subscribe once at module load; prefs may hydrate asynchronously so we also pull
+// the current snapshot immediately for the common warm-start case.
+{
+  const applyPrefs = (p: { rate: number; voice: string | undefined }) => {
+    narrationRate = Math.max(0.5, Math.min(2.0, p.rate));
+    narrationVoice = p.voice;
+  };
+  applyPrefs(narrationPrefs.get());
+  narrationPrefs.subscribe(applyPrefs);
+  // Kick off hydration so persisted rate/voice are in effect as soon as they
+  // arrive — applyPrefs will be notified through the subscription.
+  narrationPrefs.hydrate().catch(() => {});
+}
 
 function speakNext(): void {
   if (speaking) return;
@@ -102,11 +118,14 @@ export const speechService = {
   },
 
   setRate(rate: number): void {
-    narrationRate = Math.max(0.5, Math.min(2.0, rate));
+    // Route through narrationPrefs so the value persists and notifies other
+    // subscribers (e.g. the settings UI). The subscribe callback above writes
+    // back into narrationRate.
+    narrationPrefs.setRate(rate);
   },
 
   setVoice(voice: string | undefined): void {
-    narrationVoice = voice;
+    narrationPrefs.setVoice(voice);
   },
 
   get rate(): number {
