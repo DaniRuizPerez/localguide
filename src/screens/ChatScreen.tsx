@@ -33,6 +33,7 @@ import { useProximityNarration } from '../hooks/useProximityNarration';
 import { Colors } from '../theme/colors';
 import { Type, Radii, Shadows } from '../theme/tokens';
 import { GuideAvatar } from '../components/GuideAvatar';
+import { NarrationLengthPicker } from '../components/NarrationLengthPicker';
 import { t } from '../i18n';
 
 type Props = BottomTabScreenProps<RootTabParamList, 'Chat'>;
@@ -657,6 +658,8 @@ export default function ChatScreen(props: Props) {
       )}
 
       <TopicChips selected={topic} onSelect={setTopic} />
+
+      <NarrationLengthPicker />
 
       <RadiusSelector value={poiRadiusMeters} onChange={setPoiRadiusMeters} />
 

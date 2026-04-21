@@ -6,6 +6,7 @@ import {
   type StreamHandle,
 } from './InferenceService';
 import { localePromptDirective } from '../i18n';
+import { narrationPrefs, narrationLengthDirective, type NarrationLength } from './NarrationPrefs';
 
 // Kept terse on purpose: prefill cost is O(prompt tokens), and on low-end CPU devices
 // (Pixel 3-class) every 100 tokens of system prompt adds ~0.5–1 s before the first
@@ -47,6 +48,13 @@ function localeLine(): string {
   return directive ? `\n${directive}` : '';
 }
 
+// User-tuned narration length. Appended so it wins over the default
+// "3-6 sentences" rule in SYSTEM_PROMPT when they conflict.
+function lengthLine(length?: NarrationLength): string {
+  const effective = length ?? narrationPrefs.get().length;
+  return `\n${narrationLengthDirective(effective)}`;
+}
+
 function formatCoordinates(location: GPSContext | string): string {
   if (typeof location === 'string') return location;
   const accuracyNote = location.accuracy != null ? ` (±${Math.round(location.accuracy)}m)` : '';
@@ -58,7 +66,12 @@ function placeLine(location: GPSContext | string): string {
   return location.placeName ? `Place: ${location.placeName}\n` : '';
 }
 
-function buildPrompt(location: GPSContext | string, userQuery: string, topic?: GuideTopic): string {
+function buildPrompt(
+  location: GPSContext | string,
+  userQuery: string,
+  topic?: GuideTopic,
+  length?: NarrationLength
+): string {
   // When we have a resolved place name, we OMIT the coordinates line entirely
   // — Gemma 3 1B tends to parrot numbers back into the narration even when told
   // not to, and coordinates add nothing beyond the place name. When we don't
@@ -68,7 +81,7 @@ function buildPrompt(location: GPSContext | string, userQuery: string, topic?: G
   const hasPlaceName = typeof location === 'string' || !!(location.placeName);
   const coordinatesLine = hasPlaceName ? '' : `Coordinates: ${formatCoordinates(location)}\n`;
   return (
-    `${SYSTEM_PROMPT}${topicFocusLine(topic)}${localeLine()}\n` +
+    `${SYSTEM_PROMPT}${topicFocusLine(topic)}${localeLine()}${lengthLine(length)}\n` +
     `${placeLine(location)}` +
     `${coordinatesLine}` +
     `Cue: ${query}`
@@ -89,10 +102,15 @@ export interface GuideResponse {
   durationMs: number;
 }
 
-function buildImagePrompt(location: GPSContext | string, userQuery: string, topic?: GuideTopic): string {
+function buildImagePrompt(
+  location: GPSContext | string,
+  userQuery: string,
+  topic?: GuideTopic,
+  length?: NarrationLength
+): string {
   const query = userQuery.trim() || 'Narrate what is in this photo.';
   return (
-    `${SYSTEM_PROMPT}${topicFocusLine(topic)}${localeLine()}\n` +
+    `${SYSTEM_PROMPT}${topicFocusLine(topic)}${localeLine()}${lengthLine(length)}\n` +
     `${placeLine(location)}` +
     `Coordinates: ${formatCoordinates(location)}\n` +
     `The visitor shared a photo from this spot. Identify what's in it and narrate its story — what it is, why it matters, the history and cultural background a local would share. Ground every claim in what's actually visible; use Place/Coordinates only to disambiguate. If image and location disagree, trust the image.\n` +

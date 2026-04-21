@@ -19,6 +19,7 @@ import { GuideAvatar } from './src/components/GuideAvatar';
 import { Colors } from './src/theme/colors';
 import { Type } from './src/theme/tokens';
 import { t } from './src/i18n';
+import { narrationPrefs } from './src/services/NarrationPrefs';
 
 type AppState = 'checking' | 'needs_download' | 'warming_up' | 'ready';
 
@@ -35,6 +36,13 @@ export default function App() {
     Nunito_700Bold,
     Nunito_800ExtraBold,
   });
+
+  useEffect(() => {
+    // Hydrate persisted narration preferences (length, voice, rate) in parallel
+    // with the model boot-up checks below — cheap async, can't fail in a way
+    // that blocks the app.
+    narrationPrefs.hydrate();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
