@@ -1,4 +1,4 @@
-import { humanizeVoices, inferGender } from '../services/voiceLabels';
+import { humanizeVoices, inferGender, pickDiverseVoices } from '../services/voiceLabels';
 
 type Voice = Parameters<typeof humanizeVoices>[0] extends Array<infer V> ? V : never;
 
@@ -111,5 +111,86 @@ describe('humanizeVoices', () => {
     const copy = [...input];
     humanizeVoices(input);
     expect(input).toEqual(copy);
+  });
+});
+
+describe('pickDiverseVoices', () => {
+  it('returns the input unchanged when ≤ max', () => {
+    const vs = [voice('a'), voice('b'), voice('c')];
+    expect(pickDiverseVoices(vs, 5)).toBe(vs);
+  });
+
+  it('picks one per gender × locale bucket before picking a second from any bucket', () => {
+    const vs = [
+      // 3 females, 3 males in en-US — same bucket each.
+      voice('us-f1#female_1'),
+      voice('us-f2#female_2'),
+      voice('us-f3#female_3'),
+      voice('us-m1#male_1'),
+      voice('us-m2#male_2'),
+      voice('us-m3#male_3'),
+      // 2 more in en-GB — different locale, separate buckets.
+      voice('gb-f1#female_1', { language: 'en-GB' }),
+      voice('gb-m1#male_1', { language: 'en-GB' }),
+    ];
+    const picked = pickDiverseVoices(vs, 5);
+    expect(picked).toHaveLength(5);
+    // The 4 distinct (gender, locale) buckets (us-F, us-M, gb-F, gb-M) get
+    // one each in round 1; round 2 fills the 5th slot from the first non-
+    // empty bucket — us-F (sorted first by locale alphabetically).
+    const ids = picked.map((v) => v.identifier);
+    // Must cover all four buckets.
+    expect(ids.some((id) => id.startsWith('us-f'))).toBe(true);
+    expect(ids.some((id) => id.startsWith('us-m'))).toBe(true);
+    expect(ids.some((id) => id.startsWith('gb-f'))).toBe(true);
+    expect(ids.some((id) => id.startsWith('gb-m'))).toBe(true);
+  });
+
+  it('prefers Enhanced voices within a bucket', () => {
+    const defaultVoice = voice('us-f-default#female_1');
+    const enhanced = voice('us-f-enhanced#female_2', {
+      quality: 'Enhanced' as Voice['quality'],
+    });
+    const picked = pickDiverseVoices([defaultVoice, enhanced], 1);
+    expect(picked).toHaveLength(1);
+    expect(picked[0]).toBe(enhanced);
+  });
+
+  it('is deterministic — same input gives same picks across calls', () => {
+    const vs = [
+      voice('a#female_1'),
+      voice('b#male_1'),
+      voice('c#female_2'),
+      voice('d'),
+      voice('e'),
+      voice('f'),
+      voice('g#male_2'),
+    ];
+    const a = pickDiverseVoices(vs, 5).map((v) => v.identifier);
+    const b = pickDiverseVoices(vs, 5).map((v) => v.identifier);
+    expect(a).toEqual(b);
+  });
+
+  it('does not mutate the input array', () => {
+    const input = [voice('b#male_1'), voice('a#female_1'), voice('c')];
+    const copy = [...input];
+    pickDiverseVoices(input, 5);
+    expect(input).toEqual(copy);
+  });
+
+  it('scales down — picks exactly N even with > N distinct buckets', () => {
+    const vs = [
+      voice('en-us-a#female_1', { language: 'en-US' }),
+      voice('en-us-b#male_1', { language: 'en-US' }),
+      voice('en-gb-a#female_1', { language: 'en-GB' }),
+      voice('en-gb-b#male_1', { language: 'en-GB' }),
+      voice('en-au-a#female_1', { language: 'en-AU' }),
+      voice('en-au-b#male_1', { language: 'en-AU' }),
+      voice('en-us-c', { language: 'en-US' }), // unknown gender
+    ];
+    const picked = pickDiverseVoices(vs, 5);
+    expect(picked).toHaveLength(5);
+    // Known-gender buckets picked before unknown: us-F, us-M, gb-F, gb-M, au-F are the 5.
+    expect(picked.some((v) => v.identifier === 'en-us-c')).toBe(false);
   });
 });

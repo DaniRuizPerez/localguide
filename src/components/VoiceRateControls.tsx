@@ -19,7 +19,7 @@ import {
   type NarrationLength,
 } from '../services/NarrationPrefs';
 import { speechService } from '../services/SpeechService';
-import { humanizeVoices } from '../services/voiceLabels';
+import { humanizeVoices, pickDiverseVoices } from '../services/voiceLabels';
 import { currentSpeechTag, getLocale, t } from '../i18n';
 import type * as SpeechModule from 'expo-speech';
 
@@ -130,17 +130,27 @@ export function VoiceRateControls({
   }, []);
 
   const voiceChips = useMemo(() => {
-    // Replace the opaque OS identifiers ("en-us-x-iol-local") with stable,
-    // friendly first names so the picker reads as a human list.
+    // Typical Android devices expose 40–60 near-duplicate voices per locale.
+    // Show only 5 carefully-diverse picks (different gender/locale/quality
+    // combinations) to keep the picker scannable. If the user's current
+    // choice happens to fall outside that top-5, we re-add it so switching
+    // the picker open doesn't silently blow away their selection.
+    const curated = pickDiverseVoices(availableVoices, 5);
+    const selected = availableVoices.find((v) => v.identifier === voice);
+    const forDisplay =
+      selected && !curated.some((v) => v.identifier === selected.identifier)
+        ? [...curated, selected]
+        : curated;
+
     const head: Array<{ id: string | undefined; label: string }> = [
       { id: undefined, label: t('narration.voiceSystemDefault') },
     ];
-    const labeled = humanizeVoices(availableVoices).map(({ voice, label }) => ({
+    const labeled = humanizeVoices(forDisplay).map(({ voice, label }) => ({
       id: voice.identifier,
       label,
     }));
     return [...head, ...labeled];
-  }, [availableVoices]);
+  }, [availableVoices, voice]);
 
   const lengthLabel = (value: NarrationLength): string => {
     switch (value) {

@@ -54,6 +54,77 @@ export function inferGender(voice: Voice): Gender {
 }
 
 /**
+ * Curate a small, diverse subset of voices to show in the picker. Android
+ * devices commonly expose 40–60 voices for a locale — showing all of them
+ * overwhelms the user, and most are near-duplicates (same speaker, different
+ * network-vs-local quality tier).
+ *
+ * Algorithm:
+ *   1. Group by (gender, exact language tag). `en-US female`, `en-GB male`,
+ *      `en-US unknown`, … each form a bucket.
+ *   2. Within each bucket, sort by quality (Enhanced first) then identifier
+ *      for stability.
+ *   3. Round-robin across buckets: first pick one voice from each distinct
+ *      bucket (maximum diversity), then a second voice from each bucket that
+ *      has more, and so on until we hit `max` picks.
+ *   4. Buckets are ordered so that known-gender combinations come before
+ *      unknown, and locale is alphabetical for stability.
+ */
+export function pickDiverseVoices(voices: Voice[], max: number = 5): Voice[] {
+  if (voices.length <= max) return voices;
+
+  const buckets = new Map<string, Voice[]>();
+  for (const v of voices) {
+    const key = `${inferGender(v)}|${v.language ?? ''}`;
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(v);
+    else buckets.set(key, [v]);
+  }
+
+  // Sort each bucket so the "best" voice in that bucket is first: Enhanced
+  // quality wins; tie-break by identifier for deterministic output.
+  for (const vs of buckets.values()) {
+    vs.sort((a, b) => {
+      const ae = a.quality === 'Enhanced' ? 0 : 1;
+      const be = b.quality === 'Enhanced' ? 0 : 1;
+      if (ae !== be) return ae - be;
+      return a.identifier.localeCompare(b.identifier);
+    });
+  }
+
+  // Order buckets: known gender before unknown, then alphabetical key.
+  const orderedBuckets = [...buckets.entries()]
+    .map(([key, vs]) => {
+      const [gender, locale] = key.split('|');
+      return { key, gender, locale, vs };
+    })
+    .sort((a, b) => {
+      const aKnown = a.gender === 'unknown' ? 1 : 0;
+      const bKnown = b.gender === 'unknown' ? 1 : 0;
+      if (aKnown !== bKnown) return aKnown - bKnown;
+      if (a.locale !== b.locale) return a.locale.localeCompare(b.locale);
+      return a.key.localeCompare(b.key);
+    });
+
+  const picked: Voice[] = [];
+  let round = 0;
+  while (picked.length < max) {
+    let addedThisRound = false;
+    for (const bucket of orderedBuckets) {
+      if (picked.length >= max) break;
+      if (bucket.vs.length > round) {
+        picked.push(bucket.vs[round]);
+        addedThisRound = true;
+      }
+    }
+    if (!addedThisRound) break;
+    round += 1;
+  }
+
+  return picked;
+}
+
+/**
  * Assign descriptive labels to a list of TTS voices:
  *   - When we can infer gender, the label says so: "Female", "Male 2",
  *     "Female · Enhanced".
