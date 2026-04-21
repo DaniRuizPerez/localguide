@@ -40,6 +40,7 @@ import { NarrationLengthPicker } from '../components/NarrationLengthPicker';
 import { VoiceRateControls } from '../components/VoiceRateControls';
 import { PlaybackControls } from '../components/PlaybackControls';
 import { ItineraryModal } from '../components/ItineraryModal';
+import { QuizModal } from '../components/QuizModal';
 import { t } from '../i18n';
 
 type Props = BottomTabScreenProps<RootTabParamList, 'Chat'>;
@@ -257,6 +258,7 @@ export default function ChatScreen(props: Props) {
   const [poiRadiusMeters, setPoiRadiusMeters] = useState<number>(1000);
   const [narrationSettingsOpen, setNarrationSettingsOpen] = useState(false);
   const [itineraryOpen, setItineraryOpen] = useState(false);
+  const [quizOpen, setQuizOpen] = useState(false);
   const [hiddenGems, setHiddenGems] = useState<boolean>(guidePrefs.get().hiddenGems);
 
   useEffect(() => {
@@ -716,6 +718,15 @@ export default function ChatScreen(props: Props) {
           <Text style={styles.itineraryGlyph}>🗺</Text>
           <Text style={styles.itineraryLabel}>{t('itinerary.openButton')}</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.itineraryCta}
+          onPress={() => setQuizOpen(true)}
+          accessibilityLabel={t('quiz.openButton')}
+          testID="quiz-btn"
+        >
+          <Text style={styles.itineraryGlyph}>🎯</Text>
+          <Text style={styles.itineraryLabel}>{t('quiz.openButton')}</Text>
+        </TouchableOpacity>
       </View>
 
       <RadiusSelector value={poiRadiusMeters} onChange={setPoiRadiusMeters} />
@@ -729,6 +740,12 @@ export default function ChatScreen(props: Props) {
         visible={itineraryOpen}
         onClose={() => setItineraryOpen(false)}
         location={(gps ?? autoGuide.latestGps) ?? manualLocation ?? null}
+        nearbyPois={nearbyPois}
+      />
+
+      <QuizModal
+        visible={quizOpen}
+        onClose={() => setQuizOpen(false)}
         nearbyPois={nearbyPois}
       />
 
@@ -930,6 +947,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 4,
     flexDirection: 'row',
+    gap: 8,
   },
   itineraryCta: {
     flexDirection: 'row',

@@ -193,6 +193,71 @@ export interface TimelineTask {
   abort: () => Promise<void>;
 }
 
+export interface QuizQuestion {
+  question: string;
+  options: string[];
+  correctIndex: number;
+}
+
+export interface QuizTask {
+  promise: Promise<QuizQuestion[]>;
+  abort: () => Promise<void>;
+}
+
+function buildQuizPrompt(nearbyTitles: string[], count: number): string {
+  const directive = localePromptDirective();
+  const localeLine = directive ? `\n${directive}` : '';
+  const placesLine = nearbyTitles.length
+    ? nearbyTitles.slice(0, 8).join(', ')
+    : '(no specific list — use any widely-known facts about this area)';
+  return (
+    `You are writing a short local-trivia quiz for a visitor walking near these places: ${placesLine}.${localeLine}\n\n` +
+    `Write exactly ${count} multiple-choice questions. Each question has 4 options labelled A, B, C, D, and ONE correct answer. ` +
+    `Mix easy and medium difficulty. Ground questions in real, verifiable facts (history, geography, culture, architecture). ` +
+    `Never invent facts. If you are not sure about a place, use a well-established general-knowledge fact about the area.\n\n` +
+    `Output strictly in this format, with a blank line between questions:\n` +
+    `Q: <question>\n` +
+    `A: <option>\n` +
+    `B: <option>\n` +
+    `C: <option>\n` +
+    `D: <option>\n` +
+    `Correct: A\n` +
+    `(no intro, no explanations, no closing remarks)`
+  );
+}
+
+function parseQuiz(text: string): QuizQuestion[] {
+  // Split into blocks on blank lines.
+  const blocks = text.split(/\r?\n\s*\r?\n/);
+  const quizzes: QuizQuestion[] = [];
+  for (const block of blocks) {
+    const lines = block.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (lines.length < 6) continue;
+    const q = lines.find((l) => /^Q:/i.test(l))?.replace(/^Q:\s*/i, '').trim();
+    const opts: Record<string, string> = {};
+    for (const letter of ['A', 'B', 'C', 'D']) {
+      const line = lines.find((l) => new RegExp(`^${letter}[.:)]`, 'i').test(l));
+      if (!line) continue;
+      opts[letter] = line.replace(new RegExp(`^${letter}[.:)]\\s*`, 'i'), '').trim();
+    }
+    const correctLine = lines.find((l) => /^correct:/i.test(l));
+    const correctLetter = correctLine
+      ?.replace(/^correct:\s*/i, '')
+      .trim()
+      .charAt(0)
+      .toUpperCase();
+    if (!q || !correctLetter) continue;
+    if (!['A', 'B', 'C', 'D'].includes(correctLetter)) continue;
+    if (!opts.A || !opts.B || !opts.C || !opts.D) continue;
+    quizzes.push({
+      question: q,
+      options: [opts.A, opts.B, opts.C, opts.D],
+      correctIndex: { A: 0, B: 1, C: 2, D: 3 }[correctLetter as 'A' | 'B' | 'C' | 'D'],
+    });
+  }
+  return quizzes.slice(0, 10);
+}
+
 function buildTimelinePrompt(poiTitle: string, location: GPSContext | string | null): string {
   const directive = localePromptDirective();
   const localeLine = directive ? `\n${directive}` : '';
@@ -469,6 +534,56 @@ export const localGuideService = {
             },
           },
           { maxTokens: 350 }
+        )
+        .then((handle) => {
+          if (settled) {
+            handle.abort();
+            return;
+          }
+          handleRef = handle;
+        })
+        .catch((err) => {
+          settled = true;
+          reject(err instanceof Error ? err : new Error(String(err)));
+        });
+    });
+
+    return {
+      promise,
+      abort: async () => {
+        if (handleRef) await handleRef.abort();
+        settled = true;
+      },
+    };
+  },
+
+  /**
+   * Generate multiple-choice trivia questions about nearby places.
+   */
+  generateQuiz(nearbyTitles: string[], count: number = 5): QuizTask {
+    const prompt = buildQuizPrompt(nearbyTitles, count);
+    let handleRef: StreamHandle | null = null;
+    let settled = false;
+
+    const promise = new Promise<QuizQuestion[]>((resolve, reject) => {
+      let fullText = '';
+      inferenceService
+        .runInferenceStream(
+          prompt,
+          {
+            onToken: (delta) => {
+              fullText += delta;
+            },
+            onDone: () => {
+              settled = true;
+              resolve(parseQuiz(fullText));
+            },
+            onError: (message) => {
+              settled = true;
+              reject(new Error(message));
+            },
+          },
+          { maxTokens: 700 }
         )
         .then((handle) => {
           if (settled) {

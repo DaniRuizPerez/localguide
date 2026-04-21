@@ -109,6 +109,9 @@ export const EN = {
     generating: 'Writing questions…',
     nextButton: 'Next',
     scoreLine: 'You got {correct} of {total}',
+    openButton: 'Trivia',
+    progress: 'Question {current} of {total}',
+    empty: 'Could not generate a quiz for this area offline — try a more landmark-dense spot.',
   },
   topics: {
     everything: 'Everything',
