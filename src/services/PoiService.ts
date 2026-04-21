@@ -136,9 +136,9 @@ function rankPois(pois: Poi[], hiddenGems: boolean): Poi[] {
   });
 }
 
-class PoiService {
-  private cache = new Map<string, CacheEntry>();
+const cache = new Map<string, CacheEntry>();
 
+export const poiService = {
   async fetchNearby(
     latitude: number,
     longitude: number,
@@ -148,7 +148,7 @@ class PoiService {
   ): Promise<Poi[]> {
     const key = cacheKey(latitude, longitude, radiusMeters);
     const now = Date.now();
-    const cached = this.cache.get(key);
+    const cached = cache.get(key);
     if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
       return rankPois(cached.pois, options.hiddenGems === true).slice(0, limit);
     }
@@ -199,18 +199,16 @@ class PoiService {
         });
       // Cache the pre-ranked pool so we can re-rank cheaply if the toggle
       // changes without a network round-trip.
-      this.cache.set(key, { fetchedAt: now, pois });
+      cache.set(key, { fetchedAt: now, pois });
       return rankPois(pois, options.hiddenGems === true).slice(0, limit);
     } catch {
       // Offline or network error — fall back to stale cache if we have it so
       // the UI doesn't flicker between populated and empty on flaky networks.
       return rankPois(cached?.pois ?? [], options.hiddenGems === true).slice(0, limit);
     }
-  }
+  },
 
   clearCache(): void {
-    this.cache.clear();
-  }
-}
-
-export const poiService = new PoiService();
+    cache.clear();
+  },
+};

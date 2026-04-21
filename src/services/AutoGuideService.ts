@@ -25,21 +25,22 @@ export interface AutoGuideEvent {
 // The old triage-prompt path competed with the POI flow on the engine's single
 // session slot and was the root of "FAILED_PRECONDITION: a session already
 // exists" errors; removing it is what lets both paths coexist safely.
-class AutoGuideService {
-  private running = false;
-  private listener: AutoGuideCallback | null = null;
 
-  setListener(cb: AutoGuideCallback | null) {
-    this.listener = cb;
-  }
+let running = false;
+let listener: AutoGuideCallback | null = null;
 
-  private emit(event: AutoGuideEvent) {
-    this.listener?.(event);
-  }
+function emit(event: AutoGuideEvent): void {
+  listener?.(event);
+}
+
+export const autoGuideService = {
+  setListener(cb: AutoGuideCallback | null): void {
+    listener = cb;
+  },
 
   async start(): Promise<void> {
-    if (this.running) return;
-    this.running = true;
+    if (running) return;
+    running = true;
 
     try {
       const bgStatus = await Location.requestBackgroundPermissionsAsync();
@@ -59,10 +60,10 @@ class AutoGuideService {
       // Background location unavailable (Expo Go, simulator, denied) — fine,
       // useLocation's foreground watchPositionAsync still drives narration.
     }
-  }
+  },
 
   async stop(): Promise<void> {
-    this.running = false;
+    running = false;
     try {
       const hasTask = await TaskManager.isTaskRegisteredAsync(BACKGROUND_LOCATION_TASK);
       if (hasTask) {
@@ -72,19 +73,17 @@ class AutoGuideService {
       // ignore
     }
     speechService.stop();
-  }
+  },
 
   get isRunning(): boolean {
-    return this.running;
-  }
+    return running;
+  },
 
   async handleBackgroundLocation(gps: GPSContext): Promise<void> {
-    if (!this.running) return;
-    this.emit({ type: 'location_update', gps });
-  }
-}
-
-export const autoGuideService = new AutoGuideService();
+    if (!running) return;
+    emit({ type: 'location_update', gps });
+  },
+};
 
 TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   if (error) return;
