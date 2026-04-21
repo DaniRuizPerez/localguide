@@ -31,6 +31,8 @@ import { guidePrefs } from '../services/GuidePrefs';
 import { inferenceService, type GPSContext, type StreamHandle } from '../services/InferenceService';
 import { poiService, type Poi } from '../services/PoiService';
 import { useProximityNarration } from '../hooks/useProximityNarration';
+import { useDwellDetection } from '../hooks/useDwellDetection';
+import { DwellBanner } from '../components/DwellBanner';
 import { Colors } from '../theme/colors';
 import { Type, Radii, Shadows } from '../theme/tokens';
 import { GuideAvatar } from '../components/GuideAvatar';
@@ -530,6 +532,17 @@ export default function ChatScreen(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gps && gps.latitude.toFixed(3), gps && gps.longitude.toFixed(3), poiRadiusMeters, hiddenGems]);
 
+  const dwellCandidate = useDwellDetection({
+    gps,
+    pois: nearbyPois,
+    enabled: !inferring,
+  });
+  const [dismissedDwellIds, setDismissedDwellIds] = useState<Set<number>>(new Set());
+  const visibleDwell =
+    dwellCandidate && !dismissedDwellIds.has(dwellCandidate.poi.pageId)
+      ? dwellCandidate
+      : null;
+
   useProximityNarration({
     gps,
     pois: nearbyPois,
@@ -737,6 +750,27 @@ export default function ChatScreen(props: Props) {
         <View style={styles.errorBanner}>
           <Text style={[Type.bodySm, { color: Colors.error }]}>{autoGuide.error}</Text>
         </View>
+      )}
+
+      {visibleDwell && (
+        <DwellBanner
+          poi={visibleDwell.poi}
+          onAccept={() => {
+            setDismissedDwellIds((prev) => {
+              const next = new Set(prev);
+              next.add(visibleDwell.poi.pageId);
+              return next;
+            });
+            narratePoi(visibleDwell.poi);
+          }}
+          onDismiss={() => {
+            setDismissedDwellIds((prev) => {
+              const next = new Set(prev);
+              next.add(visibleDwell.poi.pageId);
+              return next;
+            });
+          }}
+        />
       )}
 
       <FlatList

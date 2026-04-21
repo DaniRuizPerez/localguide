@@ -63,6 +63,12 @@ export const EN = {
     retry: 'Retry',
     startExploring: 'Start exploring',
   },
+  dwell: {
+    eyebrow: 'YOU\'VE BEEN HERE A WHILE',
+    prompt: 'Want to hear about {label}?',
+    accept: 'Tell me',
+    dismiss: 'Dismiss',
+  },
   narration: {
     lengthShort: 'Short',
     lengthStandard: 'Standard',
