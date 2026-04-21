@@ -3,8 +3,6 @@
  * LLM-fallback prompt when guidePrefs.hiddenGems is enabled.
  */
 
-jest.mock('../native/LiteRTModule', () => ({ __esModule: true, default: undefined }));
-
 const mockRunStream = jest.fn();
 
 jest.mock('../services/InferenceService', () => {

@@ -2,8 +2,6 @@
  * E1 — itinerary prompt + parser.
  */
 
-jest.mock('../native/LiteRTModule', () => ({ __esModule: true, default: undefined }));
-
 const mockRunStream = jest.fn();
 const sharedCallbacks: { current: any } = { current: null };
 
