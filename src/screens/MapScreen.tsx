@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { RootTabParamList } from '../navigation/AppNavigator';
 import { useLocation } from '../hooks/useLocation';
@@ -10,6 +10,8 @@ import { softTactileMapStyle } from '../theme/mapStyle';
 import { poiService, type Poi } from '../services/PoiService';
 import { SoftButton } from '../components/SoftButton';
 import { CompassArrow } from '../components/CompassArrow';
+import { breadcrumbTrail } from '../services/BreadcrumbTrail';
+import { useBreadcrumbTrail } from '../hooks/useBreadcrumbTrail';
 import { t } from '../i18n';
 
 type Props = BottomTabScreenProps<RootTabParamList, 'Map'>;
@@ -22,6 +24,14 @@ export default function MapScreen(_props: Props) {
   const didInitialCenter = useRef(false);
   const [pois, setPois] = useState<Poi[]>([]);
   const [compassTarget, setCompassTarget] = useState<Poi | null>(null);
+  const trail = useBreadcrumbTrail();
+
+  // Record every GPS fix into the breadcrumb buffer. The service itself
+  // handles distance de-duplication so fast callbacks don't thrash storage.
+  useEffect(() => {
+    if (!gps) return;
+    breadcrumbTrail.record(gps.latitude, gps.longitude);
+  }, [gps]);
 
   useEffect(() => {
     if (!gps || didInitialCenter.current) return;
@@ -88,6 +98,14 @@ export default function MapScreen(_props: Props) {
         toolbarEnabled={false}
         customMapStyle={softTactileMapStyle}
       >
+        {trail.length >= 2 && (
+          <Polyline
+            coordinates={trail.map((p) => ({ latitude: p.latitude, longitude: p.longitude }))}
+            strokeColor={Colors.primary}
+            strokeWidth={4}
+            geodesic
+          />
+        )}
         {gps && (
           <Marker
             coordinate={{ latitude: gps.latitude, longitude: gps.longitude }}
@@ -134,6 +152,16 @@ export default function MapScreen(_props: Props) {
       >
         <Text style={styles.fabGlyph}>◎</Text>
       </TouchableOpacity>
+
+      {trail.length > 0 && (
+        <TouchableOpacity
+          style={[styles.fab, styles.trailFab]}
+          onPress={() => breadcrumbTrail.clear()}
+          accessibilityLabel={t('map.clearTrail')}
+        >
+          <Text style={styles.fabGlyph}>⌀</Text>
+        </TouchableOpacity>
+      )}
 
       <View style={styles.sheet} pointerEvents="box-none">
         <View style={styles.sheetHandle} />
@@ -309,6 +337,9 @@ const styles = StyleSheet.create({
   fabGlyph: {
     fontSize: 20,
     color: Colors.primary,
+  },
+  trailFab: {
+    bottom: 292,
   },
   sheet: {
     position: 'absolute',

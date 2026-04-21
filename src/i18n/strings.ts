@@ -50,6 +50,7 @@ export const EN = {
     gettingLocation: 'Getting your location…',
     locationUnavailable: 'Location unavailable',
     retry: 'Retry',
+    clearTrail: 'Clear trail',
   },
   download: {
     heading: 'Making a tiny brain\nfor your pocket.',

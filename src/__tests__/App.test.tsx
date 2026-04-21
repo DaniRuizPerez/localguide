@@ -14,10 +14,13 @@ jest.mock('react-native-maps', () => {
   });
   const Marker = (props: Record<string, unknown>) =>
     React.createElement(View, { testID: 'map-marker', ...props });
+  const Polyline = (props: Record<string, unknown>) =>
+    React.createElement(View, { testID: 'map-polyline', ...props });
   return {
     __esModule: true,
     default: MapView,
     Marker,
+    Polyline,
     PROVIDER_GOOGLE: 'google',
   };
 });
