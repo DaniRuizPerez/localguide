@@ -4,7 +4,13 @@ import type { Locale } from './locale';
 // Partial overrides. Any missing key falls back to EN. We only translate the
 // most visible strings for now — model narration is always generated in the
 // user's locale by the LLM itself, so UI chrome is what matters here.
-type Partials = { [K in keyof Strings]?: Partial<Strings[K]> };
+//
+// Values are `string`, not the EN literal, so translations are free to differ.
+// The EN store itself is `as const` for the benefit of the t() vars typing;
+// overrides only need to supply the right shape, not the same literal.
+type Partials = {
+  [K in keyof Strings]?: { [Key in keyof Strings[K]]?: string };
+};
 
 const ES: Partials = {
   app: {

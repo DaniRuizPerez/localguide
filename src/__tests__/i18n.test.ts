@@ -87,3 +87,25 @@ describe('i18n', () => {
     expect(getLocale()).toBe('en');
   });
 });
+
+// Type-level smoke test — does not execute at runtime. If any of the
+// ts-expect-error comments below stop triggering a real error, tsc fails
+// the build ("unused directive"), so these are effectively compile-time
+// tests. Static import preserves the generic signature through inference.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _typeOnlyChecks() {
+  // OK — no vars needed.
+  tDirect('chat.placeholder');
+
+  // OK — required vars supplied.
+  tDirect('map.stopsPickedOut', { count: 3 });
+
+  // @ts-expect-error map.stopsPickedOut has {count}, vars arg is required.
+  tDirect('map.stopsPickedOut');
+
+  // @ts-expect-error wrong var name — 'count' is required, not 'wrong'.
+  tDirect('map.stopsPickedOut', { wrong: 3 });
+}
+
+// Separate import so the generic preserves through static analysis.
+import { t as tDirect } from '../i18n';

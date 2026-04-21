@@ -123,7 +123,7 @@ export const EN = {
     food: 'Food',
     culture: 'Culture',
   },
-};
+} as const;
 
 export type StringKey = keyof typeof EN;
 export type Strings = typeof EN;
