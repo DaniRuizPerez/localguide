@@ -63,38 +63,40 @@ describe('VoiceRateControls', () => {
 
   it('filters voices to the current locale (default en-US keeps en-* voices)', async () => {
     mockGetAvailableVoices.mockResolvedValue([
-      { identifier: 'en-us-x-a', name: 'Voice A', language: 'en-US' },
-      { identifier: 'fr-fr-x-b', name: 'Voice B', language: 'fr-FR' },
-      { identifier: 'en-gb-x-c', name: 'Voice C', language: 'en-GB' },
+      { identifier: 'en-us-x-a', name: 'raw-en-us', language: 'en-US' },
+      { identifier: 'fr-fr-x-b', name: 'raw-fr', language: 'fr-FR' },
+      { identifier: 'en-gb-x-c', name: 'raw-en-gb', language: 'en-GB' },
     ]);
 
-    const { findByText, queryByText } = render(
-      <VoiceRateControls {...defaultProps} />
-    );
+    // Post-humanize: chip labels are friendly first names, not the OS's
+    // opaque voice names. The first two entries in humanize's alphabet-
+    // sorted output are always "Alex" and "Riley"; the French voice gets
+    // filtered out so the picker has exactly two voice chips plus the
+    // "System default" head.
+    const { findByText, queryByText } = render(<VoiceRateControls {...defaultProps} />);
 
-    expect(await findByText('Voice A')).toBeTruthy();
-    expect(await findByText('Voice C')).toBeTruthy();
-    expect(queryByText('Voice B')).toBeNull();
+    expect(await findByText('Alex')).toBeTruthy();
+    expect(await findByText('Riley')).toBeTruthy();
+    expect(queryByText(/raw-/)).toBeNull();
   });
 
-  it('setting a voice chip updates narrationPrefs', async () => {
+  it('setting a voice chip writes its OS identifier to narrationPrefs', async () => {
     mockGetAvailableVoices.mockResolvedValue([
-      { identifier: 'en-us-x-a', name: 'Voice A', language: 'en-US' },
+      { identifier: 'en-us-x-opaque', name: 'opaque', language: 'en-US' },
     ]);
 
-    const { findByText } = render(
-      <VoiceRateControls {...defaultProps} />
-    );
-    const chip = await findByText('Voice A');
+    const { findByText } = render(<VoiceRateControls {...defaultProps} />);
+    const chip = await findByText('Alex');
     await act(async () => {
       fireEvent.press(chip);
     });
-    expect(narrationPrefs.get().voice).toBe('en-us-x-a');
+    // Label is friendly, but the persisted identifier is still the real one.
+    expect(narrationPrefs.get().voice).toBe('en-us-x-opaque');
   });
 
   it('always offers a "System default" option that clears the custom voice', async () => {
     mockGetAvailableVoices.mockResolvedValue([
-      { identifier: 'en-us-x-a', name: 'Voice A', language: 'en-US' },
+      { identifier: 'en-us-x-a', name: 'raw', language: 'en-US' },
     ]);
 
     narrationPrefs.setVoice('en-us-x-a');

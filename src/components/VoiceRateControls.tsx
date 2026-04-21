@@ -19,6 +19,7 @@ import {
   type NarrationLength,
 } from '../services/NarrationPrefs';
 import { speechService } from '../services/SpeechService';
+import { humanizeVoices } from '../services/voiceLabels';
 import { currentSpeechTag, getLocale, t } from '../i18n';
 import type * as SpeechModule from 'expo-speech';
 
@@ -129,14 +130,16 @@ export function VoiceRateControls({
   }, []);
 
   const voiceChips = useMemo(() => {
+    // Replace the opaque OS identifiers ("en-us-x-iol-local") with stable,
+    // friendly first names so the picker reads as a human list.
     const head: Array<{ id: string | undefined; label: string }> = [
       { id: undefined, label: t('narration.voiceSystemDefault') },
     ];
-    const rest = availableVoices.map((v) => ({
-      id: v.identifier,
-      label: v.name || v.identifier,
+    const labeled = humanizeVoices(availableVoices).map(({ voice, label }) => ({
+      id: voice.identifier,
+      label,
     }));
-    return [...head, ...rest];
+    return [...head, ...labeled];
   }, [availableVoices]);
 
   const lengthLabel = (value: NarrationLength): string => {
