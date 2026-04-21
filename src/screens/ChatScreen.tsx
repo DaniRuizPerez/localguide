@@ -659,6 +659,19 @@ export default function ChatScreen(props: Props) {
       <View style={styles.header}>
         <LocationPill status={status} gps={gps} manualLocation={manualLocation} />
         <TouchableOpacity
+          style={styles.identifyBtn}
+          onPress={takePicture}
+          disabled={inferring}
+          accessibilityLabel={t('chat.identifyThis')}
+          accessibilityRole="button"
+          testID="identify-this-btn"
+        >
+          <Text style={styles.identifyGlyph}>📷</Text>
+          <Text style={styles.identifyLabel} numberOfLines={1}>
+            {t('chat.identifyThis')}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
           style={styles.settingsBtn}
           onPress={() => setNarrationSettingsOpen(true)}
           accessibilityLabel={t('narration.settingsButton')}
@@ -872,6 +885,25 @@ const styles = StyleSheet.create({
   settingsGlyph: {
     fontSize: 16,
     color: Colors.textSecondary,
+  },
+  identifyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: Radii.md,
+    backgroundColor: Colors.primary,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    ...Shadows.chipActiveHard,
+  },
+  identifyGlyph: {
+    fontSize: 12,
+  },
+  identifyLabel: {
+    ...Type.chip,
+    color: '#FFFFFF',
   },
   locationPill: {
     flexDirection: 'row',
