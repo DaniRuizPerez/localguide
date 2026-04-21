@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { createPersistedStore } from './persistedStore';
 
 // Keeps a polyline of where the user walked today. Persisted so reopening
 // the app mid-tour doesn't lose the trail, and reset at local midnight so
@@ -14,12 +14,11 @@ export interface BreadcrumbPoint {
   t: number; // epoch ms when captured
 }
 
-interface StoredShape {
+interface TrailState {
   dateKey: string; // YYYY-MM-DD local
   points: BreadcrumbPoint[];
 }
 
-const STORAGE_KEY = '@localguide/breadcrumb-v1';
 const MIN_STEP_METERS = 10;
 // Cap so a long-distance user doesn't blow past memory. 10km at 10m steps
 // is 1000 points; this gives a comfortable 15x safety margin.
@@ -44,60 +43,48 @@ function haversine(lat1: number, lon1: number, lat2: number, lon2: number): numb
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-let points: BreadcrumbPoint[] = [];
-let dateKey: string = localDateKey();
-let loaded = false;
-let loadPromise: Promise<void> | null = null;
-const listeners = new Set<(points: BreadcrumbPoint[]) => void>();
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
-
-function notify(): void {
-  for (const l of listeners) l(points);
-}
-
-async function load(): Promise<void> {
-  try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as StoredShape;
-      const today = localDateKey();
-      if (parsed.dateKey === today && Array.isArray(parsed.points)) {
-        points = parsed.points.filter(
+const store = createPersistedStore<TrailState>({
+  storageKey: '@localguide/breadcrumb-v1',
+  defaults: { dateKey: localDateKey(), points: [] },
+  // Drop yesterday's trail at hydrate time.
+  validate: (raw, defaults) => {
+    if (!raw || typeof raw !== 'object') return defaults;
+    const r = raw as Record<string, unknown>;
+    const today = localDateKey();
+    if (r.dateKey !== today) return { dateKey: today, points: [] };
+    const points = Array.isArray(r.points)
+      ? (r.points as BreadcrumbPoint[]).filter(
           (p) =>
             typeof p.latitude === 'number' &&
             typeof p.longitude === 'number' &&
             typeof p.t === 'number'
-        );
-        dateKey = today;
-      } else {
-        // Stored data is from yesterday (or earlier) — reset.
-        points = [];
-        dateKey = today;
-        AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
-      }
-    }
-  } catch {
-    // Corrupt or missing — keep the empty trail we started with.
-  } finally {
-    loaded = true;
-  }
-}
+        )
+      : [];
+    return { dateKey: today, points };
+  },
+  saveDebounceMs: 2000,
+});
 
-function scheduleSave(): void {
-  // Coalesce saves — GPS can fire every second, we don't want a write per tick.
-  if (saveTimer) return;
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
-    const payload: StoredShape = { dateKey, points };
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload)).catch(() => {});
-  }, 2000);
+// Public subscribe API takes just the points array (subscribers never read
+// the dateKey). Re-registered after __resetForTest so tests that reset
+// between beforeEach blocks keep a working notification path.
+const pointsListeners = new Set<(points: BreadcrumbPoint[]) => void>();
+function wireStoreForward(): void {
+  store.subscribe((s) => {
+    for (const l of pointsListeners) l(s.points);
+  });
 }
+wireStoreForward();
 
 export const breadcrumbTrail = {
-  hydrate(): Promise<void> {
-    if (loaded) return Promise.resolve();
-    if (!loadPromise) loadPromise = load();
-    return loadPromise;
+  hydrate: () => store.hydrate(),
+
+  getPoints(): BreadcrumbPoint[] {
+    return store.get().points;
+  },
+
+  getDateKey(): string {
+    return store.get().dateKey;
   },
 
   /**
@@ -106,55 +93,39 @@ export const breadcrumbTrail = {
    */
   record(latitude: number, longitude: number, timestamp: number = Date.now()): void {
     const today = localDateKey(timestamp);
-    if (today !== dateKey) {
-      dateKey = today;
-      points = [];
-      notify();
+    const state = store.get();
+    if (today !== state.dateKey) {
+      store.set({ dateKey: today, points: [] });
+      return this.record(latitude, longitude, timestamp);
     }
-    const last = points[points.length - 1];
+    const last = state.points[state.points.length - 1];
     if (last && haversine(last.latitude, last.longitude, latitude, longitude) < MIN_STEP_METERS) {
       return;
     }
-    points.push({ latitude, longitude, t: timestamp });
-    if (points.length > MAX_POINTS) {
-      // Drop from the head so the tail (recent history) stays intact.
-      points = points.slice(points.length - MAX_POINTS);
-    }
-    scheduleSave();
-    notify();
+    const next: BreadcrumbPoint[] = [
+      ...state.points,
+      { latitude, longitude, t: timestamp },
+    ];
+    const capped =
+      next.length > MAX_POINTS ? next.slice(next.length - MAX_POINTS) : next;
+    store.set({ points: capped });
   },
 
   clear(): void {
-    if (points.length === 0) return;
-    points = [];
-    scheduleSave();
-    notify();
-  },
-
-  getPoints(): BreadcrumbPoint[] {
-    return points;
-  },
-
-  getDateKey(): string {
-    return dateKey;
+    if (store.get().points.length === 0) return;
+    store.set({ points: [] });
   },
 
   subscribe(listener: (points: BreadcrumbPoint[]) => void): () => void {
-    listeners.add(listener);
+    pointsListeners.add(listener);
     return () => {
-      listeners.delete(listener);
+      pointsListeners.delete(listener);
     };
   },
 
   __resetForTest(): void {
-    points = [];
-    dateKey = localDateKey();
-    loaded = false;
-    loadPromise = null;
-    listeners.clear();
-    if (saveTimer) {
-      clearTimeout(saveTimer);
-      saveTimer = null;
-    }
+    store.__resetForTest();
+    pointsListeners.clear();
+    wireStoreForward();
   },
 };

@@ -1,8 +1,8 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { createPersistedStore } from './persistedStore';
 
-// Non-narration user preferences. Keeps the narration store focused on TTS/
-// length concerns and makes room for additional UX toggles (hidden gems,
-// exploration mode, etc.) without bloating NarrationPrefs.
+// Non-narration user preferences. Keeps NarrationPrefs focused on TTS/length
+// concerns and makes room for additional UX toggles (hidden gems, exploration
+// mode, etc.) without bloating that store.
 
 export interface GuidePrefsShape {
   /**
@@ -12,73 +12,33 @@ export interface GuidePrefsShape {
   hiddenGems: boolean;
 }
 
-const STORAGE_KEY = '@localguide/guide-prefs-v1';
-
 const DEFAULTS: GuidePrefsShape = {
   hiddenGems: false,
 };
 
-let current: GuidePrefsShape = { ...DEFAULTS };
-let loaded = false;
-let loadPromise: Promise<void> | null = null;
-const listeners = new Set<(prefs: GuidePrefsShape) => void>();
-
-async function load(): Promise<void> {
-  try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      current = {
-        hiddenGems: typeof parsed.hiddenGems === 'boolean' ? parsed.hiddenGems : DEFAULTS.hiddenGems,
-      };
-    }
-  } catch {
-    // Corrupt storage — fall back to defaults.
-  } finally {
-    loaded = true;
-  }
-}
-
-async function save(): Promise<void> {
-  try {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(current));
-  } catch {
-    // Non-critical — pref will revert on next launch if storage is broken.
-  }
-}
-
-function notify(): void {
-  for (const l of listeners) l(current);
-}
+const store = createPersistedStore<GuidePrefsShape>({
+  storageKey: '@localguide/guide-prefs-v1',
+  defaults: DEFAULTS,
+  validate: (raw, defaults) => {
+    if (!raw || typeof raw !== 'object') return defaults;
+    const hiddenGems = (raw as Record<string, unknown>).hiddenGems;
+    return {
+      hiddenGems: typeof hiddenGems === 'boolean' ? hiddenGems : defaults.hiddenGems,
+    };
+  },
+});
 
 export const guidePrefs = {
-  hydrate(): Promise<void> {
-    if (loaded) return Promise.resolve();
-    if (!loadPromise) loadPromise = load();
-    return loadPromise;
-  },
-
-  get(): GuidePrefsShape {
-    return current;
-  },
+  hydrate: () => store.hydrate(),
+  get: () => store.get(),
+  subscribe: (listener: (p: GuidePrefsShape) => void) => store.subscribe(listener),
 
   setHiddenGems(value: boolean): void {
-    if (current.hiddenGems === value) return;
-    current = { ...current, hiddenGems: value };
-    save();
-    notify();
-  },
-
-  subscribe(listener: (prefs: GuidePrefsShape) => void): () => void {
-    listeners.add(listener);
-    return () => listeners.delete(listener);
+    store.set({ hiddenGems: value });
   },
 
   __resetForTest(): void {
-    current = { ...DEFAULTS };
-    loaded = false;
-    loadPromise = null;
-    listeners.clear();
+    store.__resetForTest();
   },
 };
 
