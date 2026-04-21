@@ -35,6 +35,7 @@ import { Type, Radii, Shadows } from '../theme/tokens';
 import { GuideAvatar } from '../components/GuideAvatar';
 import { NarrationLengthPicker } from '../components/NarrationLengthPicker';
 import { VoiceRateControls } from '../components/VoiceRateControls';
+import { PlaybackControls } from '../components/PlaybackControls';
 import { t } from '../i18n';
 
 type Props = BottomTabScreenProps<RootTabParamList, 'Chat'>;
@@ -711,12 +712,9 @@ export default function ChatScreen(props: Props) {
             thumbColor={Colors.surface}
           />
         </View>
-        {autoGuide.enabled && autoGuide.isSpeaking && (
-          <TouchableOpacity style={styles.stopSpeakBtn} onPress={() => speechService.stop()}>
-            <Text style={[Type.chip, { color: '#FFFFFF' }]}>{t('chat.stop')}</Text>
-          </TouchableOpacity>
-        )}
       </View>
+
+      <PlaybackControls />
 
       {autoGuide.error && (
         <View style={styles.errorBanner}>

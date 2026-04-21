@@ -97,7 +97,14 @@ jest.mock('../services/SpeechService', () => ({
     speak: (...args: unknown[]) => mockSpeechSpeak(...args),
     enqueue: (...args: unknown[]) => mockSpeechEnqueue(...args),
     stop: (...args: unknown[]) => mockSpeechStop(...args),
+    pause: jest.fn(),
+    resume: jest.fn(),
+    skipCurrent: jest.fn(),
     isSpeaking: false,
+    isPaused: false,
+    queueLength: 0,
+    getState: () => ({ isSpeaking: false, isPaused: false, queueLength: 0 }),
+    subscribe: () => () => {},
   },
 }));
 
