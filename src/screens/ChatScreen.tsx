@@ -27,6 +27,7 @@ import { AttractionsChips } from '../components/AttractionsChips';
 import { RadiusSelector } from '../components/RadiusSelector';
 import { speechService } from '../services/SpeechService';
 import { SpeechChunker } from '../services/SpeechChunker';
+import { guidePrefs } from '../services/GuidePrefs';
 import { inferenceService, type GPSContext, type StreamHandle } from '../services/InferenceService';
 import { poiService, type Poi } from '../services/PoiService';
 import { useProximityNarration } from '../hooks/useProximityNarration';
@@ -252,6 +253,11 @@ export default function ChatScreen(props: Props) {
   const [poisLoading, setPoisLoading] = useState(false);
   const [poiRadiusMeters, setPoiRadiusMeters] = useState<number>(1000);
   const [narrationSettingsOpen, setNarrationSettingsOpen] = useState(false);
+  const [hiddenGems, setHiddenGems] = useState<boolean>(guidePrefs.get().hiddenGems);
+
+  useEffect(() => {
+    return guidePrefs.subscribe((p) => setHiddenGems(p.hiddenGems));
+  }, []);
 
   useEffect(() => {
     speakResponsesRef.current = speakResponses;
@@ -464,7 +470,7 @@ export default function ChatScreen(props: Props) {
     setNearbyPois([]);
     setPoisLoading(true);
     poiService
-      .fetchNearby(gps.latitude, gps.longitude, poiRadiusMeters)
+      .fetchNearby(gps.latitude, gps.longitude, poiRadiusMeters, undefined, { hiddenGems })
       .then(async (pois) => {
         if (cancelled) return;
         if (pois.length > 0) {
@@ -522,7 +528,7 @@ export default function ChatScreen(props: Props) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gps && gps.latitude.toFixed(3), gps && gps.longitude.toFixed(3), poiRadiusMeters]);
+  }, [gps && gps.latitude.toFixed(3), gps && gps.longitude.toFixed(3), poiRadiusMeters, hiddenGems]);
 
   useProximityNarration({
     gps,
@@ -709,6 +715,17 @@ export default function ChatScreen(props: Props) {
               if (!next) speechService.stop();
             }}
             trackColor={{ false: Colors.border, true: Colors.primary }}
+            thumbColor={Colors.surface}
+          />
+        </View>
+        <View style={styles.controlItem}>
+          <Text style={styles.controlLabel} numberOfLines={1}>
+            {t('chat.hiddenGems')}
+          </Text>
+          <Switch
+            value={hiddenGems}
+            onValueChange={(next) => guidePrefs.setHiddenGems(next)}
+            trackColor={{ false: Colors.border, true: Colors.secondary }}
             thumbColor={Colors.surface}
           />
         </View>

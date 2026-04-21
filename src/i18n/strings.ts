@@ -33,6 +33,7 @@ export const EN = {
       '⚡  Heads up: this device has limited memory, so the AI guide runs on CPU and responses may be slow.',
     onDevice: 'ON DEVICE',
     identifyThis: 'What is this?',
+    hiddenGems: 'HIDDEN GEMS',
   },
   map: {
     aroundYou: 'Around you now',

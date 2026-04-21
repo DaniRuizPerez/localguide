@@ -7,6 +7,7 @@ import {
 } from './InferenceService';
 import { localePromptDirective } from '../i18n';
 import { narrationPrefs, narrationLengthDirective, type NarrationLength } from './NarrationPrefs';
+import { guidePrefs, HIDDEN_GEMS_DIRECTIVE } from './GuidePrefs';
 
 // Kept terse on purpose: prefill cost is O(prompt tokens), and on low-end CPU devices
 // (Pixel 3-class) every 100 tokens of system prompt adds ~0.5–1 s before the first
@@ -122,12 +123,17 @@ function buildImagePrompt(
 // narrator SYSTEM_PROMPT — we want a bare list here, not 3–6 sentences of
 // flowing narration. Format is as strict as Gemma 3 1B will honor; we also
 // post-parse defensively because 1B ignores format rules maybe 20% of the time.
-function buildNearbyPlacesPrompt(location: GPSContext | string, radiusMeters: number): string {
+function buildNearbyPlacesPrompt(
+  location: GPSContext | string,
+  radiusMeters: number,
+  hiddenGems: boolean
+): string {
   const radiusLabel = radiusMeters >= 1000
     ? `${(radiusMeters / 1000).toFixed(radiusMeters % 1000 === 0 ? 0 : 1)} km`
     : `${radiusMeters} m`;
+  const hiddenGemsLine = hiddenGems ? `\n${HIDDEN_GEMS_DIRECTIVE}` : '';
   return (
-    `You are a local tourist expert helping a traveler find sights worth visiting.\n` +
+    `You are a local tourist expert helping a traveler find sights worth visiting.${hiddenGemsLine}\n` +
     `${placeLine(location)}` +
     `Coordinates: ${formatCoordinates(location)}\n` +
     `Task: list 6 TOURIST-WORTHY places WITHIN ${radiusLabel} of the visitor — a specific named attraction a traveler would actually go see.\n` +
@@ -179,7 +185,11 @@ export const localGuideService = {
    * a list this short, which is long enough to need an escape hatch.
    */
   listNearbyPlaces(location: GPSContext | string, radiusMeters: number = 1000): ListPlacesTask {
-    const prompt = buildNearbyPlacesPrompt(location, radiusMeters);
+    const prompt = buildNearbyPlacesPrompt(
+      location,
+      radiusMeters,
+      guidePrefs.get().hiddenGems
+    );
     let handleRef: StreamHandle | null = null;
     let settled = false;
 

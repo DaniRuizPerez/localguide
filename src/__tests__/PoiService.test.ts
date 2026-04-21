@@ -15,6 +15,7 @@ function wikiResponse(pages: Array<Partial<{
   title: string;
   description: string;
   coordinates: Array<{ lat: number; lon: number }>;
+  length: number;
 }>>) {
   const pagesById: Record<string, unknown> = {};
   pages.forEach((p, i) => {
@@ -180,5 +181,113 @@ describe('PoiService.fetchNearby', () => {
     mockFetch.mockRejectedValue(new Error('network down'));
     const results = await poiService.fetchNearby(37.4419, -122.143);
     expect(results).toEqual([]);
+  });
+
+  it('requests article length so hidden-gems mode can rank by popularity', async () => {
+    mockFetch.mockResolvedValue(wikiResponse([]));
+    await poiService.fetchNearby(37.4419, -122.143, 1000, 10);
+    const url: string = mockFetch.mock.calls[0][0];
+    expect(url).toContain('prop=description|coordinates|info');
+    expect(url).toContain('inprop=length');
+  });
+
+  it('attaches articleLength when Wikipedia supplies it', async () => {
+    mockFetch.mockResolvedValue(
+      wikiResponse([
+        {
+          pageid: 40,
+          title: 'Stanford University',
+          description: 'Private research university',
+          coordinates: [{ lat: 37.4275, lon: -122.1697 }],
+          length: 500_000,
+        },
+      ])
+    );
+    const [stanford] = await poiService.fetchNearby(37.4419, -122.143);
+    expect(stanford.articleLength).toBe(500_000);
+  });
+
+  it('default ranking sorts by distance ascending', async () => {
+    mockFetch.mockResolvedValue(
+      wikiResponse([
+        {
+          pageid: 50,
+          title: 'Nearby Gem',
+          description: 'Tiny local spot',
+          coordinates: [{ lat: 37.4419, lon: -122.143 }], // 0 m away
+          length: 1500,
+        },
+        {
+          pageid: 51,
+          title: 'Famous Distant Landmark',
+          description: 'Landmark in Stanford',
+          coordinates: [{ lat: 37.4275, lon: -122.1697 }], // ~3 km away
+          length: 500_000,
+        },
+      ])
+    );
+    const results = await poiService.fetchNearby(37.4419, -122.143);
+    expect(results[0].title).toBe('Nearby Gem');
+  });
+
+  it('hidden-gems ranking sorts shorter articles first', async () => {
+    mockFetch.mockResolvedValue(
+      wikiResponse([
+        {
+          pageid: 60,
+          title: 'Famous Nearby Landmark',
+          description: 'Major art museum',
+          coordinates: [{ lat: 37.4420, lon: -122.143 }], // very close
+          length: 500_000,
+        },
+        {
+          pageid: 61,
+          title: 'Obscure Nearby Landmark',
+          description: 'Historic cottage',
+          coordinates: [{ lat: 37.4421, lon: -122.143 }], // slightly farther
+          length: 2_000,
+        },
+      ])
+    );
+    const results = await poiService.fetchNearby(37.4419, -122.143, 1000, 10, {
+      hiddenGems: true,
+    });
+    expect(results[0].title).toBe('Obscure Nearby Landmark');
+    expect(results[1].title).toBe('Famous Nearby Landmark');
+  });
+
+  it('re-ranks from cache when the hiddenGems flag flips', async () => {
+    mockFetch.mockResolvedValue(
+      wikiResponse([
+        {
+          pageid: 70,
+          title: 'Obscure Spot',
+          description: 'Historic marker',
+          coordinates: [{ lat: 37.4420, lon: -122.143 }],
+          length: 1000,
+        },
+        {
+          pageid: 71,
+          title: 'Famous Spot',
+          description: 'Iconic campus building',
+          coordinates: [{ lat: 37.4421, lon: -122.143 }],
+          length: 200_000,
+        },
+      ])
+    );
+
+    // First call: default order (distance)
+    const normal = await poiService.fetchNearby(37.4419, -122.143, 1000, 10);
+    expect(normal[0].title).toBe('Obscure Spot');
+
+    // Second call: hidden-gems. Should reuse the cache (no new fetch) but
+    // still honor the new ordering.
+    mockFetch.mockClear();
+    const gems = await poiService.fetchNearby(37.4419, -122.143, 1000, 10, {
+      hiddenGems: true,
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(gems[0].title).toBe('Obscure Spot'); // still first — shortest article
+    expect(gems[1].title).toBe('Famous Spot');
   });
 });

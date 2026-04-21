@@ -17,6 +17,20 @@ export interface Poi {
    * them so we don't auto-narrate the user's current location.
    */
   source: 'wikipedia' | 'llm';
+  /**
+   * Wikipedia article length in bytes. Used as a popularity proxy: longer
+   * article ≈ more famous place. Absent when we couldn't fetch it (offline
+   * or the API dropped the prop).
+   */
+  articleLength?: number;
+}
+
+export interface FetchOptions {
+  /**
+   * When true, re-rank so less-famous places (shorter Wikipedia articles)
+   * sort to the top. See A7 Hidden Gems feature.
+   */
+  hiddenGems?: boolean;
 }
 
 // Cache key granularity: rounding to 3 decimal places (~110 m) means we reuse
@@ -59,6 +73,7 @@ interface WikiPage {
   title: string;
   description?: string;
   coordinates?: Array<{ lat: number; lon: number }>;
+  length?: number;
 }
 
 // Reject pages whose title or Wikipedia short-description smells like a
@@ -101,6 +116,26 @@ function isTouristic(title: string, description: string | null | undefined): boo
   return !blockers.some((rx) => rx.test(text));
 }
 
+// Ranking function. Default (hiddenGems=false): nearest first. Hidden-gems:
+// shorter article first (proxy for "less famous"), tiebreak by distance.
+// POIs missing articleLength are treated as average fame so they don't sink
+// below curated obscure picks.
+function rankPois(pois: Poi[], hiddenGems: boolean): Poi[] {
+  if (!hiddenGems) {
+    return [...pois].sort((a, b) => a.distanceMeters - b.distanceMeters);
+  }
+  const lengths = pois.map((p) => p.articleLength).filter((l): l is number => typeof l === 'number');
+  const median = lengths.length > 0
+    ? lengths.slice().sort((a, b) => a - b)[Math.floor(lengths.length / 2)]
+    : 0;
+  return [...pois].sort((a, b) => {
+    const aLen = a.articleLength ?? median;
+    const bLen = b.articleLength ?? median;
+    if (aLen !== bLen) return aLen - bLen;
+    return a.distanceMeters - b.distanceMeters;
+  });
+}
+
 class PoiService {
   private cache = new Map<string, CacheEntry>();
 
@@ -108,19 +143,21 @@ class PoiService {
     latitude: number,
     longitude: number,
     radiusMeters: number = DEFAULT_RADIUS_METERS,
-    limit: number = DEFAULT_LIMIT
+    limit: number = DEFAULT_LIMIT,
+    options: FetchOptions = {}
   ): Promise<Poi[]> {
     const key = cacheKey(latitude, longitude, radiusMeters);
     const now = Date.now();
     const cached = this.cache.get(key);
     if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
-      return cached.pois;
+      return rankPois(cached.pois, options.hiddenGems === true).slice(0, limit);
     }
 
     // Use the generator form of the API so we can pull `description` (the
     // one-line Wikipedia short description) alongside the geosearch hits.
     // The description is what lets us filter out chains / admin areas / roads
-    // without maintaining a brittle per-title blocklist.
+    // without maintaining a brittle per-title blocklist. Also pull article
+    // `length` (via prop=info) as a popularity proxy for hidden-gems ranking.
     // Request more than `limit` from Wikipedia since the description filter
     // trims the list; we want to land at least `limit` real attractions when
     // possible.
@@ -131,13 +168,14 @@ class PoiService {
       `&ggscoord=${latitude}|${longitude}` +
       `&ggsradius=${Math.max(10, Math.min(10000, Math.round(radiusMeters)))}` +
       `&ggslimit=${Math.max(1, Math.min(500, rawLimit))}` +
-      `&prop=description|coordinates` +
+      `&prop=description|coordinates|info` +
+      `&inprop=length` +
       `&format=json&origin=*`;
 
     try {
       const response = await fetch(url);
       if (!response.ok) {
-        return cached?.pois ?? [];
+        return rankPois(cached?.pois ?? [], options.hiddenGems === true).slice(0, limit);
       }
       const data = (await response.json()) as {
         query?: { pages?: Record<string, WikiPage> };
@@ -156,16 +194,17 @@ class PoiService {
             longitude: lon,
             distanceMeters: distanceMeters(latitude, longitude, lat, lon),
             source: 'wikipedia' as const,
+            articleLength: typeof p.length === 'number' ? p.length : undefined,
           };
-        })
-        .sort((a, b) => a.distanceMeters - b.distanceMeters)
-        .slice(0, limit);
+        });
+      // Cache the pre-ranked pool so we can re-rank cheaply if the toggle
+      // changes without a network round-trip.
       this.cache.set(key, { fetchedAt: now, pois });
-      return pois;
+      return rankPois(pois, options.hiddenGems === true).slice(0, limit);
     } catch {
       // Offline or network error — fall back to stale cache if we have it so
       // the UI doesn't flicker between populated and empty on flaky networks.
-      return cached?.pois ?? [];
+      return rankPois(cached?.pois ?? [], options.hiddenGems === true).slice(0, limit);
     }
   }
 

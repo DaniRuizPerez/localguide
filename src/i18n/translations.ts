@@ -36,6 +36,7 @@ const ES: Partials = {
       '⚡  Nota: este dispositivo tiene poca memoria, la IA se ejecuta en CPU y las respuestas pueden tardar.',
     onDevice: 'EN DISPOSITIVO',
     identifyThis: '¿Qué es esto?',
+    hiddenGems: 'TESOROS',
   },
   map: {
     aroundYou: 'Cerca de ti',
@@ -126,6 +127,7 @@ const FR: Partials = {
       '⚡  Cet appareil a peu de mémoire, l\u2019IA tourne sur CPU, les réponses peuvent être lentes.',
     onDevice: 'SUR L\u2019APPAREIL',
     identifyThis: 'Qu\u2019est-ce que c\u2019est ?',
+    hiddenGems: 'LIEUX SECRETS',
   },
   map: {
     aroundYou: 'Autour de toi',
@@ -208,6 +210,7 @@ const DE: Partials = {
     slowDevice: '⚡  Dieses Gerät hat wenig Speicher, Antworten können langsam sein.',
     onDevice: 'AUF DEM GERÄT',
     identifyThis: 'Was ist das?',
+    hiddenGems: 'GEHEIMTIPPS',
   },
   map: {
     aroundYou: 'In deiner Nähe',
@@ -268,6 +271,7 @@ const IT: Partials = {
     autoGuideListening: 'Auto-guida attiva',
     onDevice: 'SUL DISPOSITIVO',
     identifyThis: 'Cos\u2019è?',
+    hiddenGems: 'GEMME NASCOSTE',
   },
   map: { aroundYou: 'Vicino a te', retry: 'Riprova' },
   download: {
@@ -298,6 +302,7 @@ const PT: Partials = {
     set: 'OK',
     retryGps: 'Tentar GPS',
     identifyThis: 'O que é isto?',
+    hiddenGems: 'JOIAS ESCONDIDAS',
   },
   map: { aroundYou: 'Perto de ti', retry: 'Tentar de novo' },
   download: {
@@ -327,6 +332,7 @@ const JA: Partials = {
     stop: '停止',
     gotIt: 'OK',
     identifyThis: 'これは何?',
+    hiddenGems: '穴場',
   },
   map: { aroundYou: '近くの見どころ', retry: '再試行' },
   download: {
@@ -356,6 +362,7 @@ const ZH: Partials = {
     stop: '停止',
     gotIt: '好',
     identifyThis: '这是什么?',
+    hiddenGems: '隐藏景点',
   },
   map: { aroundYou: '你周围', retry: '重试' },
   download: {
