@@ -238,6 +238,7 @@ export default function ChatScreen(props: Props) {
 
   const [deviceTier, setDeviceTier] = useState<'low' | 'mid' | 'high' | null>(null);
   const [slowDeviceDismissed, setSlowDeviceDismissed] = useState(false);
+  const [hallucinationDismissed, setHallucinationDismissed] = useState(false);
   useEffect(() => {
     let cancelled = false;
     inferenceService.getDeviceTier().then((info) => {
@@ -699,6 +700,17 @@ export default function ChatScreen(props: Props) {
             {t('chat.slowDevice')}
           </Text>
           <TouchableOpacity onPress={() => setSlowDeviceDismissed(true)} style={styles.slowDeviceDismiss}>
+            <Text style={[Type.chip, { color: '#8A4B00' }]}>{t('chat.gotIt')}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {!hallucinationDismissed && (
+        <View style={styles.slowDeviceBanner}>
+          <Text style={[Type.bodySm, { flex: 1, color: '#8A4B00' }]}>
+            {t('app.hallucinationWarning')}
+          </Text>
+          <TouchableOpacity onPress={() => setHallucinationDismissed(true)} style={styles.slowDeviceDismiss}>
             <Text style={[Type.chip, { color: '#8A4B00' }]}>{t('chat.gotIt')}</Text>
           </TouchableOpacity>
         </View>

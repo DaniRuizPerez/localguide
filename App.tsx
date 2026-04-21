@@ -115,6 +115,8 @@ export default function App() {
           <Text style={styles.title}>{t('app.warmupTitle')}</Text>
           <Text style={styles.subtitle}>{t('app.warmupSubtitle')}</Text>
 
+          <Text style={styles.hallucinationWarning}>{t('app.hallucinationWarning')}</Text>
+
           <Text style={styles.topicsHeading}>{t('app.pickTopic')}</Text>
           <TopicChips selected={topic} onSelect={setTopic} />
 
@@ -153,6 +155,18 @@ const styles = StyleSheet.create({
   subtitle: {
     ...Type.body,
     color: Colors.textSecondary,
+    textAlign: 'center',
+  },
+  hallucinationWarning: {
+    ...Type.bodySm,
+    color: '#8A4B00',
+    backgroundColor: '#FBEBD0',
+    borderWidth: 1,
+    borderColor: '#F4C27A',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginTop: 20,
     textAlign: 'center',
   },
   topicsHeading: {

@@ -8,6 +8,8 @@ export const EN = {
       'Loading the on-device model and warming up so your first question is fast.\nThis happens once per app launch.',
     pickTopic: 'WHILE YOU WAIT, PICK A TOPIC',
     warmupError: 'Warmup error: {message}',
+    hallucinationWarning:
+      '⚠  Heads up: this runs on a tiny on-device model. Like any LLM it can hallucinate — double-check anything you rely on.',
   },
   nav: {
     chat: 'Chat',

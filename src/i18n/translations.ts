@@ -14,6 +14,8 @@ const ES: Partials = {
       'Cargando el modelo en el dispositivo para que tu primera pregunta sea rápida.\nEsto ocurre una vez por arranque.',
     pickTopic: 'MIENTRAS ESPERAS, ELIGE UN TEMA',
     warmupError: 'Error al preparar: {message}',
+    hallucinationWarning:
+      '⚠  Nota: esto corre con un modelo pequeño en el dispositivo. Como cualquier LLM puede inventarse datos — verifica lo importante.',
   },
   nav: { chat: 'Chat', map: 'Mapa' },
   chat: {
@@ -105,6 +107,8 @@ const FR: Partials = {
       'Chargement du modèle local pour que ta première question soit rapide.\nCela arrive une fois par lancement.',
     pickTopic: 'EN ATTENDANT, CHOISIS UN THÈME',
     warmupError: 'Erreur de préparation : {message}',
+    hallucinationWarning:
+      '⚠  Attention : le guide tourne sur un petit modèle local. Comme tout LLM il peut halluciner — vérifie ce qui compte.',
   },
   nav: { chat: 'Chat', map: 'Carte' },
   chat: {
