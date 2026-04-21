@@ -5,6 +5,7 @@ import {
   type StreamCallbacks,
   type StreamHandle,
 } from './InferenceService';
+import { runParsedStream, type AbortableTask } from './streamTask';
 import { localePromptDirective } from '../i18n';
 import { narrationPrefs, narrationLengthDirective, type NarrationLength } from './NarrationPrefs';
 import { guidePrefs, HIDDEN_GEMS_DIRECTIVE } from './GuidePrefs';
@@ -168,30 +169,21 @@ function parsePlaceList(text: string): string[] {
     .slice(0, 8);
 }
 
-export interface ListPlacesTask {
-  promise: Promise<string[]>;
-  abort: () => Promise<void>;
-}
+export type ListPlacesTask = AbortableTask<string[]>;
 
 export interface ItineraryStop {
   title: string;
   note: string;
 }
 
-export interface ItineraryTask {
-  promise: Promise<ItineraryStop[]>;
-  abort: () => Promise<void>;
-}
+export type ItineraryTask = AbortableTask<ItineraryStop[]>;
 
 export interface TimelineEvent {
   year: string;
   event: string;
 }
 
-export interface TimelineTask {
-  promise: Promise<TimelineEvent[]>;
-  abort: () => Promise<void>;
-}
+export type TimelineTask = AbortableTask<TimelineEvent[]>;
 
 export interface QuizQuestion {
   question: string;
@@ -199,10 +191,7 @@ export interface QuizQuestion {
   correctIndex: number;
 }
 
-export interface QuizTask {
-  promise: Promise<QuizQuestion[]>;
-  abort: () => Promise<void>;
-}
+export type QuizTask = AbortableTask<QuizQuestion[]>;
 
 function buildQuizPrompt(nearbyTitles: string[], count: number): string {
   const directive = localePromptDirective();
@@ -372,51 +361,7 @@ export const localGuideService = {
       radiusMeters,
       guidePrefs.get().hiddenGems
     );
-    let handleRef: StreamHandle | null = null;
-    let settled = false;
-
-    const promise = new Promise<string[]>((resolve, reject) => {
-      let fullText = '';
-      inferenceService
-        .runInferenceStream(
-          prompt,
-          {
-            onToken: (delta) => {
-              fullText += delta;
-            },
-            onDone: () => {
-              settled = true;
-              resolve(parsePlaceList(fullText));
-            },
-            onError: (message) => {
-              settled = true;
-              reject(new Error(message));
-            },
-          },
-          { maxTokens: 180 }
-        )
-        .then((handle) => {
-          if (settled) {
-            // Race: onDone/onError landed before we captured the handle. Nothing
-            // to abort — the stream already cleaned itself up.
-            handle.abort();
-            return;
-          }
-          handleRef = handle;
-        })
-        .catch((err) => {
-          settled = true;
-          reject(err instanceof Error ? err : new Error(String(err)));
-        });
-    });
-
-    return {
-      promise,
-      abort: async () => {
-        if (handleRef) await handleRef.abort();
-        settled = true;
-      },
-    };
+    return runParsedStream(prompt, parsePlaceList, { maxTokens: 180 });
   },
 
   async ask(
@@ -461,49 +406,7 @@ export const localGuideService = {
     nearbyTitles: string[] = []
   ): ItineraryTask {
     const prompt = buildItineraryPrompt(location, durationHours, nearbyTitles);
-    let handleRef: StreamHandle | null = null;
-    let settled = false;
-
-    const promise = new Promise<ItineraryStop[]>((resolve, reject) => {
-      let fullText = '';
-      inferenceService
-        .runInferenceStream(
-          prompt,
-          {
-            onToken: (delta) => {
-              fullText += delta;
-            },
-            onDone: () => {
-              settled = true;
-              resolve(parseItinerary(fullText));
-            },
-            onError: (message) => {
-              settled = true;
-              reject(new Error(message));
-            },
-          },
-          { maxTokens: 400 }
-        )
-        .then((handle) => {
-          if (settled) {
-            handle.abort();
-            return;
-          }
-          handleRef = handle;
-        })
-        .catch((err) => {
-          settled = true;
-          reject(err instanceof Error ? err : new Error(String(err)));
-        });
-    });
-
-    return {
-      promise,
-      abort: async () => {
-        if (handleRef) await handleRef.abort();
-        settled = true;
-      },
-    };
+    return runParsedStream(prompt, parseItinerary, { maxTokens: 400 });
   },
 
   /**
@@ -512,49 +415,7 @@ export const localGuideService = {
    */
   buildTimeline(poiTitle: string, location: GPSContext | string | null): TimelineTask {
     const prompt = buildTimelinePrompt(poiTitle, location);
-    let handleRef: StreamHandle | null = null;
-    let settled = false;
-
-    const promise = new Promise<TimelineEvent[]>((resolve, reject) => {
-      let fullText = '';
-      inferenceService
-        .runInferenceStream(
-          prompt,
-          {
-            onToken: (delta) => {
-              fullText += delta;
-            },
-            onDone: () => {
-              settled = true;
-              resolve(parseTimeline(fullText));
-            },
-            onError: (message) => {
-              settled = true;
-              reject(new Error(message));
-            },
-          },
-          { maxTokens: 350 }
-        )
-        .then((handle) => {
-          if (settled) {
-            handle.abort();
-            return;
-          }
-          handleRef = handle;
-        })
-        .catch((err) => {
-          settled = true;
-          reject(err instanceof Error ? err : new Error(String(err)));
-        });
-    });
-
-    return {
-      promise,
-      abort: async () => {
-        if (handleRef) await handleRef.abort();
-        settled = true;
-      },
-    };
+    return runParsedStream(prompt, parseTimeline, { maxTokens: 350 });
   },
 
   /**
@@ -562,49 +423,7 @@ export const localGuideService = {
    */
   generateQuiz(nearbyTitles: string[], count: number = 5): QuizTask {
     const prompt = buildQuizPrompt(nearbyTitles, count);
-    let handleRef: StreamHandle | null = null;
-    let settled = false;
-
-    const promise = new Promise<QuizQuestion[]>((resolve, reject) => {
-      let fullText = '';
-      inferenceService
-        .runInferenceStream(
-          prompt,
-          {
-            onToken: (delta) => {
-              fullText += delta;
-            },
-            onDone: () => {
-              settled = true;
-              resolve(parseQuiz(fullText));
-            },
-            onError: (message) => {
-              settled = true;
-              reject(new Error(message));
-            },
-          },
-          { maxTokens: 700 }
-        )
-        .then((handle) => {
-          if (settled) {
-            handle.abort();
-            return;
-          }
-          handleRef = handle;
-        })
-        .catch((err) => {
-          settled = true;
-          reject(err instanceof Error ? err : new Error(String(err)));
-        });
-    });
-
-    return {
-      promise,
-      abort: async () => {
-        if (handleRef) await handleRef.abort();
-        settled = true;
-      },
-    };
+    return runParsedStream(prompt, parseQuiz, { maxTokens: 700 });
   },
 
   async askStream(
