@@ -14,6 +14,14 @@ android/local.properties
 android/.gradle/
 android/build/
 android/app/build/
+android/.kotlin/
+android/gradle/gradle-daemon-jvm.properties
+
+# One-off HF API response dumps saved during model-lookup debugging sessions.
+android/out*.json
+
+# Claude Code per-project state — settings, scheduled task locks, etc.
+.claude/
 
 # EAS / build artifacts
 google-service-account.json
