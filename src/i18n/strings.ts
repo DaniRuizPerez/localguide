@@ -89,6 +89,13 @@ export const EN = {
     title: 'I have {hours} hour(s)',
     button: 'Plan my day',
     generating: 'Planning your day…',
+    openButton: 'Plan my day',
+    oneHour: '1 hour',
+    halfDay: 'Half day',
+    fullDay: 'Full day',
+    pickDuration: 'How long do you have to explore?',
+    empty: 'Could not assemble a route — try a different duration or move to a more populated area.',
+    walkMinutes: 'walk {minutes} min',
   },
   timeline: {
     title: 'Timeline',

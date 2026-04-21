@@ -39,6 +39,7 @@ import { GuideAvatar } from '../components/GuideAvatar';
 import { NarrationLengthPicker } from '../components/NarrationLengthPicker';
 import { VoiceRateControls } from '../components/VoiceRateControls';
 import { PlaybackControls } from '../components/PlaybackControls';
+import { ItineraryModal } from '../components/ItineraryModal';
 import { t } from '../i18n';
 
 type Props = BottomTabScreenProps<RootTabParamList, 'Chat'>;
@@ -255,6 +256,7 @@ export default function ChatScreen(props: Props) {
   const [poisLoading, setPoisLoading] = useState(false);
   const [poiRadiusMeters, setPoiRadiusMeters] = useState<number>(1000);
   const [narrationSettingsOpen, setNarrationSettingsOpen] = useState(false);
+  const [itineraryOpen, setItineraryOpen] = useState(false);
   const [hiddenGems, setHiddenGems] = useState<boolean>(guidePrefs.get().hiddenGems);
 
   useEffect(() => {
@@ -704,11 +706,30 @@ export default function ChatScreen(props: Props) {
 
       <NarrationLengthPicker />
 
+      <View style={styles.itineraryCtaRow}>
+        <TouchableOpacity
+          style={styles.itineraryCta}
+          onPress={() => setItineraryOpen(true)}
+          accessibilityLabel={t('itinerary.openButton')}
+          testID="plan-day-btn"
+        >
+          <Text style={styles.itineraryGlyph}>🗺</Text>
+          <Text style={styles.itineraryLabel}>{t('itinerary.openButton')}</Text>
+        </TouchableOpacity>
+      </View>
+
       <RadiusSelector value={poiRadiusMeters} onChange={setPoiRadiusMeters} />
 
       <VoiceRateControls
         visible={narrationSettingsOpen}
         onClose={() => setNarrationSettingsOpen(false)}
+      />
+
+      <ItineraryModal
+        visible={itineraryOpen}
+        onClose={() => setItineraryOpen(false)}
+        location={(gps ?? autoGuide.latestGps) ?? manualLocation ?? null}
+        nearbyPois={nearbyPois}
       />
 
       <AttractionsChips
@@ -904,6 +925,30 @@ const styles = StyleSheet.create({
   identifyLabel: {
     ...Type.chip,
     color: '#FFFFFF',
+  },
+  itineraryCtaRow: {
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    flexDirection: 'row',
+  },
+  itineraryCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    backgroundColor: Colors.secondaryLight,
+    borderRadius: Radii.md,
+    borderWidth: 1,
+    borderColor: 'rgba(78,163,116,0.25)',
+    ...Shadows.softOutset,
+  },
+  itineraryGlyph: {
+    fontSize: 14,
+  },
+  itineraryLabel: {
+    ...Type.chip,
+    color: Colors.secondary,
   },
   locationPill: {
     flexDirection: 'row',

@@ -173,6 +173,66 @@ export interface ListPlacesTask {
   abort: () => Promise<void>;
 }
 
+export interface ItineraryStop {
+  title: string;
+  note: string;
+}
+
+export interface ItineraryTask {
+  promise: Promise<ItineraryStop[]>;
+  abort: () => Promise<void>;
+}
+
+function buildItineraryPrompt(
+  location: GPSContext | string,
+  durationHours: number,
+  nearbyTitles: string[]
+): string {
+  const directive = localePromptDirective();
+  const localeLine = directive ? `\n${directive}` : '';
+  // Feed the model real nearby POIs so it doesn't hallucinate, but also let
+  // it drop or reorder them based on what actually fits the time budget.
+  const optionList = nearbyTitles.length
+    ? nearbyTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')
+    : '(no list available — choose what makes sense near this place)';
+  const count = durationHours <= 1.5 ? 3 : durationHours <= 5 ? 5 : 7;
+  return (
+    `You are a local tour planner helping a visitor with ${durationHours} hour(s) near ` +
+    `${typeof location === 'string' ? location : location.placeName ?? formatCoordinates(location)}.${localeLine}\n\n` +
+    `Candidate stops (real places, ordered by proximity):\n${optionList}\n\n` +
+    `Pick ${count} stops total in the best visit order for someone walking between them. ` +
+    `Account for walking time and ~15 min at each stop. Drop the candidates that don't fit; ` +
+    `prefer a coherent route (no backtracking) over ticking every box.\n` +
+    `Output strictly in this format, one line per stop:\n` +
+    `1. STOP NAME — one-sentence reason to visit\n` +
+    `2. STOP NAME — one-sentence reason to visit\n` +
+    `(no header, no intro, no summary, no bullets other than the numbered list)`
+  );
+}
+
+function parseItinerary(text: string): ItineraryStop[] {
+  const stops: ItineraryStop[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    // Expect "1. Title — note" or "1) Title - note".
+    const match = line.match(/^\s*\d+[.)]\s*(.+?)\s*[—\-–]\s*(.+)$/);
+    if (match) {
+      const title = match[1].trim().replace(/^["'"]|["'"]$/g, '');
+      const note = match[2].trim();
+      if (title && note) stops.push({ title, note });
+      continue;
+    }
+    // Fallback: number-only line like "1. Title" without a dash.
+    const titleOnly = line.match(/^\s*\d+[.)]\s*(.+)$/);
+    if (titleOnly) {
+      const title = titleOnly[1].trim();
+      if (title) stops.push({ title, note: '' });
+    }
+  }
+  return stops.slice(0, 10);
+}
+
 export const localGuideService = {
   async initialize(): Promise<void> {
     return inferenceService.initialize();
@@ -265,6 +325,62 @@ export const localGuideService = {
       text: text.trim(),
       locationUsed: location,
       durationMs: Date.now() - start,
+    };
+  },
+
+  /**
+   * Offline-capable itinerary planner. Streams the raw model output; the
+   * promise resolves with the parsed ordered list of stops. Callers can
+   * abort mid-flight (generation takes ~10–20 s on a Pixel 3 for 5 stops).
+   */
+  planItinerary(
+    location: GPSContext | string,
+    durationHours: number,
+    nearbyTitles: string[] = []
+  ): ItineraryTask {
+    const prompt = buildItineraryPrompt(location, durationHours, nearbyTitles);
+    let handleRef: StreamHandle | null = null;
+    let settled = false;
+
+    const promise = new Promise<ItineraryStop[]>((resolve, reject) => {
+      let fullText = '';
+      inferenceService
+        .runInferenceStream(
+          prompt,
+          {
+            onToken: (delta) => {
+              fullText += delta;
+            },
+            onDone: () => {
+              settled = true;
+              resolve(parseItinerary(fullText));
+            },
+            onError: (message) => {
+              settled = true;
+              reject(new Error(message));
+            },
+          },
+          { maxTokens: 400 }
+        )
+        .then((handle) => {
+          if (settled) {
+            handle.abort();
+            return;
+          }
+          handleRef = handle;
+        })
+        .catch((err) => {
+          settled = true;
+          reject(err instanceof Error ? err : new Error(String(err)));
+        });
+    });
+
+    return {
+      promise,
+      abort: async () => {
+        if (handleRef) await handleRef.abort();
+        settled = true;
+      },
     };
   },
 
