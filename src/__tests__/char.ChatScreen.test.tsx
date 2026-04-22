@@ -176,9 +176,10 @@ describe('Characterization: ChatScreen — initial render', () => {
     const { getByText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
-    // Home state greets the visitor with a time-of-day line and the "Want to
-    // wander?" prompt. One of the three greetings always matches.
-    expect(getByText(/Good (morning|afternoon|evening|night)/i)).toBeTruthy();
+    // Home state greets the visitor with a location headline ("You're in …"
+    // when the place resolved, else "You're here.") and the "Want to
+    // wander?" prompt.
+    expect(getByText(/You're (in|here)/i)).toBeTruthy();
     expect(getByText(/Want to wander\?/)).toBeTruthy();
   });
 

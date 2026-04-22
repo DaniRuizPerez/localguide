@@ -87,6 +87,10 @@ export default function AppNavigator({ initialTopic }: AppNavigatorProps = {}) {
           options={{
             tabBarLabel: t('nav.chat'),
             tabBarIcon: ({ focused }) => <TabIcon focused={focused} glyph="💬" />,
+            // Chat has its own combined header (Wordmark + location pill +
+            // settings gear in one row) — hide the nav header so those
+            // elements don't stack vertically.
+            headerShown: false,
           }}
         />
         <Tab.Screen

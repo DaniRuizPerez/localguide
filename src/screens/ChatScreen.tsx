@@ -41,6 +41,7 @@ import { ManualLocationRow } from '../components/ManualLocationRow';
 import { ChatInputBar } from '../components/ChatInputBar';
 import { TypingIndicator } from '../components/ChatBubble';
 import { HomeState } from '../components/HomeState';
+import { useEdgeSwipeBack } from '../components/EdgeSwipeBack';
 import { t } from '../i18n';
 
 type Props = BottomTabScreenProps<RootTabParamList, 'Chat'>;
@@ -212,6 +213,14 @@ export default function ChatScreen(props: Props) {
   const showTyping = inferring && (lastMsg?.role !== 'guide' || !lastMsg.text);
   const hasMessages = messages.messages.length > 0;
 
+  const backToHome = useCallback(() => {
+    if (inferring) stop();
+    speechService.stop();
+    messages.clear();
+  }, [inferring, stop, messages]);
+
+  const swipeBackHandlers = useEdgeSwipeBack(backToHome);
+
   // Coalesce slow-device + hallucination warnings into one dismissible
   // notice shown once, above the input. Priority: slow-device first (it's
   // tier-specific), else hallucination.
@@ -227,12 +236,14 @@ export default function ChatScreen(props: Props) {
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={88}
+      {...(hasMessages ? swipeBackHandlers : {})}
     >
       <ChatHeader
         status={status}
         gps={gps}
         manualLocation={manualLocation}
         onSettingsPress={() => setSettingsOpen(true)}
+        onBack={hasMessages ? backToHome : undefined}
       />
 
       {(status === 'denied' || status === 'error') && !gps && (

@@ -54,13 +54,13 @@ describe('ChatScreen', () => {
   });
 
   it('renders the Home greeting on empty state', () => {
-    // The Home state shows a time-of-day greeting + "Want to wander?" prompt
-    // when there are no messages yet. Exact greeting varies with the wall
-    // clock; any of the four is fine.
+    // The Home state shows a location headline ("You're in …" or
+    // "You're here.") + the "Want to wander?" prompt when there are no
+    // messages yet.
     const { getByText } = render(
       <ChatScreen navigation={mockNavigation} route={chatRoute} />
     );
-    expect(getByText(/Good (morning|afternoon|evening|night)/i)).toBeTruthy();
+    expect(getByText(/You're (in|here)/i)).toBeTruthy();
     expect(getByText(/Want to wander\?/)).toBeTruthy();
   });
 });

@@ -12,6 +12,7 @@ import { guidePrefs } from '../services/GuidePrefs';
 import { SoftButton } from '../components/SoftButton';
 import { CompassArrow } from '../components/CompassArrow';
 import { TimelineModal } from '../components/TimelineModal';
+import { useEdgeSwipeBack } from '../components/EdgeSwipeBack';
 import { breadcrumbTrail } from '../services/BreadcrumbTrail';
 import { useBreadcrumbTrail } from '../hooks/useBreadcrumbTrail';
 import { t } from '../i18n';
@@ -20,8 +21,10 @@ type Props = BottomTabScreenProps<RootTabParamList, 'Map'>;
 
 const DEFAULT_DELTA = 0.01;
 
-export default function MapScreen(_props: Props) {
+export default function MapScreen({ navigation }: Props) {
   const { gps, status, errorMessage, refresh } = useLocation();
+  const goBackToChat = () => navigation.navigate('Chat');
+  const swipeBackHandlers = useEdgeSwipeBack(goBackToChat);
   const mapRef = useRef<MapView>(null);
   const didInitialCenter = useRef(false);
   const [pois, setPois] = useState<Poi[]>([]);
@@ -98,7 +101,7 @@ export default function MapScreen(_props: Props) {
   const initialRegion = gps ? buildRegion(gps) : undefined;
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} {...swipeBackHandlers}>
       <MapView
         ref={mapRef}
         provider={PROVIDER_GOOGLE}
@@ -155,6 +158,16 @@ export default function MapScreen(_props: Props) {
           </View>
         )}
       </View>
+
+      <TouchableOpacity
+        style={styles.backBtn}
+        onPress={goBackToChat}
+        accessibilityLabel={t('nav.back')}
+        accessibilityRole="button"
+        testID="map-back-btn"
+      >
+        <Text style={styles.backGlyph}>‹</Text>
+      </TouchableOpacity>
 
       <TouchableOpacity
         style={styles.fab}
@@ -363,6 +376,26 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.borderLight,
     ...Shadows.softOutset,
+  },
+  backBtn: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+    ...Shadows.softOutset,
+  },
+  backGlyph: {
+    fontSize: 24,
+    lineHeight: 26,
+    color: Colors.textSecondary,
+    marginTop: -2,
   },
   fabGlyph: {
     fontSize: 20,
