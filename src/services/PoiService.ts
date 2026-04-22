@@ -36,6 +36,12 @@ export interface FetchOptions {
    * sort to the top. See A7 Hidden Gems feature.
    */
   hiddenGems?: boolean;
+  /**
+   * When true, skip the network entirely. Returns cached results if still
+   * warm; otherwise returns []. Callers are expected to fall back to the
+   * on-device LLM when the array is empty in offline mode.
+   */
+  offline?: boolean;
 }
 
 // Cache key granularity: rounding to 3 decimal places (~110 m) means we reuse
@@ -44,6 +50,10 @@ export interface FetchOptions {
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_RADIUS_METERS = 1000;
 const DEFAULT_LIMIT = 20;
+// Wikipedia usually replies in under a second. Cap at 8 s so a stalled socket
+// (mobile radio half-attached, captive-portal Wi-Fi) can't leave the caller
+// waiting forever — they'll see the cached-or-empty fallback instead.
+const FETCH_TIMEOUT_MS = 8000;
 
 interface CacheEntry {
   fetchedAt: number;
@@ -158,6 +168,13 @@ export const poiService = {
       return rankPois(cached.pois, options.hiddenGems === true).slice(0, limit);
     }
 
+    // Offline mode: no network call. Return stale cache if we have one (even
+    // past TTL — something is better than nothing when the user is explicitly
+    // offline), else empty so callers fall through to the LLM.
+    if (options.offline === true) {
+      return rankPois(cached?.pois ?? [], options.hiddenGems === true).slice(0, limit);
+    }
+
     // Use the generator form of the API so we can pull `description` (the
     // one-line Wikipedia short description) alongside the geosearch hits.
     // The description is what lets us filter out chains / admin areas / roads
@@ -177,8 +194,10 @@ export const poiService = {
       `&inprop=length` +
       `&format=json&origin=*`;
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: controller.signal });
       if (!response.ok) {
         return rankPois(cached?.pois ?? [], options.hiddenGems === true).slice(0, limit);
       }
@@ -208,9 +227,12 @@ export const poiService = {
       cache.set(key, { fetchedAt: now, pois });
       return rankPois(pois, options.hiddenGems === true).slice(0, limit);
     } catch {
-      // Offline or network error — fall back to stale cache if we have it so
-      // the UI doesn't flicker between populated and empty on flaky networks.
+      // Offline, timeout, or network error — fall back to stale cache if we
+      // have it so the UI doesn't flicker between populated and empty on
+      // flaky networks.
       return rankPois(cached?.pois ?? [], options.hiddenGems === true).slice(0, limit);
+    } finally {
+      clearTimeout(timeoutId);
     }
   },
 

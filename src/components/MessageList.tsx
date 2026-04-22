@@ -28,6 +28,7 @@ export const MessageList = forwardRef<FlatList<Message>, Props>(function Message
       data={messages}
       keyExtractor={(m) => m.id}
       renderItem={renderItem}
+      style={styles.list}
       contentContainerStyle={styles.messageList}
       ListEmptyComponent={
         <View style={styles.emptyContainer}>
@@ -45,6 +46,9 @@ export const MessageList = forwardRef<FlatList<Message>, Props>(function Message
 });
 
 const styles = StyleSheet.create({
+  list: {
+    flex: 1,
+  },
   messageList: {
     padding: 14,
     paddingTop: 10,

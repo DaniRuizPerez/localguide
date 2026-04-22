@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Colors } from '../theme/colors';
 import { Radii, Shadows, Spacing, Type } from '../theme/tokens';
 import { GuideAvatar } from './GuideAvatar';
@@ -26,6 +26,10 @@ interface Props {
   onChangeRadius: () => void;
   /** Disable interaction while a stream is in flight. */
   disabled?: boolean;
+  /** True while we're still resolving GPS or fetching nearby POIs. */
+  loading?: boolean;
+  /** True when GPS hasn't produced a fix yet (vs. fix present but no POIs). */
+  awaitingLocation?: boolean;
 }
 
 /**
@@ -49,6 +53,8 @@ export function HomeState({
   onNarratePoi,
   onChangeRadius,
   disabled = false,
+  loading = false,
+  awaitingLocation = false,
 }: Props) {
   const greeting = useMemo(() => {
     const h = new Date().getHours();
@@ -63,7 +69,10 @@ export function HomeState({
       ? `${(radiusMeters / 1000).toFixed(radiusMeters % 1000 === 0 ? 0 : 1)} km`
       : `${radiusMeters} m`;
 
-  const poiList = pois.filter((p) => p.source === 'wikipedia').slice(0, 3);
+  // Keep both wikipedia + llm sources; llm is the only flavor we get in
+  // offline mode and filtering it out would leave the section permanently
+  // empty when the user has toggled offline on.
+  const poiList = pois.slice(0, 3);
 
   const starters = [t('home.starterFood'), t('home.starterHistory'), t('home.starterWalk')];
 
@@ -107,10 +116,19 @@ export function HomeState({
       </View>
 
       {poiList.length === 0 ? (
-        <View style={styles.emptyHint}>
-          <GuideAvatar size={28} />
-          <Text style={styles.emptyHintText}>{t('home.aroundYouEmpty')}</Text>
-        </View>
+        loading || awaitingLocation ? (
+          <View style={styles.emptyHint}>
+            <ActivityIndicator size="small" color={Colors.primaryDark} />
+            <Text style={styles.emptyHintText}>
+              {awaitingLocation ? t('home.aroundYouWaitingGps') : t('home.aroundYouLoading')}
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.emptyHint}>
+            <GuideAvatar size={28} />
+            <Text style={styles.emptyHintText}>{t('home.aroundYouEmpty')}</Text>
+          </View>
+        )
       ) : (
         <View style={styles.poiList}>
           {poiList.map((p) => (
@@ -187,7 +205,8 @@ function formatDistance(meters: number): string {
 }
 
 function PoiRow({ poi, onPress, disabled }: { poi: Poi; onPress: () => void; disabled?: boolean }) {
-  const emoji = poiEmoji(poi);
+  const isLlm = poi.source === 'llm';
+  const emoji = isLlm ? '🧠' : poiEmoji(poi);
   return (
     <TouchableOpacity
       style={styles.poiRow}
@@ -209,9 +228,11 @@ function PoiRow({ poi, onPress, disabled }: { poi: Poi; onPress: () => void; dis
           </Text>
         ) : null}
       </View>
-      <View style={styles.poiDistanceBadge}>
-        <Text style={styles.poiDistanceText}>{formatDistance(poi.distanceMeters)}</Text>
-      </View>
+      {isLlm ? null : (
+        <View style={styles.poiDistanceBadge}>
+          <Text style={styles.poiDistanceText}>{formatDistance(poi.distanceMeters)}</Text>
+        </View>
+      )}
     </TouchableOpacity>
   );
 }

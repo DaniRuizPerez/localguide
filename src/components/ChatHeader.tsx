@@ -24,7 +24,7 @@ function LocationPill({
   let name = t('chat.locating');
   let dotColor: string = Colors.warning;
   if (status === 'ready' && gps) {
-    name = gps.placeName ?? `${gps.latitude.toFixed(3)}, ${gps.longitude.toFixed(3)}`;
+    name = gps.placeName ?? t('chat.hereGeneric');
     dotColor = Colors.success;
   } else if (manualLocation) {
     name = manualLocation;

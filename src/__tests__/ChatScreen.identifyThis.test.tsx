@@ -56,6 +56,10 @@ jest.mock('../services/LocalGuideService', () => ({
     ask: jest.fn(),
     askStream: jest.fn().mockResolvedValue({ abort: jest.fn() }),
     askWithImageStream: jest.fn().mockResolvedValue({ abort: jest.fn() }),
+    listNearbyPlaces: jest.fn(() => ({
+      promise: new Promise<string[]>(() => {}),
+      abort: jest.fn().mockResolvedValue(undefined),
+    })),
     dispose: jest.fn().mockResolvedValue(undefined),
   },
 }));

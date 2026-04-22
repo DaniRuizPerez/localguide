@@ -87,6 +87,13 @@ jest.mock('../services/LocalGuideService', () => ({
     ask: jest.fn(), // kept for backwards compat but no longer invoked by ChatScreen
     askStream: mockAskStream,
     askWithImageStream: mockAskStream,
+    // useNearbyPois falls back to this when Wikipedia returns nothing; stub
+    // it with a never-resolving promise so the hook stays in its loading
+    // state and tests don't have to deal with llm-flavored POI rows.
+    listNearbyPlaces: jest.fn(() => ({
+      promise: new Promise<string[]>(() => {}),
+      abort: jest.fn().mockResolvedValue(undefined),
+    })),
     dispose: jest.fn().mockResolvedValue(undefined),
   },
 }));

@@ -61,10 +61,15 @@ export default function ChatScreen(props: Props) {
   const [noticeDismissed, setNoticeDismissed] = useState(false);
   const { features } = useFeatureTier();
   const [hiddenGems, setHiddenGems] = useState<boolean>(guidePrefs.get().hiddenGems);
+  const [offlineMode, setOfflineMode] = useState<boolean>(guidePrefs.get().offlineMode);
   const [dismissedDwellIds, setDismissedDwellIds] = useState<Set<number>>(new Set());
 
   useEffect(
-    () => guidePrefs.subscribe((p) => setHiddenGems(p.hiddenGems)),
+    () =>
+      guidePrefs.subscribe((p) => {
+        setHiddenGems(p.hiddenGems);
+        setOfflineMode(p.offlineMode);
+      }),
     []
   );
 
@@ -92,7 +97,10 @@ export default function ChatScreen(props: Props) {
     onScroll: scrollToEnd,
   });
 
-  const { pois } = useNearbyPois(gps, poiRadiusMeters, { hiddenGems });
+  const { pois, loading: poisLoading } = useNearbyPois(gps, poiRadiusMeters, {
+    hiddenGems,
+    offline: offlineMode,
+  });
 
   const autoGuide = useAutoGuide((text, autoGps) => {
     messages.addGuideMessage(text, autoGps);
@@ -282,6 +290,8 @@ export default function ChatScreen(props: Props) {
           onNarratePoi={narratePoi}
           onChangeRadius={() => setSettingsOpen(true)}
           disabled={inferring}
+          loading={poisLoading}
+          awaitingLocation={!gps && !manualLocation && (status === 'idle' || status === 'requesting')}
         />
       )}
 
@@ -308,6 +318,8 @@ export default function ChatScreen(props: Props) {
         }}
         hiddenGems={hiddenGems}
         onHiddenGemsChange={(next) => guidePrefs.setHiddenGems(next)}
+        offlineMode={offlineMode}
+        onOfflineModeChange={(next) => guidePrefs.setOfflineMode(next)}
         radiusMeters={poiRadiusMeters}
         onRadiusChange={setPoiRadiusMeters}
       />

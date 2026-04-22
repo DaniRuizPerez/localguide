@@ -10,10 +10,18 @@ export interface GuidePrefsShape {
    * attractions, and the LLM fallback is instructed to pick offbeat locations.
    */
   hiddenGems: boolean;
+  /**
+   * When on, the app makes no network calls — Wikipedia geosearch, reverse
+   * geocoding, etc. are all skipped and the on-device model is the only
+   * source of tourist info. Default on so the app works anywhere (airplane,
+   * foreign-data-roaming) without surprises.
+   */
+  offlineMode: boolean;
 }
 
 const DEFAULTS: GuidePrefsShape = {
   hiddenGems: false,
+  offlineMode: true,
 };
 
 const store = createPersistedStore<GuidePrefsShape>({
@@ -21,9 +29,10 @@ const store = createPersistedStore<GuidePrefsShape>({
   defaults: DEFAULTS,
   validate: (raw, defaults) => {
     if (!raw || typeof raw !== 'object') return defaults;
-    const hiddenGems = (raw as Record<string, unknown>).hiddenGems;
+    const obj = raw as Record<string, unknown>;
     return {
-      hiddenGems: typeof hiddenGems === 'boolean' ? hiddenGems : defaults.hiddenGems,
+      hiddenGems: typeof obj.hiddenGems === 'boolean' ? obj.hiddenGems : defaults.hiddenGems,
+      offlineMode: typeof obj.offlineMode === 'boolean' ? obj.offlineMode : defaults.offlineMode,
     };
   },
 });
@@ -35,6 +44,10 @@ export const guidePrefs = {
 
   setHiddenGems(value: boolean): void {
     store.set({ hiddenGems: value });
+  },
+
+  setOfflineMode(value: boolean): void {
+    store.set({ offlineMode: value });
   },
 
   __resetForTest(): void {

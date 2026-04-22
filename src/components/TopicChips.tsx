@@ -39,6 +39,7 @@ export function TopicChips({
       showsHorizontalScrollIndicator={false}
       style={[styles.scroll, style]}
       contentContainerStyle={styles.row}
+      keyboardShouldPersistTaps="handled"
     >
       {TOPIC_OPTIONS.map((topic) => (
         <PillowChip
@@ -55,6 +56,7 @@ export function TopicChips({
 const styles = StyleSheet.create({
   scroll: {
     flexGrow: 0,
+    flexShrink: 0,
     backgroundColor: Colors.background,
   },
   row: {
@@ -63,5 +65,6 @@ const styles = StyleSheet.create({
     gap: 8,
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: 48,
   },
 });

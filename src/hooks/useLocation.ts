@@ -84,6 +84,10 @@ export function useLocation(): LocationState {
 
   // Re-geocode only when the rounded grid cell changes. Called from every
   // setGps path so both one-shot and watchPosition updates feed it.
+  // Runs even under the user's offline toggle — reverseGeocodeAsync uses the
+  // platform geocoder (Android Geocoder / iOS CLGeocoder) which is typically
+  // backed by on-device caches. When the platform has nothing cached it
+  // returns null and we fall back to a friendly label, not the raw coords.
   const maybeGeocode = useCallback((lat: number, lon: number) => {
     const key = geocodeKey(lat, lon);
     if (lastGeocodeKeyRef.current === key) return;

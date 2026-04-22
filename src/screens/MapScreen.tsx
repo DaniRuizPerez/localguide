@@ -8,6 +8,7 @@ import { Colors } from '../theme/colors';
 import { Type, Radii, Shadows, Spacing } from '../theme/tokens';
 import { softTactileMapStyle } from '../theme/mapStyle';
 import { poiService, type Poi } from '../services/PoiService';
+import { guidePrefs } from '../services/GuidePrefs';
 import { SoftButton } from '../components/SoftButton';
 import { CompassArrow } from '../components/CompassArrow';
 import { TimelineModal } from '../components/TimelineModal';
@@ -26,7 +27,10 @@ export default function MapScreen(_props: Props) {
   const [pois, setPois] = useState<Poi[]>([]);
   const [compassTarget, setCompassTarget] = useState<Poi | null>(null);
   const [timelinePoi, setTimelinePoi] = useState<Poi | null>(null);
+  const [offlineMode, setOfflineMode] = useState<boolean>(guidePrefs.get().offlineMode);
   const trail = useBreadcrumbTrail();
+
+  useEffect(() => guidePrefs.subscribe((p) => setOfflineMode(p.offlineMode)), []);
 
   // Record every GPS fix into the breadcrumb buffer. The service itself
   // handles distance de-duplication so fast callbacks don't thrash storage.
@@ -42,9 +46,15 @@ export default function MapScreen(_props: Props) {
   }, [gps]);
 
   // Fetch nearby POIs for the map pins + bottom sheet. Coarse grid-cell cache
-  // so tiny GPS jitter doesn't thrash the network.
+  // so tiny GPS jitter doesn't thrash the network. Offline mode suppresses
+  // the fetch entirely — the map has no LLM fallback with real coords so
+  // there's nothing to pin.
   useEffect(() => {
     if (!gps) return;
+    if (offlineMode) {
+      setPois([]);
+      return;
+    }
     let cancelled = false;
     poiService.fetchNearby(gps.latitude, gps.longitude, 2000).then((list) => {
       if (cancelled) return;
@@ -53,7 +63,7 @@ export default function MapScreen(_props: Props) {
     return () => {
       cancelled = true;
     };
-  }, [gps && gps.latitude.toFixed(3), gps && gps.longitude.toFixed(3)]);
+  }, [gps && gps.latitude.toFixed(3), gps && gps.longitude.toFixed(3), offlineMode]);
 
   const recenter = () => {
     if (!gps) return;

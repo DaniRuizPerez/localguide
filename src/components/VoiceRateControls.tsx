@@ -38,6 +38,8 @@ interface Props {
   onSpeakChange: (next: boolean) => void;
   hiddenGems: boolean;
   onHiddenGemsChange: (next: boolean) => void;
+  offlineMode: boolean;
+  onOfflineModeChange: (next: boolean) => void;
 
   // Settings for "Search area".
   radiusMeters: number;
@@ -113,6 +115,8 @@ export function VoiceRateControls({
   onSpeakChange,
   hiddenGems,
   onHiddenGemsChange,
+  offlineMode,
+  onOfflineModeChange,
   radiusMeters,
   onRadiusChange,
 }: Props) {
@@ -188,6 +192,13 @@ export function VoiceRateControls({
           >
             {/* THE GUIDE — behaviour toggles */}
             <SettingsGroup label={t('settings.groupGuide')}>
+              <ToggleRow
+                label={t('settings.offlineModeLabel')}
+                sub={t('settings.offlineModeSub')}
+                value={offlineMode}
+                onChange={onOfflineModeChange}
+                tint={Colors.primary}
+              />
               <ToggleRow
                 label={t('settings.autoGuideLabel')}
                 sub={t('settings.autoGuideSub')}
