@@ -173,9 +173,17 @@ export function VoiceRateControls({
       transparent
       animationType="slide"
       onRequestClose={onClose}
+      hardwareAccelerated
     >
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
+      <View style={styles.backdrop}>
+        {/* Tappable dim area sits behind the sheet so the sheet itself doesn't
+            need an onPress wrapper stealing from the ScrollView's gestures. */}
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityLabel={t('narration.done')}
+        />
+        <View style={styles.sheet}>
           <View style={styles.handle} />
 
           <View style={styles.headerRow}>
@@ -189,6 +197,9 @@ export function VoiceRateControls({
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+            removeClippedSubviews={false}
           >
             {/* THE GUIDE — behaviour toggles */}
             <SettingsGroup label={t('settings.groupGuide')}>
@@ -286,8 +297,8 @@ export function VoiceRateControls({
           <TouchableOpacity style={styles.doneBtn} onPress={onClose}>
             <Text style={styles.doneBtnText}>{t('narration.done')}</Text>
           </TouchableOpacity>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -372,7 +383,11 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
-    maxHeight: '88%',
+    // Fixed 88% height (was maxHeight) so the internal ScrollView has a
+    // deterministic size and can actually overflow + scroll properly. With
+    // maxHeight alone, the sheet shrank to content size and only a few
+    // pixels of the voice row hung off-screen, making scroll feel frozen.
+    height: '88%',
     backgroundColor: Colors.background,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
@@ -402,11 +417,14 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   scroll: {
-    flexShrink: 1,
+    // flex:1 + minHeight:0 so the ScrollView fills the space left between
+    // header and Done button and becomes the only scrollable region.
+    flex: 1,
+    minHeight: 0,
   },
   scrollContent: {
     gap: Spacing.md,
-    paddingBottom: Spacing.sm,
+    paddingBottom: Spacing.md,
   },
   group: {
     gap: 7,
