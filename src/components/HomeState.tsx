@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Colors } from '../theme/colors';
 import { Radii, Shadows, Spacing, Type } from '../theme/tokens';
@@ -35,7 +35,7 @@ interface Props {
 /**
  * Home / empty state for ChatScreen. Shown when the user has no messages yet.
  * Replaces the old "13 rows of chrome" with a purposeful landing page:
- *   - Greeting ("Good morning · You're in Midtown.")
+ *   - Location headline ("You're in Midtown. Want to wander?")
  *   - Two primary CTAs (Plan my day · Quiz me)
  *   - "Around you" POI list
  *   - Starter prompt chips along the bottom
@@ -56,14 +56,6 @@ export function HomeState({
   loading = false,
   awaitingLocation = false,
 }: Props) {
-  const greeting = useMemo(() => {
-    const h = new Date().getHours();
-    if (h < 5) return t('home.greetingNight');
-    if (h < 12) return t('home.greetingMorning');
-    if (h < 18) return t('home.greetingAfternoon');
-    return t('home.greetingEvening');
-  }, []);
-
   const radiusLabel =
     radiusMeters >= 1000
       ? `${(radiusMeters / 1000).toFixed(radiusMeters % 1000 === 0 ? 0 : 1)} km`
@@ -71,8 +63,10 @@ export function HomeState({
 
   // Keep both wikipedia + llm sources; llm is the only flavor we get in
   // offline mode and filtering it out would leave the section permanently
-  // empty when the user has toggled offline on.
-  const poiList = pois.slice(0, 3);
+  // empty when the user has toggled offline on. The outer ScrollView handles
+  // overflow so we intentionally don't truncate — the user asked to see
+  // every attraction in the radius.
+  const poiList = pois;
 
   const starters = [t('home.starterFood'), t('home.starterHistory'), t('home.starterWalk')];
 
@@ -82,7 +76,6 @@ export function HomeState({
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
     >
-      <Text style={styles.greetingEyebrow}>{greeting}</Text>
       <Text style={styles.greetingTitle}>
         {placeName ? t('home.youreIn', { place: placeName }) : t('home.youreHere')}
       </Text>
@@ -206,7 +199,12 @@ function formatDistance(meters: number): string {
 
 function PoiRow({ poi, onPress, disabled }: { poi: Poi; onPress: () => void; disabled?: boolean }) {
   const isLlm = poi.source === 'llm';
-  const emoji = isLlm ? '🧠' : poiEmoji(poi);
+  // Infer from the title for every source. LLM picks don't carry a Wikipedia
+  // description, but "Notre Dame Cathedral" / "Golden Gate Bridge" / "Stanford
+  // University" still resolve via the title alone. Fall back to 🧠 (not 📍)
+  // only when nothing infers, so uncategorized AI picks stay visibly marked.
+  const inferred = poiEmoji(poi);
+  const emoji = isLlm && inferred === '📍' ? '🧠' : inferred;
   return (
     <TouchableOpacity
       style={styles.poiRow}
@@ -237,17 +235,63 @@ function PoiRow({ poi, onPress, disabled }: { poi: Poi; onPress: () => void; dis
   );
 }
 
-// Best-effort emoji pick based on POI description keywords. Falls back to 📍.
-// Only runs on the 3 POIs shown in Home, so cost is negligible.
+// Best-effort emoji pick from POI title + Wikipedia short description. Order
+// matters: more specific categories match first so a "Royal Opera House"
+// lands on 🎭 rather than 🏛, and "Brooklyn Bridge" lands on 🌉 rather than 📍.
+// Each branch is a \b-anchored word list so a substring like "barista" in a
+// description can't accidentally match "bar".
 function poiEmoji(poi: Poi): string {
   const text = `${poi.title} ${poi.description ?? ''}`.toLowerCase();
-  if (/\b(park|garden|plaza|square|forest|beach|coast)\b/.test(text)) return '🌳';
-  if (/\b(museum|gallery|exhibit)\b/.test(text)) return '🎨';
-  if (/\b(restaurant|cafe|café|food|kitchen|bar|pub|market)\b/.test(text)) return '🍜';
-  if (/\b(church|cathedral|temple|mosque|shrine|synagogue)\b/.test(text)) return '⛪';
-  if (/\b(library|university|college|school|bookstore)\b/.test(text)) return '📚';
-  if (/\b(theater|theatre|cinema|opera|stage)\b/.test(text)) return '🎭';
-  if (/\b(monument|statue|memorial|tower)\b/.test(text)) return '🗿';
+
+  // Nature & outdoors.
+  if (/\b(mountain|peak|summit|hill|volcano|canyon|valley|cliff)\b/.test(text)) return '⛰';
+  if (/\b(river|lake|pond|waterfall|creek|bay|fjord|lagoon)\b/.test(text)) return '🌊';
+  if (/\b(beach|coast|shore|seaside|island)\b/.test(text)) return '🏖';
+  if (/\b(forest|woods?|nature reserve|wildlife|national park)\b/.test(text)) return '🌲';
+  if (/\b(park|garden|arboretum|botanical|plaza|square|promenade)\b/.test(text)) return '🌳';
+
+  // Religious buildings.
+  if (/\b(cathedral|basilica|church|chapel|abbey|convent|monastery)\b/.test(text)) return '⛪';
+  if (/\b(mosque|minaret)\b/.test(text)) return '🕌';
+  if (/\b(synagogue)\b/.test(text)) return '🕍';
+  if (/\b(temple|shrine|pagoda)\b/.test(text)) return '🛕';
+
+  // Culture & education.
+  if (/\b(museum|gallery|exhibit|exhibition)\b/.test(text)) return '🎨';
+  if (/\b(theater|theatre|opera|auditorium|concert hall|playhouse)\b/.test(text)) return '🎭';
+  if (/\b(cinema|movie theater|film)\b/.test(text)) return '🎬';
+  if (/\b(library|bookstore|archive)\b/.test(text)) return '📚';
+  if (/\b(university|college|campus|institute|academy)\b/.test(text)) return '🎓';
+  if (/\b(school|kindergarten)\b/.test(text)) return '🏫';
+
+  // Historic & civic.
+  if (/\b(castle|fortress|citadel|palace|château)\b/.test(text)) return '🏰';
+  if (/\b(monument|memorial|mausoleum|tomb|cemetery)\b/.test(text)) return '🗿';
+  if (/\b(statue|sculpture)\b/.test(text)) return '🗽';
+  if (/\b(tower|lighthouse|observation deck|belvedere)\b/.test(text)) return '🗼';
+  if (/\b(bridge|viaduct|aqueduct)\b/.test(text)) return '🌉';
+  if (/\b(city hall|town hall|capitol|parliament|courthouse|embassy)\b/.test(text)) return '🏛';
+
+  // Hospitality & commerce.
+  if (/\b(restaurant|bistro|brasserie|eatery|diner|canteen)\b/.test(text)) return '🍽';
+  if (/\b(cafe|café|coffee|bakery|patisserie)\b/.test(text)) return '☕';
+  if (/\b(bar|pub|tavern|brewery|winery|distillery)\b/.test(text)) return '🍻';
+  if (/\b(market|bazaar|souk)\b/.test(text)) return '🧺';
+  if (/\b(hotel|inn|hostel|resort|lodge)\b/.test(text)) return '🏨';
+  if (/\b(shopping|mall|department store|arcade)\b/.test(text)) return '🛍';
+
+  // Transit & sport.
+  if (/\b(train station|railway station|metro|subway|terminus)\b/.test(text)) return '🚉';
+  if (/\b(airport|aerodrome)\b/.test(text)) return '✈️';
+  if (/\b(port|harbor|harbour|marina|pier|dock)\b/.test(text)) return '⚓';
+  if (/\b(stadium|arena|ballpark|velodrome)\b/.test(text)) return '🏟';
+  if (/\b(zoo|aquarium)\b/.test(text)) return '🦁';
+  if (/\b(hospital|clinic)\b/.test(text)) return '🏥';
+
+  // Generic fallbacks for anything building-shaped.
+  if (/\b(skyscraper|high.?rise|office tower)\b/.test(text)) return '🏙';
+  if (/\b(building|house|mansion|villa|estate|hall|pavilion)\b/.test(text)) return '🏛';
+
   return '📍';
 }
 
@@ -260,11 +304,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
     paddingBottom: Spacing.md,
-  },
-  greetingEyebrow: {
-    ...Type.metaUpper,
-    color: Colors.textTertiary,
-    marginBottom: 4,
   },
   greetingTitle: {
     ...Type.h1,

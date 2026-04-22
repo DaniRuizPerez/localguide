@@ -14,6 +14,7 @@ export const EN = {
   nav: {
     chat: 'Chat',
     map: 'Map',
+    back: 'Back',
   },
   chat: {
     placeholder: "Ask about what's near you…",
@@ -117,10 +118,6 @@ export const EN = {
     empty: 'Could not generate a quiz for this area offline — try a more landmark-dense spot.',
   },
   home: {
-    greetingMorning: 'Good morning',
-    greetingAfternoon: 'Good afternoon',
-    greetingEvening: 'Good evening',
-    greetingNight: 'Good night',
     youreIn: 'You\'re in {place}.',
     youreHere: 'You\'re here.',
     wantToWander: 'Want to wander?',
