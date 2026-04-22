@@ -41,29 +41,41 @@ describe('humanizeVoices', () => {
     expect(humanizeVoices([])).toEqual([]);
   });
 
-  it('labels a single opaque voice as "Voice" (no number needed)', () => {
-    expect(humanizeVoices([voice('en-us-x-iol-local')]).map((l) => l.label)).toEqual(['Voice']);
+  it('labels a single opaque voice as "<locale> voice"', () => {
+    expect(humanizeVoices([voice('en-us-x-iol-local')]).map((l) => l.label)).toEqual([
+      'en-US voice',
+    ]);
   });
 
-  it('numbers multiple opaque voices as Voice 1, 2, 3 …', () => {
+  it('numbers multiple opaque voices as <locale> voice 1, 2, 3 …', () => {
     const labels = humanizeVoices([
       voice('en-us-x-iol-local'),
       voice('en-us-x-sfg-local'),
       voice('en-us-x-aaa-local'),
     ]).map((l) => l.label);
-    expect(labels).toEqual(['Voice 1', 'Voice 2', 'Voice 3']);
+    expect(labels).toEqual(['en-US voice 1', 'en-US voice 2', 'en-US voice 3']);
   });
 
-  it('labels known-gender voices as Female / Male', () => {
+  it('labels known-gender voices as "<locale> female" / "<locale> male"', () => {
     const labels = humanizeVoices([
       voice('en-us-x-sfg#female_1-network'),
       voice('en-us-x-iol#male_1-network'),
     ]).map((l) => l.label);
     // Sorted by identifier: iol (male) comes before sfg (female).
-    expect(labels).toEqual(['Male', 'Female']);
+    expect(labels).toEqual(['en-US male', 'en-US female']);
   });
 
-  it('numbers per-gender when there are multiples', () => {
+  it('differentiates between locale variants', () => {
+    // Same gender, different locale → no collision; each keeps the base label.
+    const labels = humanizeVoices([
+      voice('us-f#female_1', { language: 'en-US' }),
+      voice('gb-f#female_1', { language: 'en-GB' }),
+      voice('au-f#female_1', { language: 'en-AU' }),
+    ]).map((l) => l.label);
+    expect(labels).toEqual(['en-AU female', 'en-GB female', 'en-US female']);
+  });
+
+  it('numbers per (locale, gender) bucket when there are multiples', () => {
     const labels = humanizeVoices([
       voice('a-male'),
       voice('b-female'),
@@ -71,17 +83,32 @@ describe('humanizeVoices', () => {
       voice('d-female'),
       voice('e-female'),
     ]).map((l) => l.label);
-    expect(labels).toEqual(['Male 1', 'Female 1', 'Male 2', 'Female 2', 'Female 3']);
+    expect(labels).toEqual([
+      'en-US male 1',
+      'en-US female 1',
+      'en-US male 2',
+      'en-US female 2',
+      'en-US female 3',
+    ]);
   });
 
-  it('keeps Female / Male buckets separate from Voice (unknown)', () => {
+  it('falls back to capitalised "Female" / "Male" / "Voice" when no language is set', () => {
+    const labels = humanizeVoices([
+      voice('a-female', { language: '' }),
+      voice('b-male', { language: '' }),
+      voice('c', { language: '' }),
+    ]).map((l) => l.label);
+    expect(labels).toEqual(['Female', 'Male', 'Voice']);
+  });
+
+  it('keeps gender buckets separate from unknown within one locale', () => {
     const labels = humanizeVoices([
       voice('en-us-x-iol-local'),
       voice('en-us-x-sfg#female_1-network'),
       voice('en-us-x-zzz-local'),
     ]).map((l) => l.label);
-    // iol (unknown) → Voice 1, sfg (female) → Female, zzz (unknown) → Voice 2.
-    expect(labels).toEqual(['Voice 1', 'Female', 'Voice 2']);
+    // Two unknown-gender voices → "en-US voice 1/2"; one female → "en-US female".
+    expect(labels).toEqual(['en-US voice 1', 'en-US female', 'en-US voice 2']);
   });
 
   it('appends "· Enhanced" when a voice is marked Enhanced', () => {
@@ -90,7 +117,7 @@ describe('humanizeVoices', () => {
         quality: 'Enhanced' as Voice['quality'],
       }),
     ]);
-    expect(labeled.label).toBe('Female · Enhanced');
+    expect(labeled.label).toBe('en-US female · Enhanced');
   });
 
   it('is deterministic — same input gives same labels across calls', () => {

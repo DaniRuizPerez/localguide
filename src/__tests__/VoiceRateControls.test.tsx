@@ -42,6 +42,8 @@ const defaultProps = {
   onSpeakChange: () => {},
   hiddenGems: false,
   onHiddenGemsChange: () => {},
+  offlineMode: true,
+  onOfflineModeChange: () => {},
   radiusMeters: 1000,
   onRadiusChange: () => {},
 };
@@ -68,14 +70,14 @@ describe('VoiceRateControls', () => {
       { identifier: 'en-gb-x-c', name: 'raw-en-gb', language: 'en-GB' },
     ]);
 
-    // Post-humanize: chip labels describe gender when we can detect it,
-    // else fall back to "Voice N". The OS names in this test have no
-    // gender signal, so both surviving voices render as "Voice 1" and
-    // "Voice 2". The French voice is locale-filtered out.
+    // Post-humanize: chip labels carry the BCP-47 locale and gender when
+    // we can infer it. The OS names in this test have no gender signal, so
+    // the two surviving voices render as "en-GB voice" and "en-US voice".
+    // The French voice is locale-filtered out.
     const { findByText, queryByText } = render(<VoiceRateControls {...defaultProps} />);
 
-    expect(await findByText('Voice 1')).toBeTruthy();
-    expect(await findByText('Voice 2')).toBeTruthy();
+    expect(await findByText('en-US voice')).toBeTruthy();
+    expect(await findByText('en-GB voice')).toBeTruthy();
     expect(queryByText(/raw-/)).toBeNull();
   });
 
@@ -86,23 +88,21 @@ describe('VoiceRateControls', () => {
     ]);
 
     const { findByText } = render(<VoiceRateControls {...defaultProps} />);
-    expect(await findByText('Female')).toBeTruthy();
-    expect(await findByText('Male')).toBeTruthy();
+    expect(await findByText('en-US female')).toBeTruthy();
+    expect(await findByText('en-US male')).toBeTruthy();
   });
 
   it('setting a voice chip writes its OS identifier to narrationPrefs', async () => {
     mockGetAvailableVoices.mockResolvedValue([
-      // Use a gender-hinted identifier so the label ("Female") doesn't
-      // collide with the "Voice" section title above the chip row.
       { identifier: 'en-us-x-sfg#female_1-network', name: 'x', language: 'en-US' },
     ]);
 
     const { findByText } = render(<VoiceRateControls {...defaultProps} />);
-    const chip = await findByText('Female');
+    const chip = await findByText('en-US female');
     await act(async () => {
       fireEvent.press(chip);
     });
-    // Label is friendly, but the persisted identifier is still the real one.
+    // Label is human, but the persisted identifier is still the real one.
     expect(narrationPrefs.get().voice).toBe('en-us-x-sfg#female_1-network');
   });
 

@@ -126,11 +126,13 @@ export function pickDiverseVoices(voices: Voice[], max: number = 5): Voice[] {
 
 /**
  * Assign descriptive labels to a list of TTS voices:
- *   - When we can infer gender, the label says so: "Female", "Male 2",
- *     "Female · Enhanced".
- *   - When we can't, we fall back to "Voice" with a counter.
- *   - When only one voice of a given gender/bucket exists, the counter is
- *     dropped so the label reads as "Female" rather than "Female 1".
+ *   - With a language tag + known gender: "en-US female", "en-GB male".
+ *   - With a language tag, unknown gender: "en-US voice".
+ *   - No language tag but known gender: "Female", "Male" (capitalised).
+ *   - No language tag, unknown gender: "Voice".
+ *   - When more than one voice shares a (locale, gender) bucket, a numeric
+ *     suffix disambiguates: "en-US female 1", "en-US female 2".
+ *   - Enhanced-quality voices append "· Enhanced".
  *
  * The voices are sorted by identifier first so a given device always shows
  * the same voice under the same label across launches.
@@ -138,24 +140,41 @@ export function pickDiverseVoices(voices: Voice[], max: number = 5): Voice[] {
 export function humanizeVoices(voices: Voice[]): LabeledVoice[] {
   const sorted = [...voices].sort((a, b) => a.identifier.localeCompare(b.identifier));
 
+  const bucketKey = (v: Voice): string => `${v.language ?? ''}|${inferGender(v)}`;
+
   // First pass: count voices per bucket so we know whether to append a number.
-  const totals: Record<Gender, number> = { female: 0, male: 0, unknown: 0 };
-  const genders = sorted.map((v) => {
-    const g = inferGender(v);
-    totals[g] += 1;
-    return g;
-  });
+  const totals = new Map<string, number>();
+  for (const v of sorted) {
+    const k = bucketKey(v);
+    totals.set(k, (totals.get(k) ?? 0) + 1);
+  }
 
   // Second pass: build labels, incrementing per-bucket counters in order.
-  const counters: Record<Gender, number> = { female: 0, male: 0, unknown: 0 };
-  return sorted.map((voice, i) => {
-    const gender = genders[i];
-    counters[gender] += 1;
-    const baseWord =
-      gender === 'female' ? 'Female' : gender === 'male' ? 'Male' : 'Voice';
-    const withNumber =
-      totals[gender] > 1 ? `${baseWord} ${counters[gender]}` : baseWord;
+  const counters = new Map<string, number>();
+  return sorted.map((voice) => {
+    const k = bucketKey(voice);
+    const n = (counters.get(k) ?? 0) + 1;
+    counters.set(k, n);
+
+    const locale = voice.language ?? '';
+    const gender = inferGender(voice);
+    const base = formatBase(locale, gender);
+    const total = totals.get(k) ?? 1;
+    const withNumber = total > 1 ? `${base} ${n}` : base;
     const label = voice.quality === 'Enhanced' ? `${withNumber} · Enhanced` : withNumber;
     return { voice, label };
   });
+}
+
+/**
+ * Format the descriptive base label for a (locale, gender) combination.
+ * Locale prefix keeps its BCP-47 casing; the gender word is lowercase
+ * after it ("en-US female") or capitalised on its own ("Female").
+ */
+function formatBase(locale: string, gender: Gender): string {
+  const genderLower = gender === 'female' ? 'female' : gender === 'male' ? 'male' : 'voice';
+  if (locale) {
+    return `${locale} ${genderLower}`;
+  }
+  return genderLower.charAt(0).toUpperCase() + genderLower.slice(1);
 }
