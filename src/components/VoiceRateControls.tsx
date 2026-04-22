@@ -233,7 +233,7 @@ export function VoiceRateControls({
               />
             </SettingsGroup>
 
-            {/* SEARCH AREA — radius + narration length */}
+            {/* SEARCH AREA — radius only; length moved into NARRATION. */}
             <SettingsGroup label={t('settings.groupSearch')}>
               <SegmentedRow
                 label={t('settings.radiusLabel')}
@@ -241,16 +241,16 @@ export function VoiceRateControls({
                 activeIdx={RADIUS_OPTIONS.findIndex((o) => o.meters === radiusMeters)}
                 onSelect={(i) => onRadiusChange(RADIUS_OPTIONS[i].meters)}
               />
+            </SettingsGroup>
+
+            {/* NARRATION — length + rate + voice picker, all in one group. */}
+            <SettingsGroup label={t('settings.groupNarration')}>
               <SegmentedRow
                 label={t('settings.lengthLabel')}
                 options={NARRATION_LENGTH_VALUES.map(lengthLabel)}
                 activeIdx={NARRATION_LENGTH_VALUES.indexOf(length)}
                 onSelect={(i) => narrationPrefs.setLength(NARRATION_LENGTH_VALUES[i])}
               />
-            </SettingsGroup>
-
-            {/* VOICE — rate slider + voice picker */}
-            <SettingsGroup label={t('settings.groupVoice')}>
               <View style={styles.sliderRow}>
                 <View style={styles.sliderHeader}>
                   <Text style={styles.toggleLabel}>{t('narration.rateLabel')}</Text>

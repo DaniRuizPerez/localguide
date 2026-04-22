@@ -139,7 +139,7 @@ export const EN = {
     subtitle: 'Everything tweakable, in one place.',
     groupGuide: 'THE GUIDE',
     groupSearch: 'SEARCH AREA',
-    groupVoice: 'VOICE',
+    groupNarration: 'NARRATION',
     autoGuideLabel: 'Auto-Guide',
     autoGuideSub: 'Narrate as you move',
     speakLabel: 'Speak responses',
