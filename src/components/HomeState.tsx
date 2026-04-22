@@ -270,7 +270,19 @@ function poiEmoji(poi: Poi): string {
   if (/\b(statue|sculpture)\b/.test(text)) return '🗽';
   if (/\b(tower|lighthouse|observation deck|belvedere)\b/.test(text)) return '🗼';
   if (/\b(bridge|viaduct|aqueduct)\b/.test(text)) return '🌉';
-  if (/\b(city hall|town hall|capitol|parliament|courthouse|embassy)\b/.test(text)) return '🏛';
+  // Civic & government. Multi-word phrases (e.g. "civic center") avoid
+  // stealing random single-word hits like "government road" — those fall
+  // through to the street matcher below.
+  if (/\b(post office)\b/.test(text)) return '🏤';
+  if (/\b(police (station|headquarters|precinct)|sheriff'?s? office|gendarmerie)\b/.test(text)) return '🚔';
+  if (/\b(fire (station|department|house)|firehouse)\b/.test(text)) return '🚒';
+  if (
+    /\bcivic (center|centre|hall|building|campus|auditorium|complex)\b/.test(text) ||
+    /\bgovernment (center|centre|building|complex|house|office|offices)\b/.test(text) ||
+    /\bmunicipal (hall|building|center|centre|office|offices|complex)\b/.test(text) ||
+    /\badministrative (building|center|centre|complex|offices)\b/.test(text) ||
+    /\b(city hall|town hall|capitol|parliament|courthouse|embassy|prefecture|consulate|tribunal|ministry)\b/.test(text)
+  ) return '🏛';
 
   // Hospitality & commerce.
   if (/\b(restaurant|bistro|brasserie|eatery|diner|canteen)\b/.test(text)) return '🍽';
