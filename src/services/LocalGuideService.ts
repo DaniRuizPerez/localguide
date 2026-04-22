@@ -39,9 +39,14 @@ const TOPIC_LABELS: Record<GuideTopic, string> = {
   culture: 'culture, customs, and everyday life',
 };
 
-function topicFocusDirective(topic: GuideTopic | undefined): string | false {
-  if (!topic || topic === 'everything') return false;
-  return `Focus area: ${TOPIC_LABELS[topic]}. Lean your reply toward this topic unless the user asks about something else.`;
+function topicFocusDirective(topics: readonly GuideTopic[] | undefined): string | false {
+  if (!topics || topics.length === 0 || topics.includes('everything')) return false;
+  const labels = topics.map((t) => TOPIC_LABELS[t]).filter(Boolean);
+  if (labels.length === 0) return false;
+  if (labels.length === 1) {
+    return `Focus area: ${labels[0]}. Lean your reply toward this topic unless the user asks about something else.`;
+  }
+  return `Focus areas: ${labels.join(', ')}. Lean your reply toward these topics unless the user asks about something else.`;
 }
 
 function lengthDirective(length?: NarrationLength): string {
@@ -51,12 +56,12 @@ function lengthDirective(length?: NarrationLength): string {
 function buildPrompt(
   location: GPSContext | string,
   userQuery: string,
-  topic?: GuideTopic,
+  topics?: readonly GuideTopic[],
   length?: NarrationLength
 ): string {
   return buildNarratorPrompt({
     system: SYSTEM_PROMPT,
-    directives: [topicFocusDirective(topic), localePromptDirective(), lengthDirective(length)],
+    directives: [topicFocusDirective(topics), localePromptDirective(), lengthDirective(length)],
     place: location,
     cue: userQuery.trim() || 'Narrate what is interesting about this place.',
   });
@@ -71,12 +76,12 @@ export interface GuideResponse {
 function buildImagePrompt(
   location: GPSContext | string,
   userQuery: string,
-  topic?: GuideTopic,
+  topics?: readonly GuideTopic[],
   length?: NarrationLength
 ): string {
   return buildNarratorPrompt({
     system: SYSTEM_PROMPT,
-    directives: [topicFocusDirective(topic), localePromptDirective(), lengthDirective(length)],
+    directives: [topicFocusDirective(topics), localePromptDirective(), lengthDirective(length)],
     place: location,
     // Image path needs coords even when we have a place name — the model
     // uses them to disambiguate when the photo contents and named place
@@ -404,9 +409,9 @@ export const localGuideService = {
     userQuery: string,
     location: GPSContext | string,
     callbacks: StreamCallbacks,
-    topic?: GuideTopic
+    topics?: readonly GuideTopic[]
   ): Promise<StreamHandle> {
-    const prompt = buildPrompt(location, userQuery, topic);
+    const prompt = buildPrompt(location, userQuery, topics);
     return inferenceService.runInferenceStream(prompt, callbacks);
   },
 
@@ -415,9 +420,9 @@ export const localGuideService = {
     location: GPSContext | string,
     imagePath: string,
     callbacks: StreamCallbacks,
-    topic?: GuideTopic
+    topics?: readonly GuideTopic[]
   ): Promise<StreamHandle> {
-    const prompt = buildImagePrompt(location, userQuery, topic);
+    const prompt = buildImagePrompt(location, userQuery, topics);
     return inferenceService.runInferenceStream(prompt, callbacks, { imagePath });
   },
 

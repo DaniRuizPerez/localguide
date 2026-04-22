@@ -44,6 +44,8 @@ const defaultProps = {
   onHiddenGemsChange: () => {},
   offlineMode: true,
   onOfflineModeChange: () => {},
+  topics: ['everything' as const],
+  onTopicsChange: () => {},
   radiusMeters: 1000,
   onRadiusChange: () => {},
 };

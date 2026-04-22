@@ -29,7 +29,10 @@ type AppState = 'checking' | 'needs_download' | 'warming_up' | 'ready';
 export default function App() {
   const [appState, setAppState] = useState<AppState>('checking');
   const [warmupError, setWarmupError] = useState<string | null>(null);
-  const [topic, setTopic] = useState<GuideTopic>('everything');
+  // Multi-select topic bias; 'everything' is a meta-topic that implies all
+  // others and dims them in the picker. Seed with just 'everything' so the
+  // warmup screen picker shows the default "no bias" state.
+  const [topics, setTopics] = useState<readonly GuideTopic[]>(['everything']);
 
   const [fontsLoaded] = useFonts({
     Fraunces_500Medium,
@@ -118,7 +121,7 @@ export default function App() {
           <Text style={styles.hallucinationWarning}>{t('app.hallucinationWarning')}</Text>
 
           <Text style={styles.topicsHeading}>{t('app.pickTopic')}</Text>
-          <TopicChips selected={topic} onSelect={setTopic} />
+          <TopicChips selected={topics} onChange={setTopics} />
 
           {warmupError && (
             <Text style={styles.errorText}>{t('app.warmupError', { message: warmupError })}</Text>
@@ -131,7 +134,7 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <AppNavigator initialTopic={topic} />
+      <AppNavigator initialTopic={topics.find((t) => t !== 'everything')} />
       <StatusBar style="dark" />
     </SafeAreaProvider>
   );

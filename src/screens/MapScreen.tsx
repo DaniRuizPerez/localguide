@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
-import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
-import type { RootTabParamList } from '../navigation/AppNavigator';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useLocation } from '../hooks/useLocation';
 import { Colors } from '../theme/colors';
 import { Type, Radii, Shadows, Spacing } from '../theme/tokens';
@@ -17,13 +17,19 @@ import { breadcrumbTrail } from '../services/BreadcrumbTrail';
 import { useBreadcrumbTrail } from '../hooks/useBreadcrumbTrail';
 import { t } from '../i18n';
 
-type Props = BottomTabScreenProps<RootTabParamList, 'Map'>;
+type Props = NativeStackScreenProps<RootStackParamList, 'Map'>;
 
 const DEFAULT_DELTA = 0.01;
 
 export default function MapScreen({ navigation }: Props) {
   const { gps, status, errorMessage, refresh } = useLocation();
-  const goBackToChat = () => navigation.navigate('Chat');
+  // Stack nav: Map is always pushed on top of Chat, so goBack() pops.
+  // If for some reason the stack is empty (e.g. deep-linked straight to Map),
+  // fall back to an explicit navigate('Chat').
+  const goBackToChat = () => {
+    if (navigation.canGoBack()) navigation.goBack();
+    else navigation.navigate('Chat');
+  };
   const swipeBackHandlers = useEdgeSwipeBack(goBackToChat);
   const mapRef = useRef<MapView>(null);
   const didInitialCenter = useRef(false);

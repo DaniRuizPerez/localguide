@@ -10,8 +10,8 @@ import {
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
-import type { RootTabParamList } from '../navigation/AppNavigator';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useLocation } from '../hooks/useLocation';
 import { useAutoGuide } from '../hooks/useAutoGuide';
 import { useVoiceInput } from '../hooks/useVoiceInput';
@@ -27,7 +27,6 @@ import { guidePrefs } from '../services/GuidePrefs';
 import type { GPSContext } from '../services/InferenceService';
 import type { Poi } from '../services/PoiService';
 import type { Message } from '../types/chat';
-import { TopicChips } from '../components/TopicChips';
 import { DwellBanner } from '../components/DwellBanner';
 import { Colors } from '../theme/colors';
 import { Radii, Type } from '../theme/tokens';
@@ -44,7 +43,7 @@ import { HomeState } from '../components/HomeState';
 import { useEdgeSwipeBack } from '../components/EdgeSwipeBack';
 import { t } from '../i18n';
 
-type Props = BottomTabScreenProps<RootTabParamList, 'Chat'>;
+type Props = NativeStackScreenProps<RootStackParamList, 'Chat'>;
 
 const AUTO_GUIDE_WELCOME_CUE =
   'Welcome the visitor to this area and give a brief overview of its character and what makes it worth exploring.';
@@ -53,7 +52,14 @@ export default function ChatScreen(props: Props) {
   const { gps, status, refresh, manualLocation, setManualLocation } = useLocation();
 
   const [input, setInput] = useState('');
-  const [topic, setTopic] = useState<GuideTopic>(props.route.params?.initialTopic ?? 'everything');
+  // Topic is multi-select; route's single initialTopic seeds as a one-element
+  // set. 'everything' is a special marker meaning "no focus bias" — when it's
+  // present, the settings UI locks/dims the rest; downstream prompt-building
+  // treats it as "all topics".
+  const [topics, setTopics] = useState<readonly GuideTopic[]>(() => {
+    const initial = props.route.params?.initialTopic;
+    return initial ? [initial] : ['everything'];
+  });
   const [speakResponses, setSpeakResponses] = useState(true);
   const [poiRadiusMeters, setPoiRadiusMeters] = useState(1000);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -74,10 +80,10 @@ export default function ChatScreen(props: Props) {
     []
   );
 
-  const topicRef = useRef<GuideTopic>(topic);
+  const topicRef = useRef<readonly GuideTopic[]>(topics);
   useEffect(() => {
-    topicRef.current = topic;
-  }, [topic]);
+    topicRef.current = topics;
+  }, [topics]);
 
   const speakRef = useRef(speakResponses);
   useEffect(() => {
@@ -256,9 +262,6 @@ export default function ChatScreen(props: Props) {
 
       {hasMessages ? (
         <>
-          {/* One contextual strip — topic filter. Radius, length, voice hide in ⚙. */}
-          <TopicChips selected={topic} onSelect={setTopic} />
-
           <MessageList
             ref={listRef}
             messages={messages.messages}
@@ -297,6 +300,7 @@ export default function ChatScreen(props: Props) {
           pois={pois}
           onPlanDay={() => setItineraryOpen(true)}
           onQuiz={() => setQuizOpen(true)}
+          onOpenMap={() => props.navigation.navigate('Map')}
           onAsk={(q) => sendText(q)}
           onNarratePoi={narratePoi}
           onChangeRadius={() => setSettingsOpen(true)}
@@ -331,6 +335,8 @@ export default function ChatScreen(props: Props) {
         onHiddenGemsChange={(next) => guidePrefs.setHiddenGems(next)}
         offlineMode={offlineMode}
         onOfflineModeChange={(next) => guidePrefs.setOfflineMode(next)}
+        topics={topics}
+        onTopicsChange={setTopics}
         radiusMeters={poiRadiusMeters}
         onRadiusChange={setPoiRadiusMeters}
       />

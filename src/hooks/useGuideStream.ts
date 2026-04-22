@@ -10,8 +10,8 @@ export interface GuideStreamDeps {
   messages: ChatMessagesApi;
   /** Fresh ref to the current Speak toggle — read on each token. */
   speakResponsesRef: React.MutableRefObject<boolean>;
-  /** Fresh ref to the current topic — read once per stream start. */
-  topicRef: React.MutableRefObject<GuideTopic>;
+  /** Fresh ref to the current topic selection — read once per stream start. */
+  topicRef: React.MutableRefObject<readonly GuideTopic[]>;
   /** Optional — called after every state mutation so the UI can scroll. */
   onScroll?: () => void;
 }

@@ -18,6 +18,8 @@ interface Props {
   onPlanDay: () => void;
   /** Open the trivia quiz. */
   onQuiz: () => void;
+  /** Navigate to the Map screen (now a pushed stack destination). */
+  onOpenMap: () => void;
   /** Ask the guide a prompt (tapping a starter chip or POI row). */
   onAsk: (query: string) => void;
   /** Narrate a specific POI (equivalent of tapping its chip in active-chat). */
@@ -49,6 +51,7 @@ export function HomeState({
   pois,
   onPlanDay,
   onQuiz,
+  onOpenMap,
   onAsk,
   onNarratePoi,
   onChangeRadius,
@@ -83,7 +86,7 @@ export function HomeState({
 
       <View style={styles.ctaRow}>
         <CtaCard
-          glyph="🗺"
+          glyph="📅"
           label={t('home.planMyDay')}
           sub={t('home.planMyDaySub')}
           onPress={onPlanDay}
@@ -98,6 +101,14 @@ export function HomeState({
           onPress={onQuiz}
           disabled={disabled}
           testID="home-quiz"
+        />
+        <CtaCard
+          glyph="🗺"
+          label={t('home.openMap')}
+          sub={t('home.openMapSub')}
+          onPress={onOpenMap}
+          disabled={disabled}
+          testID="home-open-map"
         />
       </View>
 
@@ -270,7 +281,31 @@ function poiEmoji(poi: Poi): string {
   if (/\b(statue|sculpture)\b/.test(text)) return '🗽';
   if (/\b(tower|lighthouse|observation deck|belvedere)\b/.test(text)) return '🗼';
   if (/\b(bridge|viaduct|aqueduct)\b/.test(text)) return '🌉';
-  if (/\b(city hall|town hall|capitol|parliament|courthouse|embassy)\b/.test(text)) return '🏛';
+  // Civic & government. Multi-word phrases (e.g. "civic center") avoid
+  // stealing random single-word hits like "government road" — those fall
+  // through to the street matcher below.
+  if (/\b(post office)\b/.test(text)) return '🏤';
+  if (/\b(police (station|headquarters|precinct)|sheriff'?s? office|gendarmerie)\b/.test(text)) return '🚔';
+  if (/\b(fire (station|department|house)|firehouse)\b/.test(text)) return '🚒';
+  if (
+    /\bcivic (center|centre|hall|building|campus|auditorium|complex)\b/.test(text) ||
+    /\bgovernment (center|centre|building|complex|house|office|offices)\b/.test(text) ||
+    /\bmunicipal (hall|building|center|centre|office|offices|complex)\b/.test(text) ||
+    /\badministrative (building|center|centre|complex|offices)\b/.test(text) ||
+    /\b(city hall|town hall|capitol|parliament|courthouse|embassy|prefecture|consulate|tribunal|ministry)\b/.test(text)
+  ) return '🏛';
+
+  // Neighborhoods / towns. Keep this ahead of hospitality so "Market Street"
+  // lands on 🛣 rather than 🧺 via the "market" keyword, and "Chinatown"
+  // doesn't slip into 🏛 via the generic "building" fallback at the bottom.
+  if (
+    /\b(chinatown|koreatown|japantown|little italy|greektown|barrio)\b/.test(text) ||
+    /\b(neighbou?rhood|district|quarter|borough|suburb|arrondissement)\b/.test(text) ||
+    /\b(village|hamlet|town|township)\b/.test(text)
+  ) return '🏘';
+  if (
+    /\b(street|road|avenue|boulevard|lane|alley|drive|way|highway|route)\b/.test(text)
+  ) return '🛣';
 
   // Hospitality & commerce.
   if (/\b(restaurant|bistro|brasserie|eatery|diner|canteen)\b/.test(text)) return '🍽';
