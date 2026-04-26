@@ -169,6 +169,18 @@ export interface QuizQuestion {
 
 export type QuizTask = AbortableTask<QuizQuestion[]>;
 
+export interface QuizStreamHandlers {
+  /** Fires once per fully-parsed question, in order. */
+  onQuestion: (question: QuizQuestion, index: number) => void;
+  /** Fires after the model finishes; receives every question emitted. */
+  onDone: (questions: QuizQuestion[]) => void;
+  onError: (message: string) => void;
+}
+
+export interface QuizStreamHandle {
+  abort: () => Promise<void>;
+}
+
 function buildQuizPrompt(nearbyTitles: string[], count: number): string {
   const placesLine = nearbyTitles.length
     ? nearbyTitles.slice(0, 8).join(', ')
@@ -191,36 +203,40 @@ function buildQuizPrompt(nearbyTitles: string[], count: number): string {
   });
 }
 
-function parseQuiz(text: string): QuizQuestion[] {
-  // Split into blocks on blank lines.
-  const blocks = text.split(/\r?\n\s*\r?\n/);
-  const quizzes: QuizQuestion[] = [];
-  for (const block of blocks) {
-    const lines = block.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    if (lines.length < 6) continue;
-    const q = lines.find((l) => /^Q:/i.test(l))?.replace(/^Q:\s*/i, '').trim();
-    const opts: Record<string, string> = {};
-    for (const letter of ['A', 'B', 'C', 'D']) {
-      const line = lines.find((l) => new RegExp(`^${letter}[.:)]`, 'i').test(l));
-      if (!line) continue;
-      opts[letter] = line.replace(new RegExp(`^${letter}[.:)]\\s*`, 'i'), '').trim();
-    }
-    const correctLine = lines.find((l) => /^correct:/i.test(l));
-    const correctLetter = correctLine
-      ?.replace(/^correct:\s*/i, '')
-      .trim()
-      .charAt(0)
-      .toUpperCase();
-    if (!q || !correctLetter) continue;
-    if (!['A', 'B', 'C', 'D'].includes(correctLetter)) continue;
-    if (!opts.A || !opts.B || !opts.C || !opts.D) continue;
-    quizzes.push({
-      question: q,
-      options: [opts.A, opts.B, opts.C, opts.D],
-      correctIndex: { A: 0, B: 1, C: 2, D: 3 }[correctLetter as 'A' | 'B' | 'C' | 'D'],
-    });
+function parseQuizBlock(block: string): QuizQuestion | null {
+  const lines = block.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length < 6) return null;
+  const q = lines.find((l) => /^Q:/i.test(l))?.replace(/^Q:\s*/i, '').trim();
+  const opts: Record<string, string> = {};
+  for (const letter of ['A', 'B', 'C', 'D']) {
+    const line = lines.find((l) => new RegExp(`^${letter}[.:)]`, 'i').test(l));
+    if (!line) continue;
+    opts[letter] = line.replace(new RegExp(`^${letter}[.:)]\\s*`, 'i'), '').trim();
   }
-  return quizzes.slice(0, 10);
+  const correctLine = lines.find((l) => /^correct:/i.test(l));
+  const correctLetter = correctLine
+    ?.replace(/^correct:\s*/i, '')
+    .trim()
+    .charAt(0)
+    .toUpperCase();
+  if (!q || !correctLetter) return null;
+  if (!['A', 'B', 'C', 'D'].includes(correctLetter)) return null;
+  if (!opts.A || !opts.B || !opts.C || !opts.D) return null;
+  return {
+    question: q,
+    options: [opts.A, opts.B, opts.C, opts.D],
+    correctIndex: { A: 0, B: 1, C: 2, D: 3 }[correctLetter as 'A' | 'B' | 'C' | 'D'],
+  };
+}
+
+function parseQuiz(text: string): QuizQuestion[] {
+  const out: QuizQuestion[] = [];
+  for (const block of text.split(/\r?\n\s*\r?\n/)) {
+    const q = parseQuizBlock(block);
+    if (q) out.push(q);
+    if (out.length >= 10) break;
+  }
+  return out;
 }
 
 function buildTimelinePrompt(poiTitle: string, location: GPSContext | string | null): string {
@@ -403,6 +419,94 @@ export const localGuideService = {
   generateQuiz(nearbyTitles: string[], count: number = 5): QuizTask {
     const prompt = buildQuizPrompt(nearbyTitles, count);
     return runParsedStream(prompt, parseQuiz, { maxTokens: 700 });
+  },
+
+  /**
+   * Streaming variant: emits each question via `handlers.onQuestion` as soon
+   * as the model finishes that question, so the UI can show Q1 while the
+   * model is still generating Q2..Qn. The stream still uses a single
+   * inference call (one prompt asks for all `count` questions) — this is
+   * cheaper than N separate calls on a CPU-bound device, and the user
+   * answering one question buys "free" generation time for the next ones.
+   *
+   * Heuristic: a question block is only emitted once a blank line appears
+   * after it (i.e. the next block has started streaming) or the stream
+   * finishes. Without that guard we risk emitting a half-parsed block.
+   */
+  generateQuizStream(
+    nearbyTitles: string[],
+    count: number,
+    handlers: QuizStreamHandlers
+  ): QuizStreamHandle {
+    const prompt = buildQuizPrompt(nearbyTitles, count);
+    let fullText = '';
+    let processedBlockCount = 0;
+    const emitted: QuizQuestion[] = [];
+    let settled = false;
+    let handleRef: StreamHandle | null = null;
+
+    const drain = (final: boolean) => {
+      const blocks = fullText.split(/\r?\n\s*\r?\n/);
+      // While streaming, the trailing block may be partially generated;
+      // hold it back until either the next block starts or generation ends.
+      const ready = final ? blocks : blocks.slice(0, -1);
+      while (
+        processedBlockCount < ready.length &&
+        emitted.length < count
+      ) {
+        const block = ready[processedBlockCount];
+        processedBlockCount += 1;
+        const q = parseQuizBlock(block);
+        if (q) {
+          emitted.push(q);
+          handlers.onQuestion(q, emitted.length - 1);
+        }
+      }
+    };
+
+    inferenceService
+      .runInferenceStream(
+        prompt,
+        {
+          onToken: (delta) => {
+            if (settled) return;
+            fullText += delta;
+            drain(false);
+          },
+          onDone: () => {
+            if (settled) return;
+            settled = true;
+            drain(true);
+            handlers.onDone(emitted);
+          },
+          onError: (msg) => {
+            if (settled) return;
+            settled = true;
+            handlers.onError(msg);
+          },
+        },
+        { maxTokens: 700 }
+      )
+      .then((handle) => {
+        if (settled) {
+          handle.abort();
+          return;
+        }
+        handleRef = handle;
+      })
+      .catch((err) => {
+        if (settled) return;
+        settled = true;
+        handlers.onError(err instanceof Error ? err.message : String(err));
+      });
+
+    return {
+      abort: async () => {
+        if (settled) return;
+        settled = true;
+        if (handleRef) await handleRef.abort();
+      },
+    };
   },
 
   async askStream(
