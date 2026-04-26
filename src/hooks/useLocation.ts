@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import * as Location from 'expo-location';
+import { isGeoModuleAvailable } from '../native/GeoModule';
+import { guidePrefs } from '../services/GuidePrefs';
 import type { GPSContext } from '../services/InferenceService';
+import { reverseGeocode as reverseGeocodeOffline } from '../services/OfflineGeocoder';
 
 export type LocationStatus = 'idle' | 'requesting' | 'ready' | 'denied' | 'error';
 
@@ -42,6 +45,25 @@ async function resolvePlaceName(lat: number, lon: number): Promise<string | null
   const key = geocodeKey(lat, lon);
   const cached = geocodeCache.get(key);
   if (cached !== undefined) return cached || null;
+
+  // Offline geocoder path: when the user has it enabled AND the native
+  // GeoModule is registered on this build, try the on-device cities15000 +
+  // per-country packs first. A null return (no row in tolerance, native
+  // error, or module shimmed-out at runtime) falls back to the platform
+  // geocoder below — preserving the legacy behaviour for unsupported
+  // builds, simulators, and Jest.
+  if (guidePrefs.get().useOfflineGeocoder && isGeoModuleAvailable()) {
+    try {
+      const offline = await reverseGeocodeOffline(lat, lon);
+      if (offline) {
+        geocodeCache.set(key, offline);
+        return offline;
+      }
+    } catch {
+      // Fall through to platform geocoder.
+    }
+  }
+
   try {
     const results = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lon });
     const first = results[0];

@@ -141,6 +141,11 @@ android {
     }
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
+        // Don't re-compress .gz assets — the bundled cities15000.db.gz is already
+        // gzip-compressed and AAPT trying to deflate it again wastes CPU and
+        // produces a slightly larger APK entry. The geo module reads the asset
+        // through GZIPInputStream, which expects the raw gzip bytes.
+        noCompress 'gz'
     }
 }
 
@@ -170,6 +175,15 @@ dependencies {
 
     // LiteRT-LM runtime for Gemma 4 (.litertlm) on-device inference
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.10.2")
+
+    // Offline reverse-geocoder dependencies (com.localguideapp.geo).
+    // FusedLocationProvider for last-known + current-location fixes.
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+    // WorkManager scaffolding for future background country-pack refresh.
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+    // Coroutines: GeoModule launches on Dispatchers.IO. Pinned to a stable
+    // version compatible with Kotlin 2.x (RN 0.83 / Expo 55 toolchain).
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";

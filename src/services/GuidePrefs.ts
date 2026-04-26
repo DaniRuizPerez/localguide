@@ -17,11 +17,20 @@ export interface GuidePrefsShape {
    * foreign-data-roaming) without surprises.
    */
   offlineMode: boolean;
+  /**
+   * When on, useLocation prefers the bundled cities15000 + per-country
+   * GeoNames packs (via GeoModule) for reverse-geocoding before falling back
+   * to expo-location's platform geocoder. Default on so users with the
+   * native module installed get offline place names everywhere; if the
+   * native module isn't registered the toggle is effectively a no-op.
+   */
+  useOfflineGeocoder: boolean;
 }
 
 const DEFAULTS: GuidePrefsShape = {
   hiddenGems: false,
   offlineMode: true,
+  useOfflineGeocoder: true,
 };
 
 const store = createPersistedStore<GuidePrefsShape>({
@@ -33,6 +42,10 @@ const store = createPersistedStore<GuidePrefsShape>({
     return {
       hiddenGems: typeof obj.hiddenGems === 'boolean' ? obj.hiddenGems : defaults.hiddenGems,
       offlineMode: typeof obj.offlineMode === 'boolean' ? obj.offlineMode : defaults.offlineMode,
+      useOfflineGeocoder:
+        typeof obj.useOfflineGeocoder === 'boolean'
+          ? obj.useOfflineGeocoder
+          : defaults.useOfflineGeocoder,
     };
   },
 });
@@ -48,6 +61,10 @@ export const guidePrefs = {
 
   setOfflineMode(value: boolean): void {
     store.set({ offlineMode: value });
+  },
+
+  setUseOfflineGeocoder(value: boolean): void {
+    store.set({ useOfflineGeocoder: value });
   },
 
   __resetForTest(): void {
