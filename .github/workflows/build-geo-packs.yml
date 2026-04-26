@@ -1,0 +1,194 @@
+name: Build GeoNames packs
+
+# Builds gzipped SQLite reverse-geocoding databases from the public GeoNames
+# dumps and publishes them as a tagged GitHub Release. Runs monthly to track
+# upstream refreshes, and can also be triggered manually for a single ISO.
+
+on:
+  workflow_dispatch:
+    inputs:
+      iso_filter:
+        description: "Optional single ISO code to build (skips others). Leave empty to build everything in COUNTRIES.txt."
+        required: false
+        default: ""
+  schedule:
+    # GeoNames refreshes monthly; rebuild on the 1st at 04:00 UTC.
+    - cron: "0 4 1 * *"
+
+# Don't let a manual dispatch cancel an in-flight monthly cron build.
+concurrency:
+  group: geo-packs-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+  GEONAMES_BASE: "https://download.geonames.org/export/dump"
+
+jobs:
+  # Reads tools/geonames/COUNTRIES.txt and emits a JSON array of ISO codes for
+  # the matrix below. Honours the optional iso_filter input.
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      isos: ${{ steps.build-list.outputs.isos }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build ISO list
+        id: build-list
+        shell: bash
+        run: |
+          set -euo pipefail
+          filter="${{ github.event.inputs.iso_filter }}"
+          file="tools/geonames/COUNTRIES.txt"
+          if [[ -n "$filter" ]]; then
+            # User asked for a single country; ignore the file.
+            isos=$(printf '%s\n' "$filter" | jq -R . | jq -sc .)
+          else
+            # Strip blanks/comments, then JSON-encode as a flat array.
+            isos=$(grep -vE '^\s*(#|$)' "$file" | jq -R . | jq -sc .)
+          fi
+          echo "isos=$isos" >> "$GITHUB_OUTPUT"
+          echo "Matrix ISOs: $isos"
+
+  # Single-shot job: download the ~400MB allCountries.zip, build the global
+  # cities15000 pack, and upload it as an artifact for the publish job.
+  build-cities15000:
+    runs-on: ubuntu-latest
+    # Skip the giant global pack when the user only wants one country.
+    if: ${{ github.event.inputs.iso_filter == '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Compute cache month
+        id: cache-month
+        run: echo "month=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache GeoNames metadata
+        uses: actions/cache@v4
+        with:
+          path: tools/geonames/.cache
+          # Refresh monthly to mirror upstream cadence.
+          key: geonames-cache-${{ runner.os }}-${{ steps.cache-month.outputs.month }}
+          restore-keys: |
+            geonames-cache-${{ runner.os }}-
+
+      - name: Download allCountries.zip
+        run: |
+          curl -L --fail --retry 5 --retry-delay 10 \
+            -o allCountries.zip \
+            "${GEONAMES_BASE}/allCountries.zip"
+
+      - name: Build cities15000 pack
+        run: |
+          python tools/geonames/build_geo_db.py cities15000 \
+            --zip allCountries.zip \
+            --out cities15000.db.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pack-cities15000
+          path: cities15000.db.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  # Matrix job: one shard per ISO code, each producing a {ISO}.db.gz artifact.
+  # fail-fast disabled so one bad country doesn't kill the rest of the build.
+  build-country-packs:
+    needs: prepare-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        iso: ${{ fromJson(needs.prepare-matrix.outputs.isos) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Compute cache month
+        id: cache-month
+        run: echo "month=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache GeoNames metadata
+        uses: actions/cache@v4
+        with:
+          path: tools/geonames/.cache
+          key: geonames-cache-${{ runner.os }}-${{ steps.cache-month.outputs.month }}
+          restore-keys: |
+            geonames-cache-${{ runner.os }}-
+
+      - name: Download ${{ matrix.iso }}.zip
+        run: |
+          curl -L --fail --retry 5 --retry-delay 10 \
+            -o "${{ matrix.iso }}.zip" \
+            "${GEONAMES_BASE}/${{ matrix.iso }}.zip"
+
+      - name: Build ${{ matrix.iso }} pack
+        run: |
+          python tools/geonames/build_geo_db.py country \
+            --zip "${{ matrix.iso }}.zip" \
+            --iso "${{ matrix.iso }}" \
+            --out "${{ matrix.iso }}.db.gz"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pack-${{ matrix.iso }}
+          path: ${{ matrix.iso }}.db.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  # Collects every artifact and publishes a single GitHub Release tagged
+  # geo-YYYYMMDD with all .db.gz files attached.
+  publish:
+    needs: [build-cities15000, build-country-packs]
+    # Run even if the cities15000 job was skipped (single-country dispatch).
+    if: ${{ always() && needs.build-country-packs.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      # Required so the default GITHUB_TOKEN can create the release.
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p release
+          find artifacts -type f -name '*.db.gz' -exec cp {} release/ \;
+          ls -lh release/
+
+      - name: Compute snapshot tag
+        id: tag
+        run: |
+          tag="geo-$(date -u +%Y%m%d)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: GeoNames packs ${{ steps.tag.outputs.date }}
+          prerelease: false
+          files: release/*.db.gz
+          body: |
+            Offline reverse-geocoding packs built on ${{ steps.tag.outputs.date }} (UTC).
+
+            Source: https://download.geonames.org/export/dump/
+            Built by: `.github/workflows/build-geo-packs.yml`

@@ -10,10 +10,12 @@ import {
   View,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
+import { CountryPackPicker } from './CountryPackPicker';
 import { PillowChip } from './PillowChip';
 import { TopicChips, type GuideTopic } from './TopicChips';
 import { Colors } from '../theme/colors';
 import { Radii, Shadows, Spacing, Type } from '../theme/tokens';
+import { guidePrefs } from '../services/GuidePrefs';
 import {
   narrationPrefs,
   NARRATION_LENGTH_VALUES,
@@ -128,6 +130,10 @@ export function VoiceRateControls({
   const [rate, setRate] = useState<number>(narrationPrefs.get().rate);
   const [voice, setVoice] = useState<string | undefined>(narrationPrefs.get().voice);
   const [length, setLength] = useState<NarrationLength>(narrationPrefs.get().length);
+  const [useOfflineGeocoder, setUseOfflineGeocoder] = useState<boolean>(
+    guidePrefs.get().useOfflineGeocoder
+  );
+  const [packPickerOpen, setPackPickerOpen] = useState(false);
   const availableVoices = useVoicesForLocale(visible);
 
   useEffect(() => {
@@ -135,6 +141,12 @@ export function VoiceRateControls({
       setRate(p.rate);
       setVoice(p.voice);
       setLength(p.length);
+    });
+  }, []);
+
+  useEffect(() => {
+    return guidePrefs.subscribe((p) => {
+      setUseOfflineGeocoder(p.useOfflineGeocoder);
     });
   }, []);
 
@@ -306,6 +318,33 @@ export function VoiceRateControls({
                 )}
               </View>
             </SettingsGroup>
+
+            {/* LOCATION — offline reverse-geocoding toggle + country pack manager.
+                Labels are literal English: the i18n strings module isn't in this
+                feature's scope; the integration phase can route them through t(). */}
+            <SettingsGroup label="LOCATION">
+              <ToggleRow
+                label="Offline geocoder"
+                sub="Use bundled place data instead of the system geocoder."
+                value={useOfflineGeocoder}
+                onChange={(next) => guidePrefs.setUseOfflineGeocoder(next)}
+                tint={Colors.primary}
+              />
+              <TouchableOpacity
+                style={styles.toggleRow}
+                onPress={() => setPackPickerOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Country detail packs"
+              >
+                <View style={styles.toggleText}>
+                  <Text style={styles.toggleLabel}>Country detail packs</Text>
+                  <Text style={styles.toggleSub}>
+                    Add per-country place data for richer offline names.
+                  </Text>
+                </View>
+                <Text style={styles.disclosure}>›</Text>
+              </TouchableOpacity>
+            </SettingsGroup>
           </ScrollView>
 
           <TouchableOpacity style={styles.doneBtn} onPress={onClose}>
@@ -313,6 +352,7 @@ export function VoiceRateControls({
           </TouchableOpacity>
         </View>
       </View>
+      <CountryPackPicker visible={packPickerOpen} onClose={() => setPackPickerOpen(false)} />
     </Modal>
   );
 }
@@ -472,6 +512,11 @@ const styles = StyleSheet.create({
     ...Type.hint,
     color: Colors.textTertiary,
     marginTop: 1,
+  },
+  disclosure: {
+    ...Type.h1,
+    color: Colors.textTertiary,
+    paddingHorizontal: 4,
   },
   segmentRow: {
     paddingVertical: 8,
