@@ -54,6 +54,66 @@ SKIP_FEATURE_CODES = {"PPLH", "PPLW", "PPLQ", "PPLCH"}
 GEOHASH_ALPHABET = "0123456789bcdefghjkmnpqrstuvwxyz"
 SCHEMA_VERSION = "1"
 
+# Country packs include populated places + a curated set of landmarks. These
+# are the feature codes that consistently map to "place a tourist would
+# narrate about" — parks/preserves under feature class L, plus a tight
+# allowlist of S (spot/building) codes that excludes farms, ATMs, schools,
+# and other GeoNames noise. The runtime POI lookup queries everything in
+# this list within `radiusMeters` of the user.
+COUNTRY_PACK_FEATURE_CLASSES = {"P"}  # populated places
+COUNTRY_PACK_L_CODES = {
+    "PRK",   # park
+    "NATP",  # national park
+    "RES",   # reserve
+    "RESN",  # nature reserve
+    "RESF",  # forest reserve
+    "RESV",  # reservation
+    "RESP",  # palm tree reserve  (rare; cheap to include)
+    "AMUS",  # amusement park
+    "GDN",   # garden(s)
+    "ZN",    # zone (e.g. historic district) — keep, lots of false positives
+}
+COUNTRY_PACK_S_CODES = {
+    "MNMT",  # monument
+    "HSTS",  # historical site
+    "MUS",   # museum
+    "CSTL",  # castle
+    "PAL",   # palace
+    "TMPL",  # temple
+    "CH",    # church
+    "MSQE",  # mosque
+    "SHRN",  # shrine
+    "SYG",   # synagogue
+    "MSTY",  # monastery
+    "ABBY",  # abbey
+    "CTHSE", # courthouse
+    "GOVL",  # local government office
+    "CTRR",  # religious center
+    "CTRCM", # community center
+    "LIBR",  # library
+    "OPRA",  # opera house
+    "THTR",  # theater
+    "AMTH",  # amphitheater
+    "STDM",  # stadium
+    "ARCH",  # arch
+    "OBS",   # observatory
+    "OBPT",  # observation point / lookout
+    "TOWR",  # tower
+    "LTHSE", # lighthouse
+    "ZOO",
+    "SQR",   # square / plaza
+    "PIER",
+    "MAR",   # marina
+    "CTRA",  # athletic center
+    "UNIV",  # university
+    "COLL",  # college
+    "SCHA",  # academy / specialised school
+    "PRSH",  # parish house
+    "FT",    # fort
+    "RUIN",  # ruin
+    "ANS",   # ancient site
+}
+
 
 def geohash_encode(lat: float, lon: float, length: int = 5) -> str:
     lat_lo, lat_hi = -90.0, 90.0
@@ -201,7 +261,20 @@ def load_places(
     zip_path: Path,
     min_population: int,
     iso_filter: str | None = None,
+    include_landmarks: bool = False,
 ) -> int:
+    """Stream the GeoNames TSV into the `places` table.
+
+    `include_landmarks=False` reproduces the cities15000 behavior: keep only
+    feature class P (populated places) above `min_population`, minus the
+    historical/destroyed codes.
+
+    `include_landmarks=True` (used for country packs) additionally keeps
+    feature class L parks/preserves and a curated allowlist of S codes
+    (museums, monuments, castles, etc.) regardless of population. The
+    population filter still applies to the P-class rows so sub-1k hamlets
+    don't drown out the chip list.
+    """
     BATCH = 5000
     batch: list[tuple] = []
     inserted = 0
@@ -210,16 +283,39 @@ def load_places(
         seen += 1
         if seen % 250000 == 0:
             print(f"  scanned {seen:,} rows, inserted {inserted:,}", file=sys.stderr)
-        if parts[6] != "P":
+
+        feature_class = parts[6]
+        feature_code = parts[7]
+
+        # Class-aware filter. P rows always honor min_population and the
+        # historical/destroyed skip list. L and S rows only land when the
+        # caller asked for landmarks AND the code is in our allowlist.
+        if feature_class == "P":
+            if feature_code in SKIP_FEATURE_CODES:
+                continue
+            try:
+                pop = int(parts[14]) if parts[14] else 0
+            except ValueError:
+                pop = 0
+            if pop < min_population:
+                continue
+        elif include_landmarks and feature_class == "L":
+            if feature_code not in COUNTRY_PACK_L_CODES:
+                continue
+            try:
+                pop = int(parts[14]) if parts[14] else 0
+            except ValueError:
+                pop = 0
+        elif include_landmarks and feature_class == "S":
+            if feature_code not in COUNTRY_PACK_S_CODES:
+                continue
+            try:
+                pop = int(parts[14]) if parts[14] else 0
+            except ValueError:
+                pop = 0
+        else:
             continue
-        if parts[7] in SKIP_FEATURE_CODES:
-            continue
-        try:
-            pop = int(parts[14]) if parts[14] else 0
-        except ValueError:
-            pop = 0
-        if pop < min_population:
-            continue
+
         country_code = parts[8]
         if iso_filter and country_code != iso_filter:
             continue
@@ -306,7 +402,22 @@ def build(mode: str, zip_path: Path, out_path: Path, min_population: int, iso: s
         n_admin1 = load_admin1(conn, admin1_path)
         print(f"Loaded {n_countries} countries, {n_admin1} admin1 entries", file=sys.stderr)
 
-        n_places = load_places(conn, zip_path, min_population, iso_filter=iso if mode == "country" else None)
+        n_places = load_places(
+            conn,
+            zip_path,
+            min_population,
+            iso_filter=iso if mode == "country" else None,
+            include_landmarks=(mode == "country"),
+        )
+
+        # Country packs need a feature_code index too — the offline POI
+        # lookup filters by parks/landmarks codes when ranking nearby spots.
+        if mode == "country":
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_places_feature_code "
+                "ON places(feature_code)"
+            )
+            conn.commit()
 
         source = "cities15000" if mode == "cities15000" else f"country:{iso}"
         write_meta(conn, source)

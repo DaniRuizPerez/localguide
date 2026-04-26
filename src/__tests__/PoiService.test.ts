@@ -291,3 +291,129 @@ describe('PoiService.fetchNearby', () => {
     expect(gems[1].title).toBe('Famous Spot');
   });
 });
+
+// ─── Offline GeoNames path ────────────────────────────────────────────────
+
+jest.mock('../native/GeoModule', () => ({
+  __esModule: true,
+  default: { nearbyPlaces: jest.fn() },
+  isGeoModuleAvailable: jest.fn(() => true),
+}));
+
+const mockedNearby = jest.requireMock('../native/GeoModule').default
+  .nearbyPlaces as jest.Mock;
+const mockedAvailable = jest.requireMock('../native/GeoModule')
+  .isGeoModuleAvailable as jest.Mock;
+
+function geoPlace(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    geonameid: 1,
+    name: 'Pace Park',
+    asciiname: 'Pace Park',
+    admin1: 'FL',
+    admin1Name: 'Florida',
+    admin2: null,
+    countryCode: 'US',
+    countryName: 'United States',
+    featureCode: 'PRK',
+    population: 0,
+    lat: 25.7626,
+    lon: -80.1893,
+    distanceMeters: 126,
+    source: 'country:US',
+    ...overrides,
+  };
+}
+
+describe('PoiService.fetchNearby — offline GeoNames path', () => {
+  beforeEach(() => {
+    poiService.clearCache();
+    mockFetch.mockReset();
+    mockedNearby.mockReset();
+    mockedAvailable.mockReturnValue(true);
+  });
+
+  it('queries GeoModule.nearbyPlaces in offline mode and maps hits to Pois', async () => {
+    mockedNearby.mockResolvedValue([
+      geoPlace({ geonameid: 1, name: 'Pace Park', distanceMeters: 126, featureCode: 'PRK' }),
+      geoPlace({
+        geonameid: 2,
+        name: 'Historical Museum of Southern Florida',
+        distanceMeters: 136,
+        featureCode: 'MUS',
+      }),
+    ]);
+    const results = await poiService.fetchNearby(25.7617, -80.1918, 1000, 10, {
+      offline: true,
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockedNearby).toHaveBeenCalledTimes(1);
+    expect(results.map((p) => p.title)).toEqual([
+      'Pace Park',
+      'Historical Museum of Southern Florida',
+    ]);
+    expect(results[0].source).toBe('geonames');
+    expect(results[0].featureCode).toBe('PRK');
+    expect(results[0].distanceMeters).toBe(126);
+  });
+
+  it('passes 2x the requested limit to the native side so rank/filter has slack', async () => {
+    mockedNearby.mockResolvedValue([]);
+    await poiService.fetchNearby(25.7617, -80.1918, 1000, 8, { offline: true });
+    expect(mockedNearby).toHaveBeenCalledWith(25.7617, -80.1918, 1000, 16);
+  });
+
+  it('caps the native limit at 200 even for absurd consumer asks', async () => {
+    mockedNearby.mockResolvedValue([]);
+    await poiService.fetchNearby(25.7617, -80.1918, 1000, 500, { offline: true });
+    const [, , , nativeLimit] = mockedNearby.mock.calls[0];
+    expect(nativeLimit).toBe(200);
+  });
+
+  it('falls back to stale Wikipedia cache when GeoNames returns nothing', async () => {
+    // Seed the cache with one online run.
+    mockFetch.mockResolvedValue(wikiResponse([
+      {
+        pageid: 99,
+        title: 'Stanford Cantor Arts Center',
+        description: 'Art museum at Stanford University',
+        coordinates: [{ lat: 37.4326, lon: -122.1702 }],
+      },
+    ]));
+    await poiService.fetchNearby(37.4419, -122.143, 1000, 10);
+    mockFetch.mockReset();
+
+    mockedNearby.mockResolvedValue([]);
+    const offline = await poiService.fetchNearby(37.4419, -122.143, 1000, 10, {
+      offline: true,
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(offline.map((p) => p.title)).toEqual(['Stanford Cantor Arts Center']);
+    expect(offline[0].source).toBe('wikipedia');
+  });
+
+  it('returns [] when GeoNames is empty and the cache is empty (caller falls through to LLM)', async () => {
+    mockedNearby.mockResolvedValue([]);
+    const results = await poiService.fetchNearby(25.7617, -80.1918, 1000, 10, {
+      offline: true,
+    });
+    expect(results).toEqual([]);
+  });
+
+  it('skips the native call when GeoModule is not registered, returns [] cleanly', async () => {
+    mockedAvailable.mockReturnValue(false);
+    const results = await poiService.fetchNearby(25.7617, -80.1918, 1000, 10, {
+      offline: true,
+    });
+    expect(mockedNearby).not.toHaveBeenCalled();
+    expect(results).toEqual([]);
+  });
+
+  it('survives a native rejection and falls through to []', async () => {
+    mockedNearby.mockRejectedValue(new Error('sqlite blew up'));
+    const results = await poiService.fetchNearby(25.7617, -80.1918, 1000, 10, {
+      offline: true,
+    });
+    expect(results).toEqual([]);
+  });
+});

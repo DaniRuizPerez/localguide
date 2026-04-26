@@ -54,6 +54,113 @@ internal class ReverseGeocoder(private val geoDb: GeoDatabase) {
         return queryNearest(cities, lat, lon, cells, source = "cities15000")
     }
 
+    /**
+     * Top-N places within `radiusMeters` of the query, ranked by distance.
+     *
+     * Used by the offline-mode POI chip list — instead of asking the LLM to
+     * invent place names, we query the bundled cities15000 + every installed
+     * country pack and return real, ranked-by-distance hits. Country packs
+     * include parks and curated landmark codes, so for a city like Miami the
+     * list surfaces neighborhoods, parks, and museums rather than the LLM's
+     * hallucinated "12th Street Park."
+     *
+     * Dedup is by geonameid: the same place appearing in both cities15000
+     * and an installed pack is counted once (the pack copy wins because it
+     * carries richer metadata — feature_code, finer admin lineage).
+     */
+    suspend fun nearbyPlaces(
+        lat: Double,
+        lon: Double,
+        radiusMeters: Double,
+        limit: Int,
+    ): List<Match> {
+        if (limit <= 0 || radiusMeters <= 0) return emptyList()
+        // 5x5 block ≈ 25 km coverage; enough for any practical chip-list
+        // radius (the UI caps at 5 km today).
+        val cell = Geohash.encode(lat, lon, 5)
+        val cells = Geohash.neighborBlock(cell, radius = 2)
+
+        val byId = LinkedHashMap<Long, Match>()
+
+        // Country packs first so their richer entries win the dedup race.
+        for (pack in geoDb.listInstalledPacks()) {
+            val db = geoDb.openCountryPack(pack.iso) ?: continue
+            for (m in queryWithin(db, lat, lon, cells, radiusMeters, "country:${pack.iso}")) {
+                if (!byId.containsKey(m.geonameid)) byId[m.geonameid] = m
+            }
+        }
+
+        // Then the global cities table — dedup against pack hits above.
+        val cities = geoDb.openCities()
+        for (m in queryWithin(cities, lat, lon, cells, radiusMeters, "cities15000")) {
+            if (!byId.containsKey(m.geonameid)) byId[m.geonameid] = m
+        }
+
+        return byId.values.sortedBy { it.distanceMeters }.take(limit)
+    }
+
+    private fun queryWithin(
+        db: SQLiteDatabase,
+        lat: Double,
+        lon: Double,
+        cells: List<String>,
+        radiusMeters: Double,
+        source: String,
+    ): List<Match> {
+        if (cells.isEmpty()) return emptyList()
+        val placeholders = cells.joinToString(",") { "?" }
+        val sql = """
+            SELECT p.geonameid, p.name, p.asciiname, p.country_code, p.admin1, p.admin2,
+                   p.feature_code, p.population, p.lat, p.lon,
+                   c.name AS country_name,
+                   a.name AS admin1_name
+            FROM places p
+            LEFT JOIN countries c ON c.iso = p.country_code
+            LEFT JOIN admin1    a ON a.country_code = p.country_code AND a.code = p.admin1
+            WHERE p.geohash5 IN ($placeholders)
+        """.trimIndent()
+        val out = ArrayList<Match>()
+        db.rawQuery(sql, cells.toTypedArray()).use { cur ->
+            val iId = cur.getColumnIndexOrThrow("geonameid")
+            val iName = cur.getColumnIndexOrThrow("name")
+            val iAscii = cur.getColumnIndexOrThrow("asciiname")
+            val iCc = cur.getColumnIndexOrThrow("country_code")
+            val iAdmin1 = cur.getColumnIndexOrThrow("admin1")
+            val iAdmin2 = cur.getColumnIndexOrThrow("admin2")
+            val iFc = cur.getColumnIndexOrThrow("feature_code")
+            val iPop = cur.getColumnIndexOrThrow("population")
+            val iLat = cur.getColumnIndexOrThrow("lat")
+            val iLon = cur.getColumnIndexOrThrow("lon")
+            val iCountry = cur.getColumnIndexOrThrow("country_name")
+            val iA1Name = cur.getColumnIndexOrThrow("admin1_name")
+            while (cur.moveToNext()) {
+                val pLat = cur.getDouble(iLat)
+                val pLon = cur.getDouble(iLon)
+                val d = haversineMeters(lat, lon, pLat, pLon)
+                if (d > radiusMeters) continue
+                out.add(
+                    Match(
+                        geonameid = cur.getLong(iId),
+                        name = cur.getString(iName).orEmpty(),
+                        asciiname = cur.getString(iAscii).orEmpty(),
+                        admin1 = cur.getString(iAdmin1),
+                        admin1Name = cur.getString(iA1Name),
+                        admin2 = cur.getString(iAdmin2),
+                        countryCode = cur.getString(iCc).orEmpty(),
+                        countryName = cur.getString(iCountry),
+                        featureCode = cur.getString(iFc),
+                        population = if (cur.isNull(iPop)) 0 else cur.getInt(iPop),
+                        lat = pLat,
+                        lon = pLon,
+                        distanceMeters = d,
+                        source = source,
+                    )
+                )
+            }
+        }
+        return out
+    }
+
     private fun queryNearest(
         db: SQLiteDatabase,
         lat: Double,
@@ -66,6 +173,10 @@ internal class ReverseGeocoder(private val geoDb: GeoDatabase) {
         // LEFT JOIN countries + admin1 so we get human-readable names when the
         // pack ships them. Country packs and cities15000 share the exact same
         // schema, so this query is uniform across both.
+        // The nearest-only path filters to feature class P (populated places)
+        // — sticking parks/landmarks into the place-name label would render
+        // as "Yosemite National Park, California" for someone standing in a
+        // hotel at the park entrance, which is misleading.
         val sql = """
             SELECT p.geonameid, p.name, p.asciiname, p.country_code, p.admin1, p.admin2,
                    p.feature_code, p.population, p.lat, p.lon,
@@ -75,9 +186,11 @@ internal class ReverseGeocoder(private val geoDb: GeoDatabase) {
             LEFT JOIN countries c ON c.iso = p.country_code
             LEFT JOIN admin1    a ON a.country_code = p.country_code AND a.code = p.admin1
             WHERE p.geohash5 IN ($placeholders)
+              AND substr(p.feature_code, 1, 3) = 'PPL'
         """.trimIndent()
         var best: Match? = null
         db.rawQuery(sql, cells.toTypedArray()).use { cur ->
+            val iId = cur.getColumnIndexOrThrow("geonameid")
             val iName = cur.getColumnIndexOrThrow("name")
             val iAscii = cur.getColumnIndexOrThrow("asciiname")
             val iCc = cur.getColumnIndexOrThrow("country_code")
@@ -96,6 +209,7 @@ internal class ReverseGeocoder(private val geoDb: GeoDatabase) {
                 val current = best
                 if (current == null || d < current.distanceMeters) {
                     best = Match(
+                        geonameid = cur.getLong(iId),
                         name = cur.getString(iName).orEmpty(),
                         asciiname = cur.getString(iAscii).orEmpty(),
                         admin1 = cur.getString(iAdmin1),
@@ -117,6 +231,7 @@ internal class ReverseGeocoder(private val geoDb: GeoDatabase) {
     }
 
     data class Match(
+        val geonameid: Long,
         val name: String,
         val asciiname: String,
         val admin1: String?,

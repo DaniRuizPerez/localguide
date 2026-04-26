@@ -1,8 +1,13 @@
-// Notable-places lookup backed by Wikipedia's GeoSearch endpoint. We pick
+// Notable-places lookup backed by Wikipedia's GeoSearch endpoint when online,
+// the bundled GeoNames cities15000 + per-country packs when offline. We pick
 // Wikipedia over Overpass/Google Places because "has a Wikipedia article" is a
 // reliable proxy for "interesting enough to narrate about" — Stanford, Steve
 // Jobs house, well-known parks, historic churches all surface, while generic
-// convenience stores don't. Free, no API key, no rate-limit at our usage.
+// convenience stores don't. Free, no API key, no rate-limit at our usage. The
+// GeoNames offline path has narrower coverage but ships real coordinates so
+// the offline-mode chip list shows actual nearby places instead of LLM
+// hallucinations.
+import GeoModule, { isGeoModuleAvailable, type GeoPlace } from '../native/GeoModule';
 
 export interface Poi {
   pageId: number;
@@ -11,12 +16,19 @@ export interface Poi {
   longitude: number;
   distanceMeters: number;
   /**
-   * Where this suggestion came from. 'wikipedia' entries have real coords
-   * (safe to geofence); 'llm' entries are model-generated names with the
-   * user's own position used as a placeholder — proximity checks must skip
-   * them so we don't auto-narrate the user's current location.
+   * Where this suggestion came from. 'wikipedia' and 'geonames' entries
+   * carry real coords (safe to geofence); 'llm' entries are model-generated
+   * names with the user's own position used as a placeholder — proximity
+   * checks must skip them so we don't auto-narrate the user's current
+   * location.
    */
-  source: 'wikipedia' | 'llm';
+  source: 'wikipedia' | 'geonames' | 'llm';
+  /**
+   * GeoNames feature code for 'geonames' entries (e.g. PRK = park, CH =
+   * church, MUS = museum). Lets the chip-row emoji classifier do a much
+   * tighter job than parsing the title alone. Absent for other sources.
+   */
+  featureCode?: string;
   /**
    * Wikipedia article length in bytes. Used as a popularity proxy: longer
    * article ≈ more famous place. Absent when we couldn't fetch it (offline
@@ -81,6 +93,45 @@ export function distanceMeters(
     Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+async function fetchNearbyFromGeoNames(
+  lat: number,
+  lon: number,
+  radiusMeters: number,
+  limit: number
+): Promise<Poi[]> {
+  if (!isGeoModuleAvailable()) return [];
+  try {
+    // Ask for 2x the cap so the downstream rank/filter has room to work
+    // (hidden-gems re-rank, dedup, etc). The native side caps at 200.
+    const places = await GeoModule.nearbyPlaces(lat, lon, radiusMeters, Math.min(200, limit * 2));
+    return places.map(geoPlaceToPoi);
+  } catch {
+    return [];
+  }
+}
+
+function geoPlaceToPoi(p: GeoPlace): Poi {
+  return {
+    // GeoNames IDs are positive 32-bit integers; Poi.pageId originated as a
+    // Wikipedia pageid but the field's only consumer is React `key`, so we
+    // can reuse it cleanly here.
+    pageId: p.geonameid,
+    title: p.name,
+    latitude: p.lat,
+    longitude: p.lon,
+    distanceMeters: p.distanceMeters,
+    source: 'geonames',
+    featureCode: p.featureCode ?? undefined,
+    // Borrow the population proxy: places with a non-zero population get
+    // ranked first under hidden-gems sort (fewer people = lesser-known).
+    articleLength: p.population > 0 ? p.population : undefined,
+    // Tiny human-readable hint. Region/admin1Name when available, else the
+    // feature code. Keeps the row visually consistent with the Wikipedia
+    // path which shows a one-line description.
+    description: p.admin1Name ?? undefined,
+  };
 }
 
 interface WikiPage {
@@ -168,10 +219,17 @@ export const poiService = {
       return rankPois(cached.pois, options.hiddenGems === true).slice(0, limit);
     }
 
-    // Offline mode: no network call. Return stale cache if we have one (even
-    // past TTL — something is better than nothing when the user is explicitly
-    // offline), else empty so callers fall through to the LLM.
+    // Offline mode: no network call. Try the bundled GeoNames data first —
+    // cities15000 plus any installed country packs, which include parks and
+    // curated landmark codes. If GeoNames returns nothing (no pack installed
+    // for this region, or the user is somewhere genuinely uncovered), fall
+    // back to the stale Wikipedia cache, then to []. The empty case lets
+    // callers fall through to the LLM as today.
     if (options.offline === true) {
+      const geoPois = await fetchNearbyFromGeoNames(latitude, longitude, radiusMeters, limit);
+      if (geoPois.length > 0) {
+        return rankPois(geoPois, options.hiddenGems === true).slice(0, limit);
+      }
       return rankPois(cached?.pois ?? [], options.hiddenGems === true).slice(0, limit);
     }
 
