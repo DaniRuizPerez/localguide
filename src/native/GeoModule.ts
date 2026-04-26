@@ -18,6 +18,8 @@ import { NativeEventEmitter, NativeModules } from 'react-native';
 import type { EmitterSubscription } from 'react-native';
 
 export interface GeoPlace {
+  /** GeoNames ID — stable across snapshots; safe to dedupe on. */
+  geonameid: number;
   name: string;
   asciiname: string;
   admin1: string | null;
@@ -70,6 +72,19 @@ export interface GeoModuleNative {
     lon: number,
     options?: GeoReverseGeocodeOptions
   ): Promise<GeoPlace | null>;
+
+  /**
+   * Top-N places within `radiusMeters` of the query, ranked by distance.
+   * Used by the offline-mode POI chip list — returns real GeoNames entries
+   * (cities, neighborhoods, parks, museums depending on which packs are
+   * installed). Caps: limit ∈ [1, 200], radius ∈ [10 m, 50 km].
+   */
+  nearbyPlaces(
+    lat: number,
+    lon: number,
+    radiusMeters: number,
+    limit: number
+  ): Promise<GeoPlace[]>;
 
   getCurrentLocation(options?: GeoCurrentLocationOptions): Promise<GeoCurrentLocation>;
 
@@ -132,6 +147,7 @@ if (!NativeGeoModule) {
  */
 const SHIM: GeoModuleNative = {
   reverseGeocode: () => Promise.resolve(null),
+  nearbyPlaces: () => Promise.resolve([]),
   getCurrentLocation: () =>
     Promise.reject(new Error('GeoModule native bridge not available')),
   availableCountryPacks: () => Promise.resolve([]),

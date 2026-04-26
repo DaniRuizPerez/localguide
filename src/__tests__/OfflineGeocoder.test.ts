@@ -28,6 +28,7 @@ global.fetch = fetchMock as unknown as typeof fetch;
 
 function place(overrides: Partial<Record<string, unknown>> = {}) {
   return {
+    geonameid: 3117735,
     name: 'Madrid',
     asciiname: 'Madrid',
     admin1: '29',

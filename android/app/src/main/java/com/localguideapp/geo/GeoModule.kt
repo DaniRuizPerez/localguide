@@ -60,6 +60,9 @@ class GeoModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
     }
 
     private fun ReverseGeocoder.Match.toWritableMap(): WritableMap = Arguments.createMap().apply {
+        // geonameid is a Long; WritableMap doesn't have putLong, so JS sees it
+        // as a number (safe — geonameids fit comfortably in 53 bits).
+        putDouble("geonameid", geonameid.toDouble())
         putString("name", name)
         putString("asciiname", asciiname)
         if (admin1 != null) putString("admin1", admin1) else putNull("admin1")
@@ -73,6 +76,26 @@ class GeoModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
         putDouble("lon", lon)
         putDouble("distanceMeters", distanceMeters)
         putString("source", source)
+    }
+
+    // ---------------------------------------------------------------------- //
+    // 1b. nearbyPlaces (offline POI list)
+    // ---------------------------------------------------------------------- //
+
+    @ReactMethod
+    fun nearbyPlaces(lat: Double, lon: Double, radiusMeters: Double, limit: Int, promise: Promise) {
+        val safeLimit = limit.coerceIn(1, 200)
+        val safeRadius = radiusMeters.coerceIn(10.0, 50_000.0)
+        scope.launch {
+            try {
+                val matches = geocoder.nearbyPlaces(lat, lon, safeRadius, safeLimit)
+                val arr = Arguments.createArray()
+                for (m in matches) arr.pushMap(m.toWritableMap())
+                promise.resolve(arr)
+            } catch (t: Throwable) {
+                promise.reject("E_NEARBY_PLACES", t.message ?: t.javaClass.simpleName, t)
+            }
+        }
     }
 
     // ---------------------------------------------------------------------- //
