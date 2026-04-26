@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -22,6 +22,7 @@ import { useProximityNarration } from '../hooks/useProximityNarration';
 import { useDwellDetection } from '../hooks/useDwellDetection';
 import { useFeatureTier } from '../hooks/useFeatureTier';
 import { type GuideTopic } from '../services/LocalGuideService';
+import { filterPoisByTopics } from '../services/poiTopic';
 import { speechService } from '../services/SpeechService';
 import { guidePrefs } from '../services/GuidePrefs';
 import type { GPSContext } from '../services/InferenceService';
@@ -108,6 +109,14 @@ export default function ChatScreen(props: Props) {
     hiddenGems,
     offline: offlineMode,
   });
+
+  // Topic filter is applied in-memory rather than re-issuing the fetch — the
+  // user's pick should affect already-rendered POIs immediately, and the
+  // upstream Wikipedia/LLM result set doesn't expose topic metadata. POIs
+  // whose category doesn't map to any of the 5 topics (hotels, transit,
+  // generic buildings) are kept regardless so the list isn't unexpectedly
+  // empty when none of the local places match the picked topic.
+  const visiblePois = useMemo(() => filterPoisByTopics(pois, topics), [pois, topics]);
 
   const autoGuide = useAutoGuide((text, autoGps) => {
     messages.addGuideMessage(text, autoGps);
@@ -297,7 +306,7 @@ export default function ChatScreen(props: Props) {
         <HomeState
           placeName={gps?.placeName ?? manualLocation}
           radiusMeters={poiRadiusMeters}
-          pois={pois}
+          pois={visiblePois}
           onPlanDay={() => setItineraryOpen(true)}
           onQuiz={() => setQuizOpen(true)}
           onOpenMap={() => props.navigation.navigate('Map')}
@@ -319,6 +328,7 @@ export default function ChatScreen(props: Props) {
         onMicToggle={voice.isListening ? voice.stopListening : voice.startListening}
         inferring={inferring}
         isListening={voice.isListening}
+        cameraEnabled={features?.multimodal === true}
       />
 
       <VoiceRateControls
@@ -344,9 +354,9 @@ export default function ChatScreen(props: Props) {
         visible={itineraryOpen}
         onClose={() => setItineraryOpen(false)}
         location={effectiveLocation}
-        nearbyPois={pois}
+        nearbyPois={visiblePois}
       />
-      <QuizModal visible={quizOpen} onClose={() => setQuizOpen(false)} nearbyPois={pois} />
+      <QuizModal visible={quizOpen} onClose={() => setQuizOpen(false)} nearbyPois={visiblePois} />
     </KeyboardAvoidingView>
   );
 }

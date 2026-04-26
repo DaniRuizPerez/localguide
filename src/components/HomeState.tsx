@@ -6,6 +6,7 @@ import { GuideAvatar } from './GuideAvatar';
 import { t } from '../i18n';
 import type { GPSContext } from '../services/InferenceService';
 import type { Poi } from '../services/PoiService';
+import { poiEmojiFor } from '../services/poiTopic';
 
 interface Props {
   /** Human-readable place name ("Midtown, NYC"). Falls back to "here". */
@@ -214,7 +215,7 @@ function PoiRow({ poi, onPress, disabled }: { poi: Poi; onPress: () => void; dis
   // description, but "Notre Dame Cathedral" / "Golden Gate Bridge" / "Stanford
   // University" still resolve via the title alone. Fall back to 🧠 (not 📍)
   // only when nothing infers, so uncategorized AI picks stay visibly marked.
-  const inferred = poiEmoji(poi);
+  const inferred = poiEmojiFor(poi);
   const emoji = isLlm && inferred === '📍' ? '🧠' : inferred;
   return (
     <TouchableOpacity
@@ -244,90 +245,6 @@ function PoiRow({ poi, onPress, disabled }: { poi: Poi; onPress: () => void; dis
       )}
     </TouchableOpacity>
   );
-}
-
-// Best-effort emoji pick from POI title + Wikipedia short description. Order
-// matters: more specific categories match first so a "Royal Opera House"
-// lands on 🎭 rather than 🏛, and "Brooklyn Bridge" lands on 🌉 rather than 📍.
-// Each branch is a \b-anchored word list so a substring like "barista" in a
-// description can't accidentally match "bar".
-function poiEmoji(poi: Poi): string {
-  const text = `${poi.title} ${poi.description ?? ''}`.toLowerCase();
-
-  // Nature & outdoors.
-  if (/\b(mountain|peak|summit|hill|volcano|canyon|valley|cliff)\b/.test(text)) return '⛰';
-  if (/\b(river|lake|pond|waterfall|creek|bay|fjord|lagoon)\b/.test(text)) return '🌊';
-  if (/\b(beach|coast|shore|seaside|island)\b/.test(text)) return '🏖';
-  if (/\b(forest|woods?|nature reserve|wildlife|national park)\b/.test(text)) return '🌲';
-  if (/\b(park|garden|arboretum|botanical|plaza|square|promenade)\b/.test(text)) return '🌳';
-
-  // Religious buildings.
-  if (/\b(cathedral|basilica|church|chapel|abbey|convent|monastery)\b/.test(text)) return '⛪';
-  if (/\b(mosque|minaret)\b/.test(text)) return '🕌';
-  if (/\b(synagogue)\b/.test(text)) return '🕍';
-  if (/\b(temple|shrine|pagoda)\b/.test(text)) return '🛕';
-
-  // Culture & education.
-  if (/\b(museum|gallery|exhibit|exhibition)\b/.test(text)) return '🎨';
-  if (/\b(theater|theatre|opera|auditorium|concert hall|playhouse)\b/.test(text)) return '🎭';
-  if (/\b(cinema|movie theater|film)\b/.test(text)) return '🎬';
-  if (/\b(library|bookstore|archive)\b/.test(text)) return '📚';
-  if (/\b(university|college|campus|institute|academy)\b/.test(text)) return '🎓';
-  if (/\b(school|kindergarten)\b/.test(text)) return '🏫';
-
-  // Historic & civic.
-  if (/\b(castle|fortress|citadel|palace|château)\b/.test(text)) return '🏰';
-  if (/\b(monument|memorial|mausoleum|tomb|cemetery)\b/.test(text)) return '🗿';
-  if (/\b(statue|sculpture)\b/.test(text)) return '🗽';
-  if (/\b(tower|lighthouse|observation deck|belvedere)\b/.test(text)) return '🗼';
-  if (/\b(bridge|viaduct|aqueduct)\b/.test(text)) return '🌉';
-  // Civic & government. Multi-word phrases (e.g. "civic center") avoid
-  // stealing random single-word hits like "government road" — those fall
-  // through to the street matcher below.
-  if (/\b(post office)\b/.test(text)) return '🏤';
-  if (/\b(police (station|headquarters|precinct)|sheriff'?s? office|gendarmerie)\b/.test(text)) return '🚔';
-  if (/\b(fire (station|department|house)|firehouse)\b/.test(text)) return '🚒';
-  if (
-    /\bcivic (center|centre|hall|building|campus|auditorium|complex)\b/.test(text) ||
-    /\bgovernment (center|centre|building|complex|house|office|offices)\b/.test(text) ||
-    /\bmunicipal (hall|building|center|centre|office|offices|complex)\b/.test(text) ||
-    /\badministrative (building|center|centre|complex|offices)\b/.test(text) ||
-    /\b(city hall|town hall|capitol|parliament|courthouse|embassy|prefecture|consulate|tribunal|ministry)\b/.test(text)
-  ) return '🏛';
-
-  // Neighborhoods / towns. Keep this ahead of hospitality so "Market Street"
-  // lands on 🛣 rather than 🧺 via the "market" keyword, and "Chinatown"
-  // doesn't slip into 🏛 via the generic "building" fallback at the bottom.
-  if (
-    /\b(chinatown|koreatown|japantown|little italy|greektown|barrio)\b/.test(text) ||
-    /\b(neighbou?rhood|district|quarter|borough|suburb|arrondissement)\b/.test(text) ||
-    /\b(village|hamlet|town|township)\b/.test(text)
-  ) return '🏘';
-  if (
-    /\b(street|road|avenue|boulevard|lane|alley|drive|way|highway|route)\b/.test(text)
-  ) return '🛣';
-
-  // Hospitality & commerce.
-  if (/\b(restaurant|bistro|brasserie|eatery|diner|canteen)\b/.test(text)) return '🍽';
-  if (/\b(cafe|café|coffee|bakery|patisserie)\b/.test(text)) return '☕';
-  if (/\b(bar|pub|tavern|brewery|winery|distillery)\b/.test(text)) return '🍻';
-  if (/\b(market|bazaar|souk)\b/.test(text)) return '🧺';
-  if (/\b(hotel|inn|hostel|resort|lodge)\b/.test(text)) return '🏨';
-  if (/\b(shopping|mall|department store|arcade)\b/.test(text)) return '🛍';
-
-  // Transit & sport.
-  if (/\b(train station|railway station|metro|subway|terminus)\b/.test(text)) return '🚉';
-  if (/\b(airport|aerodrome)\b/.test(text)) return '✈️';
-  if (/\b(port|harbor|harbour|marina|pier|dock)\b/.test(text)) return '⚓';
-  if (/\b(stadium|arena|ballpark|velodrome)\b/.test(text)) return '🏟';
-  if (/\b(zoo|aquarium)\b/.test(text)) return '🦁';
-  if (/\b(hospital|clinic)\b/.test(text)) return '🏥';
-
-  // Generic fallbacks for anything building-shaped.
-  if (/\b(skyscraper|high.?rise|office tower)\b/.test(text)) return '🏙';
-  if (/\b(building|house|mansion|villa|estate|hall|pavilion)\b/.test(text)) return '🏛';
-
-  return '📍';
 }
 
 const styles = StyleSheet.create({
