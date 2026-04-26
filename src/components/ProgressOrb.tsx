@@ -18,25 +18,18 @@ export function ProgressOrb({ percent, label, state = 'downloading', size = 180 
   const innerSize = size * 0.78;
   const pct = Math.max(0, Math.min(100, percent));
 
-  // Rotate the ring overlay continuously while downloading. When paused/idle,
-  // freeze it at the angle proportional to progress.
-  const rotate = useRef(new Animated.Value(0)).current;
+  // Ring angle tracks actual progress — tween smoothly to pct/100 whenever
+  // it advances so the user sees the arc "close in" as bytes arrive instead
+  // of a free-spinning loop that's disconnected from the percent readout.
+  const rotate = useRef(new Animated.Value(pct / 100)).current;
   useEffect(() => {
-    if (state === 'downloading') {
-      const loop = Animated.loop(
-        Animated.timing(rotate, {
-          toValue: 1,
-          duration: 2400,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        })
-      );
-      loop.start();
-      return () => loop.stop();
-    }
-    rotate.setValue(pct / 100);
-    return undefined;
-  }, [state, pct, rotate]);
+    Animated.timing(rotate, {
+      toValue: pct / 100,
+      duration: 400,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [pct, rotate]);
 
   const rotation = rotate.interpolate({
     inputRange: [0, 1],
