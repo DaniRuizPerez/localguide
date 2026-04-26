@@ -9,7 +9,6 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.security.MessageDigest
-import java.util.zip.GZIPInputStream
 
 /**
  * Owns the bundled cities15000 DB and any installed country-pack DBs.
@@ -87,14 +86,16 @@ internal class GeoDatabase(private val context: Context) {
     /**
      * Make sure `filesDir/geo/cities15000.db` exists and matches the current asset.
      *
-     * Detection strategy: stream-hash the gzipped asset bytes (SHA-256, 64 KB chunks)
-     * and compare with the `cities15000.assethash` sentinel. If they match, reuse
-     * the extracted DB. If they differ — or no extracted DB exists — re-extract.
+     * Detection strategy: stream-hash the asset bytes (SHA-256, 64 KB chunks)
+     * and compare with the `cities15000.assethash` sentinel. If they match,
+     * reuse the extracted DB. If they differ — or no extracted DB exists —
+     * re-extract.
      *
-     * Reading `meta.snapshot_date` directly from the gzipped asset would require
-     * decompressing it twice (once to peek, once to write). Hashing the gzipped
-     * bytes is cheaper and equally reliable: every snapshot bump produces a new
-     * gzip blob.
+     * The asset ships as a raw SQLite file (not gzipped). AGP's mergeAssets
+     * task auto-decompresses any `.gz` we hand it, leaving the raw bytes
+     * inside the APK regardless — so wrapping was pointless and broke the
+     * extraction path. The APK ZIP still deflate-compresses the asset on its
+     * own, so on-device install size is unaffected.
      */
     private fun ensureCitiesExtracted() {
         val dir = geoDir()
@@ -107,11 +108,9 @@ internal class GeoDatabase(private val context: Context) {
         Log.i(TAG, "Extracting bundled $CITIES_ASSET → ${db.absolutePath} (hash=$assetHash)")
         val tmp = File(dir, "$CITIES_DB.tmp")
         try {
-            context.assets.open(CITIES_ASSET).use { raw ->
-                GZIPInputStream(raw).use { gz ->
-                    FileOutputStream(tmp).use { out ->
-                        gz.copyTo(out, bufferSize = 64 * 1024)
-                    }
+            context.assets.open(CITIES_ASSET).use { input ->
+                FileOutputStream(tmp).use { out ->
+                    input.copyTo(out, bufferSize = 64 * 1024)
                 }
             }
             if (db.exists()) db.delete()
@@ -172,7 +171,7 @@ internal class GeoDatabase(private val context: Context) {
 
     companion object {
         private const val TAG = "GeoDatabase"
-        const val CITIES_ASSET = "geo/cities15000.db.gz"
+        const val CITIES_ASSET = "geo/cities15000.db"
         const val CITIES_DB = "cities15000.db"
         const val CITIES_HASH = "cities15000.assethash"
     }
