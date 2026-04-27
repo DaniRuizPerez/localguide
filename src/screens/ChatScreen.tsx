@@ -250,7 +250,6 @@ export default function ChatScreen(props: Props) {
     <KeyboardAvoidingView
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={88}
       {...(hasMessages ? swipeBackHandlers : {})}
     >
       <ChatHeader
