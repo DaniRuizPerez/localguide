@@ -99,6 +99,25 @@ class GeoModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
     }
 
     // ---------------------------------------------------------------------- //
+    // 1c. searchByName (forward geocode against on-device DB)
+    // ---------------------------------------------------------------------- //
+
+    @ReactMethod
+    fun searchByName(query: String, limit: Int, promise: Promise) {
+        val safeLimit = limit.coerceIn(1, 50)
+        scope.launch {
+            try {
+                val matches = geocoder.searchByName(query, safeLimit)
+                val arr = Arguments.createArray()
+                for (m in matches) arr.pushMap(m.toWritableMap())
+                promise.resolve(arr)
+            } catch (t: Throwable) {
+                promise.reject("E_SEARCH_BY_NAME", t.message ?: t.javaClass.simpleName, t)
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------- //
     // 2. getCurrentLocation
     // ---------------------------------------------------------------------- //
 

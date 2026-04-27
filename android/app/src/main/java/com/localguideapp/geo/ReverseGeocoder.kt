@@ -99,6 +99,116 @@ internal class ReverseGeocoder(private val geoDb: GeoDatabase) {
         return byId.values.sortedBy { it.distanceMeters }.take(limit)
     }
 
+    /**
+     * Forward-geocode a typed place name. Used when GPS is denied and the
+     * user types something into the manual-location row. Searches every
+     * installed country pack first (richer coverage — neighborhoods, parks)
+     * and falls back to cities15000. Returns the highest-population match
+     * because population is the only signal we have to disambiguate
+     * collisions like "Springfield, MO" vs "Springfield, IL" — the user is
+     * statistically more likely to have meant the bigger one.
+     *
+     * Match strategy: exact ascii name first (high confidence), then a
+     * `LIKE` prefix on either name or ascii name. Diacritic-insensitive via
+     * the `asciiname` column, which the importer pre-normalizes.
+     */
+    suspend fun searchByName(query: String, limit: Int): List<Match> {
+        val safeLimit = limit.coerceAtLeast(1).coerceAtMost(50)
+        val needle = query.trim()
+        if (needle.isEmpty()) return emptyList()
+
+        val byId = LinkedHashMap<Long, Match>()
+        for (pack in geoDb.listInstalledPacks()) {
+            val db = geoDb.openCountryPack(pack.iso) ?: continue
+            for (m in queryByName(db, needle, safeLimit, "country:${pack.iso}")) {
+                if (!byId.containsKey(m.geonameid)) byId[m.geonameid] = m
+            }
+        }
+        val cities = geoDb.openCities()
+        for (m in queryByName(cities, needle, safeLimit, "cities15000")) {
+            if (!byId.containsKey(m.geonameid)) byId[m.geonameid] = m
+        }
+
+        // Population descending — exact matches still beat fuzzy matches
+        // because queryByName surfaces them with a synthetic high-priority
+        // tie-break (see the ORDER BY there).
+        return byId.values.sortedWith(
+            compareByDescending<Match> { exactScore(it, needle) }.thenByDescending { it.population }
+        ).take(safeLimit)
+    }
+
+    private fun exactScore(m: Match, needle: String): Int {
+        val n = needle.lowercase()
+        return when {
+            m.name.lowercase() == n || m.asciiname.lowercase() == n -> 2
+            m.name.lowercase().startsWith(n) || m.asciiname.lowercase().startsWith(n) -> 1
+            else -> 0
+        }
+    }
+
+    private fun queryByName(
+        db: SQLiteDatabase,
+        needle: String,
+        limit: Int,
+        source: String,
+    ): List<Match> {
+        // SQLite's LIKE is case-insensitive for ASCII by default; the
+        // asciiname column is already diacritic-stripped at import time so
+        // "Zürich" matches "zurich". COLLATE NOCASE on the equality keeps
+        // the exact-match arm cheap (uses the index) while LIKE 'foo%' is
+        // a prefix scan that also benefits from the index.
+        val sql = """
+            SELECT p.geonameid, p.name, p.asciiname, p.country_code, p.admin1, p.admin2,
+                   p.feature_code, p.population, p.lat, p.lon,
+                   c.name AS country_name,
+                   a.name AS admin1_name
+            FROM places p
+            LEFT JOIN countries c ON c.iso = p.country_code
+            LEFT JOIN admin1    a ON a.country_code = p.country_code AND a.code = p.admin1
+            WHERE p.name      LIKE ? COLLATE NOCASE
+               OR p.asciiname LIKE ? COLLATE NOCASE
+            ORDER BY p.population DESC
+            LIMIT ?
+        """.trimIndent()
+        val pattern = "$needle%"
+        val out = ArrayList<Match>()
+        db.rawQuery(sql, arrayOf(pattern, pattern, limit.toString())).use { cur ->
+            val iId = cur.getColumnIndexOrThrow("geonameid")
+            val iName = cur.getColumnIndexOrThrow("name")
+            val iAscii = cur.getColumnIndexOrThrow("asciiname")
+            val iCc = cur.getColumnIndexOrThrow("country_code")
+            val iAdmin1 = cur.getColumnIndexOrThrow("admin1")
+            val iAdmin2 = cur.getColumnIndexOrThrow("admin2")
+            val iFc = cur.getColumnIndexOrThrow("feature_code")
+            val iPop = cur.getColumnIndexOrThrow("population")
+            val iLat = cur.getColumnIndexOrThrow("lat")
+            val iLon = cur.getColumnIndexOrThrow("lon")
+            val iCountry = cur.getColumnIndexOrThrow("country_name")
+            val iA1Name = cur.getColumnIndexOrThrow("admin1_name")
+            while (cur.moveToNext()) {
+                out.add(
+                    Match(
+                        geonameid = cur.getLong(iId),
+                        name = cur.getString(iName).orEmpty(),
+                        asciiname = cur.getString(iAscii).orEmpty(),
+                        admin1 = cur.getString(iAdmin1),
+                        admin1Name = cur.getString(iA1Name),
+                        admin2 = cur.getString(iAdmin2),
+                        countryCode = cur.getString(iCc).orEmpty(),
+                        countryName = cur.getString(iCountry),
+                        featureCode = cur.getString(iFc),
+                        population = if (cur.isNull(iPop)) 0 else cur.getInt(iPop),
+                        lat = cur.getDouble(iLat),
+                        lon = cur.getDouble(iLon),
+                        distanceMeters = 0.0,
+                        source = source,
+                    )
+                )
+            }
+        }
+        return out
+    }
+
     private fun queryWithin(
         db: SQLiteDatabase,
         lat: Double,

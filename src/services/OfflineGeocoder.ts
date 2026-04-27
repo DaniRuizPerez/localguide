@@ -83,6 +83,28 @@ export async function reverseGeocode(lat: number, lon: number): Promise<string |
   }
 }
 
+/**
+ * Forward-geocode a typed place name to coordinates using the on-device
+ * cities15000 + every installed country pack. Returns null when the native
+ * module is unavailable (Jest, iOS, Expo Go) or no row matches the query.
+ */
+export async function forwardGeocode(
+  query: string
+): Promise<{ lat: number; lon: number; placeName: string } | null> {
+  if (!isGeoModuleAvailable()) return null;
+  const trimmed = query.trim();
+  if (!trimmed) return null;
+  try {
+    const matches = await GeoModule.searchByName(trimmed, 1);
+    const first = matches[0];
+    if (!first) return null;
+    const label = formatPlace(first);
+    return { lat: first.lat, lon: first.lon, placeName: label ?? trimmed };
+  } catch {
+    return null;
+  }
+}
+
 /** Clear the in-memory memo. Test-only. */
 export function __resetForTest(): void {
   labelCache.clear();

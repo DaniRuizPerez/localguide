@@ -86,6 +86,14 @@ export interface GeoModuleNative {
     limit: number
   ): Promise<GeoPlace[]>;
 
+  /**
+   * Forward-geocode a typed place name against the on-device cities15000 DB
+   * + every installed country pack. Returns up to `limit` matches sorted by
+   * exact-match priority and population. Used by the manual-location row
+   * when GPS is denied. Caps: limit ∈ [1, 50].
+   */
+  searchByName(query: string, limit: number): Promise<GeoPlace[]>;
+
   getCurrentLocation(options?: GeoCurrentLocationOptions): Promise<GeoCurrentLocation>;
 
   availableCountryPacks(): Promise<GeoCountryPackAvailable[]>;
@@ -148,6 +156,7 @@ if (!NativeGeoModule) {
 const SHIM: GeoModuleNative = {
   reverseGeocode: () => Promise.resolve(null),
   nearbyPlaces: () => Promise.resolve([]),
+  searchByName: () => Promise.resolve([]),
   getCurrentLocation: () =>
     Promise.reject(new Error('GeoModule native bridge not available')),
   availableCountryPacks: () => Promise.resolve([]),

@@ -3,7 +3,10 @@ import * as Location from 'expo-location';
 import { isGeoModuleAvailable } from '../native/GeoModule';
 import { guidePrefs } from '../services/GuidePrefs';
 import type { GPSContext } from '../services/InferenceService';
-import { reverseGeocode as reverseGeocodeOffline } from '../services/OfflineGeocoder';
+import {
+  reverseGeocode as reverseGeocodeOffline,
+  forwardGeocode as forwardGeocodeOffline,
+} from '../services/OfflineGeocoder';
 
 export type LocationStatus = 'idle' | 'requesting' | 'ready' | 'denied' | 'error';
 
@@ -95,14 +98,36 @@ function pickNonEmpty(...candidates: Array<string | null | undefined>): string |
   return null;
 }
 
+/**
+ * Resolve a typed place name to coordinates. Tries the on-device GeoNames
+ * DB first (offline, no network) and falls back to the platform Geocoder
+ * (Android's `Geocoder.getFromLocationName`, which uses Play services and
+ * is unreliable on some devices — Pixel 3 returns IOException). Returns
+ * null when both paths fail.
+ */
+async function forwardGeocode(query: string): Promise<{ lat: number; lon: number } | null> {
+  const offline = await forwardGeocodeOffline(query);
+  if (offline) return { lat: offline.lat, lon: offline.lon };
+  try {
+    const results = await Location.geocodeAsync(query);
+    const first = results[0];
+    if (first) return { lat: first.latitude, lon: first.longitude };
+  } catch {
+    // expo-location surfaces the platform Geocoder's IOException here on
+    // devices without a working backend.
+  }
+  return null;
+}
+
 export function useLocation(): LocationState {
   const [rawGps, setRawGps] = useState<GPSContext | null>(null);
   const [placeName, setPlaceName] = useState<string | null>(null);
   const [status, setStatus] = useState<LocationStatus>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [manualLocation, setManualLocation] = useState<string | null>(null);
+  const [manualLocation, setManualLocationState] = useState<string | null>(null);
   const watchSubscriptionRef = useRef<Location.LocationSubscription | null>(null);
   const lastGeocodeKeyRef = useRef<string | null>(null);
+  const lastManualQueryRef = useRef<string | null>(null);
 
   // Re-geocode only when the rounded grid cell changes. Called from every
   // setGps path so both one-shot and watchPosition updates feed it.
@@ -188,6 +213,32 @@ export function useLocation(): LocationState {
       watchSubscriptionRef.current = null;
     };
   }, [fetchLocation]);
+
+  // Forward-geocode the typed place name into a synthetic GPSContext so
+  // useNearbyPois (which bails on null gps) can run when GPS is denied. The
+  // pill keeps showing the user's typed text — placeName state is updated to
+  // the same string so the LLM prompt sees the precise label they entered
+  // (e.g. "Brickell, Miami") rather than whatever the geocoder rounds to. A
+  // null result is non-fatal: the existing string-only fallback in
+  // ChatScreen still feeds the LLM, just without a populated POI list.
+  const setManualLocation = useCallback((text: string) => {
+    const trimmed = text.trim();
+    setManualLocationState(trimmed.length > 0 ? trimmed : null);
+    lastManualQueryRef.current = trimmed;
+    if (!trimmed) return;
+    (async () => {
+      const coords = await forwardGeocode(trimmed);
+      if (!coords) return;
+      // Drop late results from a superseded query.
+      if (lastManualQueryRef.current !== trimmed) return;
+      // Reset the reverse-geocode grid ref so a real GPS fix that lands on
+      // the same coarse cell as this manual entry still triggers a fresh
+      // platform-geocoder lookup once it arrives.
+      lastGeocodeKeyRef.current = null;
+      setRawGps({ latitude: coords.lat, longitude: coords.lon });
+      setPlaceName(trimmed);
+    })();
+  }, []);
 
   // Merge placeName into gps so all downstream consumers (ChatScreen, Wikipedia
   // lookup, LLM prompt) see the richer context without having to stitch two
