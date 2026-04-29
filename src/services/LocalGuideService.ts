@@ -536,7 +536,23 @@ export const localGuideService = {
       radiusMeters,
       guidePrefs.get().hiddenGems
     );
-    return runParsedStream(prompt, parsePlaceList, { maxTokens: 180 });
+    // Wrap parsePlaceList so empty results dump the raw model text — without
+    // this, an "Around you" call that returns 0 names looks identical in
+    // logcat whether Gemma produced nothing, was filtered to nothing, or hit
+    // the token cap mid-emit. The dump is __DEV__-only and truncated to
+    // keep logcat readable.
+    const parse = (raw: string): string[] => {
+      const parsed = parsePlaceList(raw);
+      if (__DEV__ && parsed.length === 0) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[NearbyPlaces] parsePlaceList returned 0 names; raw output:\n' +
+            raw.slice(0, 600)
+        );
+      }
+      return parsed;
+    };
+    return runParsedStream(prompt, parse, { maxTokens: 180 });
   },
 
   async ask(

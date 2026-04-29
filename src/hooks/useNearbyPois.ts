@@ -150,7 +150,15 @@ export function useNearbyPois(
             distanceMeters: 0,
             source: 'llm',
           }));
-          llmCacheRef.current.set(cellKey, { at: Date.now(), pois: llmPois });
+          // Skip caching empty results: when Gemma drifts on a single call
+          // (every-line filtered out by parsePlaceList, or simply produced
+          // nothing) we'd otherwise pin the user to "[]" for the full
+          // LLM_CACHE_TTL_MS even if the very next call would have come back
+          // with real names. The model is non-deterministic — let the next
+          // fetch try fresh.
+          if (llmPois.length > 0) {
+            llmCacheRef.current.set(cellKey, { at: Date.now(), pois: llmPois });
+          }
           setPois(llmPois);
         } catch (err) {
           if (__DEV__) {
