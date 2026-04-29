@@ -207,7 +207,7 @@ describe('generateQuiz', () => {
     expect(quiz[0].options[0]).toBe('Aardvark');
   });
 
-  it('infers correct answer from a "(correct)" tag on an option line', async () => {
+  it('infers correct answer from a "(correct)" tag and strips it from the option', async () => {
     const task = localGuideService.generateQuiz([], 1);
     const done = task.promise;
     await flushMicrotasks();
@@ -222,6 +222,30 @@ describe('generateQuiz', () => {
     const quiz = await done;
     expect(quiz).toHaveLength(1);
     expect(quiz[0].correctIndex).toBe(1);
+    // The marker must NOT survive into the rendered option, otherwise the
+    // quiz UI would give away the answer.
+    expect(quiz[0].options[1]).toBe('Jupiter');
+  });
+
+  it('infers correct answer from a "[correct]" tag and strips it from the option', async () => {
+    // Matches the prompt's worked example shape — the on-device 1B model
+    // copied this format reliably in device tests after we moved the
+    // marker inline (it kept dropping the trailing "Correct: <letter>").
+    const task = localGuideService.generateQuiz([], 1);
+    const done = task.promise;
+    await flushMicrotasks();
+    sharedCallbacks.current.onToken(
+      `Q: Which river runs through London?\n` +
+      `A: The Seine\n` +
+      `B: The Thames [correct]\n` +
+      `C: The Danube\n` +
+      `D: The Rhine\n`
+    );
+    sharedCallbacks.current.onDone();
+    const quiz = await done;
+    expect(quiz).toHaveLength(1);
+    expect(quiz[0].correctIndex).toBe(1);
+    expect(quiz[0].options[1]).toBe('The Thames');
   });
 
   it('skips malformed blocks (missing options, missing Correct line)', async () => {

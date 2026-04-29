@@ -279,18 +279,19 @@ function buildSingleQuizPrompt(
       `${avoidBlock}` +
       `Write exactly ONE multiple-choice question. 4 options labelled A, B, C, D. ONE correct answer. ` +
       `${QUIZ_GROUNDING_RULES}\n\n` +
-      // Worked example. The on-device 1B model reliably copies the SHAPE of
-      // a single example far better than it follows a list of format rules,
-      // and was previously dropping the trailing "Correct: <letter>" line on
-      // ~all generations because the format spec alone wasn't enough signal.
+      // The 1B model is very good at copying a one-shot example shape, but
+      // it consistently dropped the trailing "Correct: <letter>" line — even
+      // with the example shown — on Pixel 3 (logcat: every retry truncated
+      // after option D). Move the correctness marker INLINE so it can't be
+      // truncated separately: tag the right option's line with [correct].
+      // The block parser accepts that annotation as the answer signal.
       `Example of the exact format you must produce (do not reuse this content):\n` +
       `Q: Which river runs through Paris?\n` +
       `A: The Thames\n` +
-      `B: The Seine\n` +
+      `B: The Seine [correct]\n` +
       `C: The Danube\n` +
-      `D: The Rhine\n` +
-      `Correct: B\n\n` +
-      `Now write your one question in that same six-line format. The "Correct: <letter>" line is REQUIRED — do not stop before emitting it. No intro, no explanations, no question number, no closing remarks.`,
+      `D: The Rhine\n\n` +
+      `Now write your one question in that same five-line format. Mark exactly ONE option with " [correct]" at the end of its line; the other three must NOT be marked. No intro, no explanations, no question number, no closing remarks.`,
   });
 }
 
@@ -384,9 +385,23 @@ function parseQuizBlock(block: string): QuizQuestion | null {
     }
     if (!opts.A || !opts.B || !opts.C || !opts.D) return null;
   }
+  // Strip the inline correctness marker — "(correct)", "[correct]", a
+  // trailing "*", "(answer)" — from each option's display text. Without
+  // this, the right answer would render as "Jupiter (correct)" in the
+  // quiz UI, giving the answer away.
+  const stripCorrectnessMarker = (s: string): string =>
+    s
+      .replace(/\s*[\[(]\s*(?:correct|answer)\s*[\])]\s*$/i, '')
+      .replace(/\s*\*+\s*$/, '')
+      .trim();
   return {
     question: q,
-    options: [opts.A, opts.B, opts.C, opts.D],
+    options: [
+      stripCorrectnessMarker(opts.A),
+      stripCorrectnessMarker(opts.B),
+      stripCorrectnessMarker(opts.C),
+      stripCorrectnessMarker(opts.D),
+    ],
     correctIndex: { A: 0, B: 1, C: 2, D: 3 }[correctLetter as 'A' | 'B' | 'C' | 'D'],
   };
 }
