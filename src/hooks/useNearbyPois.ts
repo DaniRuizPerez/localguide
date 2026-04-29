@@ -64,6 +64,14 @@ export function useNearbyPois(
         .filter((p) => p.distanceMeters <= radiusMeters)
         .sort((a, b) => a.distanceMeters - b.distanceMeters);
 
+    if (__DEV__) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[NearbyPois] fetch start lat=${gps.latitude.toFixed(4)} lon=${gps.longitude.toFixed(4)} ` +
+          `r=${radiusMeters}m hiddenGems=${hiddenGems} offline=${offline}`
+      );
+    }
+
     poiService
       .fetchNearbyStreaming(
         gps.latitude,
@@ -75,9 +83,15 @@ export function useNearbyPois(
           // Partial emissions land before the full network round trip (cache
           // hit) or alongside it (offline GeoNames). Both carry real coords
           // we can geofence on — safe to feed straight into the Poi state.
-          onPartial: (partial) => {
+          onPartial: (partial, stage) => {
             if (cancelled) return;
             const sorted = sortAndFilter(partial);
+            if (__DEV__) {
+              // eslint-disable-next-line no-console
+              console.log(
+                `[NearbyPois] partial '${stage}' raw=${partial.length} after-radius=${sorted.length}`
+              );
+            }
             if (sorted.length > 0) setPois(sorted);
           },
         }
@@ -85,6 +99,12 @@ export function useNearbyPois(
       .then(async (raw) => {
         if (cancelled) return;
         const sorted = sortAndFilter(raw);
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.log(
+            `[NearbyPois] wikipedia raw=${raw.length} after-radius=${sorted.length}`
+          );
+        }
 
         if (sorted.length > 0) {
           setPois(sorted);
@@ -127,6 +147,14 @@ export function useNearbyPois(
             llmFallbackTaskRef.current = null;
           }
         }
+      })
+      .catch((err) => {
+        // fetchNearbyStreaming should swallow its own errors, but a stray
+        // reject (e.g. a synchronous throw in a future change) would
+        // otherwise leave `loading` true forever and the list permanently
+        // empty. Log it so logcat can show what happened.
+        // eslint-disable-next-line no-console
+        console.warn(`[NearbyPois] fetch rejected: ${(err as Error)?.message ?? err}`);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

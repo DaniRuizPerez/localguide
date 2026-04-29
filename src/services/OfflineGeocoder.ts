@@ -208,12 +208,26 @@ export async function listAvailableCountryPacks(): Promise<CountryPackListing[]>
     const res = await fetch(RELEASES_URL, {
       headers: { Accept: 'application/vnd.github+json' },
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      // 404 usually means the repo is private and we're calling
+      // unauthenticated; 403 is rate-limit. Either way the picker can't
+      // resolve packs — surface the status in logcat so the empty state
+      // isn't a silent black box during diagnosis.
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[CountryPacks] releases API ${res.status} ${res.statusText}; URL=${RELEASES_URL}`
+      );
+      return [];
+    }
     const releases = (await res.json()) as GitHubRelease[];
     // Find the newest geo- release. The Releases API returns them
     // newest-first by default; pick the first one whose tag matches.
     const release = releases.find((r) => r.tag_name?.startsWith('geo-'));
-    if (!release) return [];
+    if (!release) {
+      // eslint-disable-next-line no-console
+      console.warn('[CountryPacks] no release with tag starting "geo-" found');
+      return [];
+    }
     const snapshotDate = parseSnapshotFromTag(release.tag_name);
     const packs: CountryPackListing[] = [];
     for (const asset of release.assets ?? []) {
@@ -230,8 +244,12 @@ export async function listAvailableCountryPacks(): Promise<CountryPackListing[]>
     packs.sort((a, b) => a.name.localeCompare(b.name));
     cachedReleases = packs;
     cachedReleasesAt = now;
+    // eslint-disable-next-line no-console
+    console.log(`[CountryPacks] discovered ${packs.length} pack(s) for ${snapshotDate}`);
     return packs;
-  } catch {
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[CountryPacks] fetch failed: ${(err as Error)?.message ?? err}`);
     return [];
   }
 }
