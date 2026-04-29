@@ -273,21 +273,26 @@ function buildSingleQuizPrompt(
   total: number
 ): string {
   const grounding = quizGroundingBlock(nearbyTitles, locationLabel);
-  // Number the avoid-list. Listing them as "1. <text>" with an explicit
-  // "topic must be different" instruction is materially stronger than a
-  // plain "do not repeat" sentence — Gemma honours numbered constraints
-  // more reliably than freeform ones.
-  const avoidBlock = previousQuestions.length
-    ? `Already asked (your new question must be on a DIFFERENT topic — different place, person, fact, or angle — and must not repeat the wording of any of these):\n` +
+  // The avoid-list is placed RIGHT BEFORE the "Now write" instruction —
+  // the small on-device model has strong recency bias and consistently
+  // ignored the avoid-list when it sat earlier in the prompt (we observed
+  // identical Q1=Q2=Q3 even with previousQuestions populated). Pulling it
+  // to the tail and phrasing it as a hard FORBIDDEN list, plus an explicit
+  // "do not write any question similar to" callout naming the most recent
+  // one, gets the model to actually pick a new topic.
+  const lastQuestion = previousQuestions[previousQuestions.length - 1];
+  const forbiddenBlock = previousQuestions.length
+    ? `\n\nFORBIDDEN — do NOT write any of these questions, do NOT paraphrase them, ` +
+      `and do NOT ask about the same topic, place, person, or fact as any of them:\n` +
       previousQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n') +
-      `\n\n`
+      `\n\nYour new question MUST be on a completely different subject from #${previousQuestions.length} ("${lastQuestion}"). ` +
+      `Pick a new angle: if the previous one was about a place, ask about people or history; if it was about food, ask about geography; etc.`
     : '';
   return buildNarratorPrompt({
     system: `You are writing one local-trivia question (#${questionIndex + 1} of ${total}) for a visitor.`,
     directives: [localePromptDirective()],
     extraContext:
       `${grounding}\n\n` +
-      `${avoidBlock}` +
       `Write exactly ONE multiple-choice question. 4 options labelled A, B, C, D. ONE correct answer. ` +
       `${QUIZ_GROUNDING_RULES}\n\n` +
       // The on-device 1B model consistently truncates after option D and
@@ -302,7 +307,8 @@ function buildSingleQuizPrompt(
       `A: The Thames\n` +
       `B: The Seine\n` +
       `C: The Danube\n` +
-      `D: The Rhine\n\n` +
+      `D: The Rhine` +
+      `${forbiddenBlock}\n\n` +
       `Now write your one question in that same six-line format. The first line MUST be "Correct: <letter>" naming which of A/B/C/D is right; the next five lines are Q, A, B, C, D in order. No intro, no explanations, no question number, no closing remarks.`,
   });
 }

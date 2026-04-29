@@ -365,7 +365,7 @@ describe('generateQuizStream', () => {
 
     // The 1st prompt has no avoid list; the 2nd must list Q1.
     const firstPrompt: string = mockRunStream.mock.calls[0][0];
-    expect(firstPrompt).not.toContain('Already asked');
+    expect(firstPrompt).not.toContain('FORBIDDEN');
 
     await completeNextCallWith(
       `Q: What river runs near Palo Alto?\n` +
@@ -376,7 +376,7 @@ describe('generateQuizStream', () => {
         `Correct: C\n`
     );
     const secondPrompt: string = mockRunStream.mock.calls[1][0];
-    expect(secondPrompt).toContain('Already asked');
+    expect(secondPrompt).toContain('FORBIDDEN');
     expect(secondPrompt).toContain('When was Stanford University founded?');
     expect(secondPrompt).toContain('Palo Alto, California');
 
