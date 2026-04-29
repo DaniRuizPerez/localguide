@@ -2,8 +2,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import GeoModule, { addGeoPackCompleteListener, addGeoPackErrorListener, addGeoPackProgressListener, isGeoModuleAvailable, type GeoPackPhase } from '../native/GeoModule';
 import { countryNameForIso, listAvailableCountryPacks, type CountryPackListing } from '../services/OfflineGeocoder';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../theme/colors';
-import { Radii, Shadows, Spacing, Type } from '../theme/tokens';
+import { Radii, Shadows, Sizing, Spacing, Type } from '../theme/tokens';
 import { t } from '../i18n';
 
 interface Props {
@@ -38,6 +39,7 @@ function formatProgress(p: ProgressState): string {
  * module's `GeoPackProgress` events. Visual style mirrors VoiceRateControls.
  */
 export function CountryPackPicker({ visible, onClose }: Props) {
+  const insets = useSafeAreaInsets();
   const [available, setAvailable] = useState<CountryPackListing[]>([]);
   const [installed, setInstalled] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
@@ -124,7 +126,7 @@ export function CountryPackPicker({ visible, onClose }: Props) {
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} hardwareAccelerated>
       <View style={styles.backdrop}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={t('narration.done')} />
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, { paddingBottom: Spacing.lg + insets.bottom }]}>
           <View style={styles.handle} />
           <Text style={styles.heading}>Country detail packs</Text>
           <Text style={styles.subheading}>Download per-country place data for richer offline geocoding.</Text>
@@ -198,8 +200,12 @@ function PackRow({
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'flex-end' },
   sheet: {
-    height: '78%', backgroundColor: Colors.background,
-    paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm, paddingBottom: Spacing.xxl,
+    // 78vh sheet — paddingBottom is added inline at render time so it picks
+    // up the system gesture-nav inset and the Done button stays visible.
+    height: '78%',
+    maxHeight: Sizing.vh(85),
+    backgroundColor: Colors.background,
+    paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm,
     borderTopLeftRadius: Radii.xl, borderTopRightRadius: Radii.xl, ...Shadows.softFloating,
   },
   handle: {

@@ -9,8 +9,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../theme/colors';
-import { Radii, Shadows, Spacing, Type } from '../theme/tokens';
+import { Radii, Shadows, Sizing, Spacing, Type } from '../theme/tokens';
 import { t } from '../i18n';
 import { PillowChip } from './PillowChip';
 import {
@@ -47,6 +48,7 @@ function minutesBetween(
 }
 
 export function ItineraryModal({ visible, onClose, location, nearbyPois }: Props) {
+  const insets = useSafeAreaInsets();
   const [duration, setDuration] = useState<number>(4);
   const [stops, setStops] = useState<ItineraryStop[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -111,7 +113,10 @@ export function ItineraryModal({ visible, onClose, location, nearbyPois }: Props
       onRequestClose={onClose}
     >
       <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
+        <Pressable
+          style={[styles.sheet, { paddingBottom: Spacing.lg + insets.bottom }]}
+          onPress={() => {}}
+        >
           <View style={styles.handle} />
           <Text style={styles.heading}>{t(`itinerary.${durationLabel}`)}</Text>
           <Text style={styles.sub}>{t('itinerary.pickDuration')}</Text>
@@ -181,13 +186,16 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
-    maxHeight: '85%',
+    // Percentage-of-viewport caps so the sheet adapts to phone size; bottom
+    // padding is added inline at render time using `useSafeAreaInsets()` so
+    // the trailing CTA never disappears under gesture-nav.
+    maxHeight: Sizing.vh(85),
+    minHeight: Sizing.vh(40),
     backgroundColor: Colors.background,
     borderTopLeftRadius: Radii.xl,
     borderTopRightRadius: Radii.xl,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
-    paddingBottom: Spacing.xxl,
     ...Shadows.softFloating,
   },
   handle: {

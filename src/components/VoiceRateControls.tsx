@@ -13,8 +13,9 @@ import Slider from '@react-native-community/slider';
 import { CountryPackPicker } from './CountryPackPicker';
 import { PillowChip } from './PillowChip';
 import { TopicChips, type GuideTopic } from './TopicChips';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../theme/colors';
-import { Radii, Shadows, Spacing, Type } from '../theme/tokens';
+import { Radii, Shadows, Sizing, Spacing, Type } from '../theme/tokens';
 import { guidePrefs } from '../services/GuidePrefs';
 import {
   narrationPrefs,
@@ -127,6 +128,7 @@ export function VoiceRateControls({
   radiusMeters,
   onRadiusChange,
 }: Props) {
+  const insets = useSafeAreaInsets();
   const [rate, setRate] = useState<number>(narrationPrefs.get().rate);
   const [voice, setVoice] = useState<string | undefined>(narrationPrefs.get().voice);
   const [length, setLength] = useState<NarrationLength>(narrationPrefs.get().length);
@@ -200,7 +202,9 @@ export function VoiceRateControls({
           onPress={onClose}
           accessibilityLabel={t('narration.done')}
         />
-        <View style={styles.sheet}>
+        <View
+          style={[styles.sheet, { paddingBottom: Spacing.lg + insets.bottom }]}
+        >
           <View style={styles.handle} />
 
           <View style={styles.headerRow}>
@@ -441,11 +445,13 @@ const styles = StyleSheet.create({
     // deterministic size and can actually overflow + scroll properly. With
     // maxHeight alone, the sheet shrank to content size and only a few
     // pixels of the voice row hung off-screen, making scroll feel frozen.
+    // Hard cap at 92vh so on tall phones we don't grow under the status bar.
     height: '88%',
+    maxHeight: Sizing.vh(92),
     backgroundColor: Colors.background,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
-    paddingBottom: Spacing.xxl,
+    // paddingBottom is applied inline so we can add insets.bottom dynamically.
     borderTopLeftRadius: Radii.xl,
     borderTopRightRadius: Radii.xl,
     ...Shadows.softFloating,

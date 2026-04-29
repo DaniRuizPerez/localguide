@@ -5,7 +5,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useLocation } from '../hooks/useLocation';
 import { Colors } from '../theme/colors';
-import { Type, Radii, Shadows, Spacing } from '../theme/tokens';
+import { Type, Radii, Shadows, Sizing, Spacing } from '../theme/tokens';
 import { softTactileMapStyle } from '../theme/mapStyle';
 import { poiService, type Poi } from '../services/PoiService';
 import { guidePrefs } from '../services/GuidePrefs';
@@ -221,7 +221,9 @@ export default function MapScreen({ navigation }: Props) {
         )}
 
         <ScrollView
-          style={{ marginTop: 10, maxHeight: 160 }}
+          // Cap the inline POI list to ~22vh so on small phones it doesn't
+          // crowd the map and on big phones we use the extra real estate.
+          style={{ marginTop: 10, maxHeight: Sizing.vh(22) }}
           contentContainerStyle={{ gap: 6 }}
           showsVerticalScrollIndicator={false}
         >

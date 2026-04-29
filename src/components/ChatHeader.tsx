@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../theme/colors';
-import { Radii, Shadows, Type } from '../theme/tokens';
+import { Radii, Shadows, Sizing, Type } from '../theme/tokens';
 import { Wordmark } from './Wordmark';
 import { t } from '../i18n';
 import type { GPSContext } from '../services/InferenceService';
@@ -126,7 +126,9 @@ const styles = StyleSheet.create({
     borderColor: Colors.borderLight,
     gap: 6,
     flexShrink: 1,
-    maxWidth: 170,
+    // Cap the location pill to ~46% of viewport so on tall narrow phones
+    // (e.g. small Pixels) it still leaves room for the wordmark + settings.
+    maxWidth: Sizing.vw(46),
     ...Shadows.softOutset,
   },
   dot: {

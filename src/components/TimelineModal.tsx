@@ -8,8 +8,9 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../theme/colors';
-import { Radii, Shadows, Spacing, Type } from '../theme/tokens';
+import { Radii, Shadows, Sizing, Spacing, Type } from '../theme/tokens';
 import { t } from '../i18n';
 import {
   localGuideService,
@@ -27,6 +28,7 @@ interface Props {
 }
 
 export function TimelineModal({ visible, onClose, poiTitle, location }: Props) {
+  const insets = useSafeAreaInsets();
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +73,10 @@ export function TimelineModal({ visible, onClose, poiTitle, location }: Props) {
       onRequestClose={onClose}
     >
       <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
+        <Pressable
+          style={[styles.sheet, { paddingBottom: Spacing.lg + insets.bottom }]}
+          onPress={() => {}}
+        >
           <View style={styles.handle} />
           <Text style={styles.heading}>{t('timeline.title')}</Text>
           {poiTitle ? <Text style={styles.subheading}>{poiTitle}</Text> : null}
@@ -112,13 +117,15 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
-    maxHeight: '85%',
+    // Cap to a percentage of viewport height so this works on every screen
+    // size; bottom padding is added inline to honour the safe-area inset.
+    maxHeight: Sizing.vh(85),
+    minHeight: Sizing.vh(35),
     backgroundColor: Colors.background,
     borderTopLeftRadius: Radii.xl,
     borderTopRightRadius: Radii.xl,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
-    paddingBottom: Spacing.xxl,
     ...Shadows.softFloating,
   },
   handle: {

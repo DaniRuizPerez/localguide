@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Image, StyleSheet, Text, View } from 'react-native';
 import { Colors } from '../theme/colors';
-import { Radii, Shadows, Type } from '../theme/tokens';
+import { Radii, Shadows, Sizing, Type } from '../theme/tokens';
 import { GuideAvatar } from './GuideAvatar';
 import { t } from '../i18n';
 import type { Message } from '../types/chat';
@@ -123,8 +123,10 @@ const styles = StyleSheet.create({
     ...Shadows.softOutset,
   },
   bubbleImage: {
-    width: 200,
-    height: 150,
+    // ~56% of viewport width with a 4:3 aspect → adapts to phone size while
+    // keeping a sensible thumbnail proportion regardless of device.
+    width: Sizing.vw(56),
+    height: Sizing.vw(42),
     borderRadius: Radii.md,
     marginBottom: 8,
   },
