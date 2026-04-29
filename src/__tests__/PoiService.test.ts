@@ -417,3 +417,160 @@ describe('PoiService.fetchNearby — offline GeoNames path', () => {
     expect(results).toEqual([]);
   });
 });
+
+// ─── Streaming path (perceived-latency optimization) ──────────────────────
+
+describe('PoiService.fetchNearbyStreaming', () => {
+  beforeEach(() => {
+    poiService.clearCache();
+    mockFetch.mockReset();
+    mockedNearby.mockReset();
+    mockedAvailable.mockReturnValue(true);
+  });
+
+  it('emits the GeoNames result as a partial before Wikipedia resolves, then resolves with Wikipedia', async () => {
+    // GeoNames lands first (resolves synchronously after a microtask),
+    // Wikipedia resolves on a deferred timer to simulate a slower network.
+    mockedNearby.mockResolvedValue([
+      geoPlace({ geonameid: 9001, name: 'Local Park', lat: 37.4419, lon: -122.143, distanceMeters: 50 }),
+    ]);
+    let resolveWiki: ((v: unknown) => void) | null = null;
+    mockFetch.mockReturnValue(
+      new Promise((resolve) => {
+        resolveWiki = resolve;
+      })
+    );
+
+    const partials: Array<{ stage: string; titles: string[] }> = [];
+    const finalP = poiService.fetchNearbyStreaming(
+      37.4419,
+      -122.143,
+      1000,
+      10,
+      {},
+      {
+        onPartial: (pois, stage) => {
+          partials.push({ stage, titles: pois.map((p) => p.title) });
+        },
+      }
+    );
+
+    // Flush the GeoNames microtask so its onPartial fires.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(partials.length).toBeGreaterThanOrEqual(1);
+    expect(partials[0].stage).toBe('geonames');
+    expect(partials[0].titles).toEqual(['Local Park']);
+
+    // Now resolve Wikipedia with the canonical list.
+    resolveWiki!(
+      wikiResponse([
+        {
+          pageid: 12345,
+          title: 'Cantor Arts Center',
+          description: 'Art museum at Stanford University',
+          coordinates: [{ lat: 37.4326, lon: -122.1702 }],
+        },
+      ])
+    );
+    const finalList = await finalP;
+    expect(finalList.map((p) => p.title)).toEqual(['Cantor Arts Center']);
+    expect(finalList[0].source).toBe('wikipedia');
+  });
+
+  it('emits a partial from a stale cache entry before refetching', async () => {
+    // Seed the cache, then expire it by manually invoking with a stale TTL.
+    mockFetch.mockResolvedValueOnce(
+      wikiResponse([
+        {
+          pageid: 1,
+          title: 'Old Stale Entry',
+          description: 'Historic landmark',
+          coordinates: [{ lat: 37.4419, lon: -122.143 }],
+        },
+      ])
+    );
+    await poiService.fetchNearby(37.4419, -122.143, 1000, 10);
+
+    // Force the cache to be stale by jumping time forward.
+    const realNow = Date.now;
+    Date.now = () => realNow() + 6 * 60 * 1000;
+
+    try {
+      mockedNearby.mockResolvedValue([]);
+      mockFetch.mockResolvedValueOnce(
+        wikiResponse([
+          {
+            pageid: 2,
+            title: 'Fresh Entry',
+            description: 'Newly relevant landmark',
+            coordinates: [{ lat: 37.4419, lon: -122.143 }],
+          },
+        ])
+      );
+
+      const partials: string[][] = [];
+      const finalList = await poiService.fetchNearbyStreaming(
+        37.4419,
+        -122.143,
+        1000,
+        10,
+        {},
+        {
+          onPartial: (pois) => partials.push(pois.map((p) => p.title)),
+        }
+      );
+
+      expect(partials).toContainEqual(['Old Stale Entry']);
+      expect(finalList.map((p) => p.title)).toEqual(['Fresh Entry']);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  it('skips streaming partials when a fresh cache entry is available', async () => {
+    mockFetch.mockResolvedValue(
+      wikiResponse([
+        {
+          pageid: 1,
+          title: 'Cached Entry',
+          description: 'Historic landmark',
+          coordinates: [{ lat: 37.4419, lon: -122.143 }],
+        },
+      ])
+    );
+    await poiService.fetchNearby(37.4419, -122.143, 1000, 10);
+    mockFetch.mockClear();
+
+    const partials: string[][] = [];
+    const result = await poiService.fetchNearbyStreaming(
+      37.4419,
+      -122.143,
+      1000,
+      10,
+      {},
+      {
+        onPartial: (pois) => partials.push(pois.map((p) => p.title)),
+      }
+    );
+    expect(partials).toEqual([]); // fresh cache → no stream needed
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(result.map((p) => p.title)).toEqual(['Cached Entry']);
+  });
+
+  it('falls through to the offline fetchNearby path when offline:true', async () => {
+    mockedNearby.mockResolvedValue([
+      geoPlace({ geonameid: 1, name: 'Offline Place', distanceMeters: 100 }),
+    ]);
+    const result = await poiService.fetchNearbyStreaming(
+      25.76,
+      -80.19,
+      1000,
+      10,
+      { offline: true }
+    );
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(result.map((p) => p.title)).toEqual(['Offline Place']);
+    expect(result[0].source).toBe('geonames');
+  });
+});

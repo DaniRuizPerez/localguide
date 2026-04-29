@@ -56,6 +56,21 @@ export interface FetchOptions {
   offline?: boolean;
 }
 
+/**
+ * Streaming variant of fetchNearby: emits whatever is available locally first
+ * (in-memory cache, then bundled GeoNames data — typically tens of ms), then
+ * emits the canonical Wikipedia list once the network returns. Lets the UI
+ * paint real, named POIs while the slower request is still in flight instead
+ * of blanking out the "Around you" section for the full Wikipedia round trip.
+ *
+ * `onPartial` may be invoked 0–2 times before the returned promise resolves.
+ * The promise resolves with the same final list a normal `fetchNearby` would
+ * have returned, so existing callers can keep using whichever shape suits.
+ */
+export interface StreamHandlers {
+  onPartial?: (pois: Poi[], stage: 'cache' | 'geonames') => void;
+}
+
 // Cache key granularity: rounding to 3 decimal places (~110 m) means we reuse
 // results while the user drifts around a neighborhood, but refetch when they
 // walk more than a block. TTL handles the same drift in time.
@@ -292,6 +307,90 @@ export const poiService = {
     } finally {
       clearTimeout(timeoutId);
     }
+  },
+
+  /**
+   * Same contract as `fetchNearby`, but emits whatever is locally available
+   * first via `handlers.onPartial`. Order of emissions:
+   *   1. In-memory cache (if present, even when stale — the freshness check
+   *      below decides whether to skip the network).
+   *   2. Bundled GeoNames lookup (cities15000 + installed country packs) —
+   *      always runs in parallel with Wikipedia in online mode, since the
+   *      native side is on-device and finishes in milliseconds while the
+   *      Wikipedia geosearch routinely takes 1–2 s on a healthy network and
+   *      up to 8 s on a flaky one.
+   * The promise resolves with the canonical list (Wikipedia when available,
+   * otherwise GeoNames, otherwise stale cache or []), exactly matching the
+   * return shape of `fetchNearby`.
+   */
+  async fetchNearbyStreaming(
+    latitude: number,
+    longitude: number,
+    radiusMeters: number = DEFAULT_RADIUS_METERS,
+    limit: number = DEFAULT_LIMIT,
+    options: FetchOptions = {},
+    handlers: StreamHandlers = {}
+  ): Promise<Poi[]> {
+    const key = cacheKey(latitude, longitude, radiusMeters);
+    const now = Date.now();
+    const cached = cache.get(key);
+
+    // Fresh cache hit: return it synchronously (well, microtask) — no need to
+    // refetch or stream partials, the consumer is going to render it anyway.
+    if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
+      return rankPois(cached.pois, options.hiddenGems === true).slice(0, limit);
+    }
+
+    // Offline mode keeps its existing single-path behavior — there's no
+    // network to race against, and surfacing intermediate cache hits would
+    // double-render for no win.
+    if (options.offline === true) {
+      return this.fetchNearby(latitude, longitude, radiusMeters, limit, options);
+    }
+
+    // Stale cache: paint it immediately so the user sees real names instead
+    // of a spinner while the fresh request is in flight. The UI will swap to
+    // the new list when it lands; this just kills the empty-flicker.
+    if (cached && cached.pois.length > 0) {
+      handlers.onPartial?.(
+        rankPois(cached.pois, options.hiddenGems === true).slice(0, limit),
+        'cache'
+      );
+    }
+
+    // Kick off both lookups in parallel. GeoNames is on-device SQLite —
+    // typically finishes in < 50 ms, well before Wikipedia. Wikipedia stays
+    // the source of truth (richer descriptions, popularity-ranked); GeoNames
+    // is the "show something now" stand-in.
+    let wikipediaSettled = false;
+    const geoNamesP = fetchNearbyFromGeoNames(latitude, longitude, radiusMeters, limit)
+      .then((geoPois) => {
+        // Don't bother emitting if Wikipedia already came back first.
+        if (wikipediaSettled) return;
+        if (geoPois.length === 0) return;
+        handlers.onPartial?.(
+          rankPois(geoPois, options.hiddenGems === true).slice(0, limit),
+          'geonames'
+        );
+      })
+      .catch(() => {
+        // Native errors are non-fatal — this is a "best effort" partial.
+      });
+
+    const wikiP = this.fetchNearby(latitude, longitude, radiusMeters, limit, options).then(
+      (pois) => {
+        wikipediaSettled = true;
+        return pois;
+      }
+    );
+
+    // We await Wikipedia but don't block the caller on geoNamesP — the
+    // GeoNames partial only matters if it lands before Wikipedia, and
+    // resolving the returned promise is what tells the UI "you have the real
+    // list now". Floating the GeoNames promise is fine; its only side effect
+    // is firing onPartial.
+    void geoNamesP;
+    return wikiP;
   },
 
   clearCache(): void {

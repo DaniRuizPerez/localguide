@@ -49,20 +49,42 @@ export function useNearbyPois(
     let cancelled = false;
 
     const cellKey = `${gps.latitude.toFixed(3)}_${gps.longitude.toFixed(3)}_${radiusMeters}`;
-    setPois([]);
+    // Don't blank the list on grid-cell change; keep what's on screen until the
+    // new fetch lands so the user doesn't see an empty flicker. The streaming
+    // fetch below will paint a partial result (cache or GeoNames) within tens
+    // of milliseconds, then the canonical Wikipedia list when it returns.
     setLoading(true);
 
+    const sortAndFilter = (raw: Poi[]) =>
+      raw
+        .map((p) => ({
+          ...p,
+          distanceMeters: distanceMeters(gps.latitude, gps.longitude, p.latitude, p.longitude),
+        }))
+        .filter((p) => p.distanceMeters <= radiusMeters)
+        .sort((a, b) => a.distanceMeters - b.distanceMeters);
+
     poiService
-      .fetchNearby(gps.latitude, gps.longitude, radiusMeters, undefined, { hiddenGems, offline })
+      .fetchNearbyStreaming(
+        gps.latitude,
+        gps.longitude,
+        radiusMeters,
+        undefined,
+        { hiddenGems, offline },
+        {
+          // Partial emissions land before the full network round trip (cache
+          // hit) or alongside it (offline GeoNames). Both carry real coords
+          // we can geofence on — safe to feed straight into the Poi state.
+          onPartial: (partial) => {
+            if (cancelled) return;
+            const sorted = sortAndFilter(partial);
+            if (sorted.length > 0) setPois(sorted);
+          },
+        }
+      )
       .then(async (raw) => {
         if (cancelled) return;
-        const sorted = raw
-          .map((p) => ({
-            ...p,
-            distanceMeters: distanceMeters(gps.latitude, gps.longitude, p.latitude, p.longitude),
-          }))
-          .filter((p) => p.distanceMeters <= radiusMeters)
-          .sort((a, b) => a.distanceMeters - b.distanceMeters);
+        const sorted = sortAndFilter(raw);
 
         if (sorted.length > 0) {
           setPois(sorted);
