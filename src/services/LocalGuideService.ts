@@ -116,7 +116,7 @@ function buildNearbyPlacesPrompt(
       `Task: list 6 TOURIST-WORTHY places WITHIN ${radiusLabel} of the visitor — a specific named attraction a traveler would actually go see.\n` +
       `Allowed categories: landmarks, historic sites, famous buildings, parks, gardens, plazas, museums, art galleries, universities, libraries, theaters, monuments, scenic viewpoints, notable neighborhoods.\n` +
       `NEVER include: chain stores (7-Eleven, Starbucks, McDonald's), gas stations, supermarkets, convenience stores, ZIP codes, highways, streets, administrative areas (countries, states, counties), generic schools, bus or metro stations, corporate headquarters.\n` +
-      `Real places only; do not invent. If you don't know what's near this place, output nothing.\n` +
+      `Prefer real places you're confident exist there. If you're unsure of names within ${radiusLabel}, broaden to the nearest well-known landmarks of the surrounding city or town instead — but ALWAYS output 6 names. An empty answer is not allowed.\n` +
       `Output ONLY the place names, one per line. No numbering. No bullets. No descriptions. No intro or closing text.`,
   });
 }
