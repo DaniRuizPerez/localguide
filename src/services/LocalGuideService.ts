@@ -279,22 +279,41 @@ function buildSingleQuizPrompt(
       `${avoidBlock}` +
       `Write exactly ONE multiple-choice question. 4 options labelled A, B, C, D. ONE correct answer. ` +
       `${QUIZ_GROUNDING_RULES}\n\n` +
-      `Output strictly in this format and nothing else:\n` +
-      `Q: <question>\n` +
-      `A: <option>\n` +
-      `B: <option>\n` +
-      `C: <option>\n` +
-      `D: <option>\n` +
-      `Correct: A\n` +
-      `(no intro, no explanations, no question number, no closing remarks)`,
+      // Worked example. The on-device 1B model reliably copies the SHAPE of
+      // a single example far better than it follows a list of format rules,
+      // and was previously dropping the trailing "Correct: <letter>" line on
+      // ~all generations because the format spec alone wasn't enough signal.
+      `Example of the exact format you must produce (do not reuse this content):\n` +
+      `Q: Which river runs through Paris?\n` +
+      `A: The Thames\n` +
+      `B: The Seine\n` +
+      `C: The Danube\n` +
+      `D: The Rhine\n` +
+      `Correct: B\n\n` +
+      `Now write your one question in that same six-line format. The "Correct: <letter>" line is REQUIRED — do not stop before emitting it. No intro, no explanations, no question number, no closing remarks.`,
   });
 }
 
 // Strip a leading option prefix in any of the shapes the model produces:
 // "A:", "A.", "A)", "(A)", "[A]", with optional surrounding markdown emphasis.
 // Returns the trailing text or null if the line doesn't lead with this letter.
+//
+// We require at least one *separator* after the letter — either a wrapping
+// bracket pair `(A)` / `[A]`, or one of `:.)\-`. Bare `A` followed by text
+// without a separator (e.g. "Aardvark") must NOT match, otherwise we'd
+// strip the leading 'A' off any answer that happened to start with it.
+//
+// On-device Gemma also sometimes drops the space after the separator
+// ("A:12th Street"), so the trailing whitespace is optional.
 function stripOptionPrefix(line: string, letter: string): string | null {
-  const re = new RegExp(`^[\\(\\[]?\\s*${letter}\\s*[\\)\\]]?\\s*[:.)\\-]?\\s+`, 'i');
+  const re = new RegExp(
+    `^(?:` +
+      `[\\(\\[]\\s*${letter}\\s*[\\)\\]]\\s*[:.)\\-]?\\s*` +
+      `|` +
+      `${letter}\\s*[:.)\\-]\\s*` +
+    `)`,
+    'i'
+  );
   const m = line.match(re);
   if (!m) return null;
   return line.slice(m[0].length).trim();

@@ -165,6 +165,48 @@ describe('generateQuiz', () => {
     expect(quiz[0].correctIndex).toBe(2);
   });
 
+  it('parses options with no space after the separator ("A:foo")', async () => {
+    // On-device Gemma 3 1B routinely drops the space between the option
+    // letter's punctuation and the option text — observed live on Pixel 3 as
+    // `A:12th Street Square`. Parser must accept it.
+    const task = localGuideService.generateQuiz([], 1);
+    const done = task.promise;
+    await flushMicrotasks();
+    sharedCallbacks.current.onToken(
+      `Q: Largest city?\n` +
+      `A:Paris\n` +
+      `B:Berlin\n` +
+      `C:Madrid\n` +
+      `D:Rome\n` +
+      `Correct: A\n`
+    );
+    sharedCallbacks.current.onDone();
+    const quiz = await done;
+    expect(quiz).toHaveLength(1);
+    expect(quiz[0].options).toEqual(['Paris', 'Berlin', 'Madrid', 'Rome']);
+    expect(quiz[0].correctIndex).toBe(0);
+  });
+
+  it('does not strip a leading "A" from an option that lacks a separator', async () => {
+    // Defensive against the obvious foot-gun: relaxing the prefix regex too
+    // far would make `Aardvark` get parsed as option A "ardvark".
+    const task = localGuideService.generateQuiz([], 1);
+    const done = task.promise;
+    await flushMicrotasks();
+    sharedCallbacks.current.onToken(
+      `Q: Animal?\n` +
+      `A: Aardvark\n` +
+      `B: Beaver\n` +
+      `C: Cougar\n` +
+      `D: Deer\n` +
+      `Correct: A\n`
+    );
+    sharedCallbacks.current.onDone();
+    const quiz = await done;
+    expect(quiz).toHaveLength(1);
+    expect(quiz[0].options[0]).toBe('Aardvark');
+  });
+
   it('infers correct answer from a "(correct)" tag on an option line', async () => {
     const task = localGuideService.generateQuiz([], 1);
     const done = task.promise;
