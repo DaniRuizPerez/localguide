@@ -1,7 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Dimensions,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -70,27 +73,18 @@ export function QuizModal({ visible, onClose, nearbyPois }: Props) {
     );
   };
 
-  // Abort any in-flight generation when the user dismisses the modal so we
-  // don't keep the model busy after the sheet is gone.
-  useEffect(() => {
-    if (!visible && handleRef.current) {
-      handleRef.current.abort();
+  // Persistence: do NOT reset state when the modal closes/opens — the user
+  // wants closing the sheet and reopening it to leave the quiz exactly where
+  // they were. Resets only happen explicitly via `start()` (new quiz). On
+  // unmount we still abort any in-flight generation so we don't leak the
+  // model.
+  useEffect(
+    () => () => {
+      handleRef.current?.abort();
       handleRef.current = null;
-      setGenerating(false);
-    }
-  }, [visible]);
-
-  // Reset visual state every open.
-  useEffect(() => {
-    if (visible) {
-      setQuestions([]);
-      setCurrentIdx(0);
-      setSelectedIdx(null);
-      setScore(0);
-      setError(null);
-      setGenerating(false);
-    }
-  }, [visible]);
+    },
+    []
+  );
 
   const currentQ = questions[currentIdx];
   const answered = selectedIdx != null;
@@ -128,29 +122,80 @@ export function QuizModal({ visible, onClose, nearbyPois }: Props) {
     }
   }, [finished]);
 
+  // Drag-to-dismiss: a downward drag on the handle/header translates the
+  // sheet, and on release we either snap back to 0 or animate it offscreen
+  // and close. Only attached to the handle area so taps + scrolls in the
+  // body still work normally.
+  const dragY = useRef(new Animated.Value(0)).current;
+  const screenHeight = Dimensions.get('window').height;
+  const dragResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 4,
+        onPanResponderMove: (_e, g) => {
+          if (g.dy > 0) dragY.setValue(g.dy);
+        },
+        onPanResponderRelease: (_e, g) => {
+          const shouldClose = g.dy > 120 || g.vy > 1.2;
+          if (shouldClose) {
+            Animated.timing(dragY, {
+              toValue: screenHeight,
+              duration: 180,
+              useNativeDriver: true,
+            }).start(() => {
+              dragY.setValue(0);
+              onClose();
+            });
+          } else {
+            Animated.spring(dragY, {
+              toValue: 0,
+              useNativeDriver: true,
+              tension: 80,
+              friction: 10,
+            }).start();
+          }
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(dragY, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+        },
+      }),
+    [dragY, onClose, screenHeight]
+  );
+
+  // Reset translation when the sheet is reopened so a previous drag-down
+  // doesn't leak into the next session.
+  useEffect(() => {
+    if (visible) dragY.setValue(0);
+  }, [visible, dragY]);
+
   return (
     <Modal
       visible={visible}
       transparent
       animationType="slide"
       onRequestClose={onClose}
+      hardwareAccelerated
     >
       <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
-          <View style={styles.handle} />
-          <Text style={styles.heading}>{t('quiz.title')}</Text>
+        <Animated.View
+          style={[styles.sheet, { transform: [{ translateY: dragY }] }]}
+          // Block backdrop press from firing when interacting with the sheet.
+          onStartShouldSetResponder={() => true}
+        >
+          <View style={styles.handleArea} {...dragResponder.panHandlers}>
+            <View style={styles.handle} />
+            <Text style={styles.heading}>{t('quiz.title')}</Text>
+          </View>
 
           <ScrollView
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
-            {questions.length === 0 && !generating && !error && (
-              <TouchableOpacity style={styles.cta} onPress={start}>
-                <Text style={styles.ctaLabel}>{t('quiz.startButton')}</Text>
-              </TouchableOpacity>
-            )}
-
             {questions.length === 0 && generating && (
               <View style={styles.loadingRow}>
                 <ActivityIndicator color={Colors.secondary} />
@@ -203,27 +248,6 @@ export function QuizModal({ visible, onClose, nearbyPois }: Props) {
                     </TouchableOpacity>
                   );
                 })}
-
-                {answered && advanceReady && (
-                  <TouchableOpacity
-                    style={styles.nextBtn}
-                    onPress={() => {
-                      setCurrentIdx((i) => i + 1);
-                      setSelectedIdx(null);
-                    }}
-                  >
-                    <Text style={styles.nextLabel}>{advanceLabel}</Text>
-                  </TouchableOpacity>
-                )}
-
-                {waitingForNext && (
-                  <View style={styles.waitingRow}>
-                    <ActivityIndicator color={Colors.secondary} />
-                    <Text style={styles.loadingText}>
-                      {t('quiz.preparingNext')}
-                    </Text>
-                  </View>
-                )}
               </View>
             )}
 
@@ -235,13 +259,51 @@ export function QuizModal({ visible, onClose, nearbyPois }: Props) {
                     total: questions.length,
                   })}
                 </Text>
-                <TouchableOpacity style={styles.cta} onPress={start}>
-                  <Text style={styles.ctaLabel}>{t('quiz.startButton')}</Text>
-                </TouchableOpacity>
               </View>
             )}
           </ScrollView>
-        </Pressable>
+
+          {/*
+            Action footer: pinned outside the ScrollView so the primary CTA is
+            always reachable even when the question text + options overflow.
+            The button shown depends on the current quiz state; only one is
+            visible at a time.
+          */}
+          <View style={styles.footer}>
+            {questions.length === 0 && !generating && !error && (
+              <TouchableOpacity style={styles.cta} onPress={start}>
+                <Text style={styles.ctaLabel}>{t('quiz.startButton')}</Text>
+              </TouchableOpacity>
+            )}
+
+            {currentQ && !finished && answered && advanceReady && (
+              <TouchableOpacity
+                style={styles.cta}
+                onPress={() => {
+                  setCurrentIdx((i) => i + 1);
+                  setSelectedIdx(null);
+                }}
+              >
+                <Text style={styles.ctaLabel}>{advanceLabel}</Text>
+              </TouchableOpacity>
+            )}
+
+            {currentQ && !finished && waitingForNext && (
+              <View style={styles.waitingRow}>
+                <ActivityIndicator color={Colors.secondary} />
+                <Text style={styles.loadingText}>
+                  {t('quiz.preparingNext')}
+                </Text>
+              </View>
+            )}
+
+            {finished && (
+              <TouchableOpacity style={styles.cta} onPress={start}>
+                <Text style={styles.ctaLabel}>{t('quiz.startButton')}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </Animated.View>
       </Pressable>
     </Modal>
   );
@@ -266,6 +328,12 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.xxl,
     ...Shadows.softFloating,
   },
+  // The header strip captures the drag gesture; making it tall enough to be
+  // an easy grab target on touch.
+  handleArea: {
+    paddingTop: Spacing.xs,
+    paddingBottom: Spacing.xs,
+  },
   handle: {
     width: 40,
     height: 4,
@@ -283,7 +351,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: Spacing.lg,
+    paddingBottom: Spacing.md,
+  },
+  // Pinned at the bottom of the sheet so the action button is always
+  // reachable even when a long question + 4 options overflow the body.
+  footer: {
+    paddingTop: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.borderLight,
+    marginTop: Spacing.sm,
   },
   cta: {
     backgroundColor: Colors.primary,
@@ -304,9 +380,9 @@ const styles = StyleSheet.create({
   waitingRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 10,
-    marginTop: Spacing.md,
-    alignSelf: 'flex-end',
+    paddingVertical: 12,
   },
   loadingText: {
     ...Type.bodySm,
@@ -367,19 +443,6 @@ const styles = StyleSheet.create({
     ...Type.body,
     color: Colors.text,
     flex: 1,
-  },
-  nextBtn: {
-    alignSelf: 'flex-end',
-    backgroundColor: Colors.primary,
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    borderRadius: Radii.md,
-    marginTop: Spacing.sm,
-    ...Shadows.chipActiveHard,
-  },
-  nextLabel: {
-    ...Type.button,
-    color: '#FFFFFF',
   },
   scoreBox: {
     alignItems: 'center',
