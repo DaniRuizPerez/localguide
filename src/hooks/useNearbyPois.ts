@@ -45,7 +45,18 @@ export function useNearbyPois(
   const llmFallbackTaskRef = useRef<ListPlacesTask | null>(null);
 
   useEffect(() => {
-    if (!gps) return;
+    if (!gps) {
+      // Permission revoked (or not yet granted): discard any stale POIs that
+      // were fetched when GPS was available and abort any in-flight LLM task.
+      // Without this, the "Around you" list keeps showing names from the
+      // previous session / location even after the user revokes permission.
+      setPois([]);
+      if (llmFallbackTaskRef.current) {
+        llmFallbackTaskRef.current.abort().catch(() => {});
+        llmFallbackTaskRef.current = null;
+      }
+      return;
+    }
     let cancelled = false;
 
     const cellKey = `${gps.latitude.toFixed(3)}_${gps.longitude.toFixed(3)}_${radiusMeters}`;

@@ -33,6 +33,13 @@ interface Props {
   loading?: boolean;
   /** True when GPS hasn't produced a fix yet (vs. fix present but no POIs). */
   awaitingLocation?: boolean;
+  /**
+   * True when location permission has been denied (or an error occurred) and
+   * the user has not entered a manual location. In this state the "Around you"
+   * list should show a "grant permission" nudge instead of the generic empty
+   * state or an LLM-hallucinated list.
+   */
+  locationDenied?: boolean;
 }
 
 /**
@@ -59,6 +66,7 @@ export function HomeState({
   disabled = false,
   loading = false,
   awaitingLocation = false,
+  locationDenied = false,
 }: Props) {
   const radiusLabel =
     radiusMeters >= 1000
@@ -121,7 +129,12 @@ export function HomeState({
       </View>
 
       {poiList.length === 0 ? (
-        loading || awaitingLocation ? (
+        locationDenied ? (
+          <View style={styles.emptyHint}>
+            <GuideAvatar size={28} />
+            <Text style={styles.emptyHintText}>{t('home.aroundYouNoPermission')}</Text>
+          </View>
+        ) : loading || awaitingLocation ? (
           <View style={styles.emptyHint}>
             <ActivityIndicator size="small" color={Colors.primaryDark} />
             <Text style={styles.emptyHintText}>

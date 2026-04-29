@@ -315,6 +315,7 @@ export default function ChatScreen(props: Props) {
           disabled={inferring}
           loading={poisLoading}
           awaitingLocation={!gps && !manualLocation && (status === 'idle' || status === 'requesting')}
+          locationDenied={!gps && !manualLocation && (status === 'denied' || status === 'error')}
         />
       )}
 

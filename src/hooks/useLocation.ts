@@ -186,6 +186,11 @@ export function useLocation(): LocationState {
       if (permStatus !== 'granted') {
         setStatus('denied');
         setErrorMessage('Location permission denied. Enable it in Settings to use the guide.');
+        // Clear any stale GPS fix so downstream consumers (useNearbyPois,
+        // ChatHeader) don't keep showing a position that is no longer valid.
+        setRawGps(null);
+        setPlaceName(null);
+        lastGeocodeKeyRef.current = null;
         return;
       }
 

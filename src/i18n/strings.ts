@@ -136,6 +136,7 @@ export const EN = {
     aroundYouEmpty: 'Walk around a bit and I\'ll find places nearby.',
     aroundYouLoading: 'Looking around you…',
     aroundYouWaitingGps: 'Waiting for your location…',
+    aroundYouNoPermission: 'Grant location permission (or enter a place above) to see what\'s nearby.',
     starterFood: 'What\'s good to eat nearby?',
     starterHistory: 'Tell me the history here',
     starterWalk: 'Walk me somewhere pretty',
