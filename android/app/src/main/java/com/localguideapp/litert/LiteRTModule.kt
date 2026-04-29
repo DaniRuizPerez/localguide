@@ -361,15 +361,19 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
         // module thread (the previous design) raced with executor tasks that
         // hadn't finished unwinding from generate, causing
         // "FAILED_PRECONDITION: a session already exists".
+        android.util.Log.d("LiteRTModule", "startSessionStream: queuing executor task requestId=$requestId")
         inferenceExecutor.execute {
+            android.util.Log.d("LiteRTModule", "startSessionStream: executor task START requestId=$requestId")
             val session: Session = try {
                 engine.createSession(
                     SessionConfig(SamplerConfig(topK = activeTier.topK, topP = 0.95, temperature = 0.8, seed = 0))
                 )
             } catch (e: Exception) {
+                android.util.Log.e("LiteRTModule", "startSessionStream: createSession FAILED requestId=$requestId: ${e.message}")
                 promise.reject("INFERENCE_ERROR", "Failed to create session: ${e.message}", e)
                 return@execute
             }
+            android.util.Log.d("LiteRTModule", "startSessionStream: session created, resolving promise requestId=$requestId")
 
             val handle = StreamHandle(
                 requestId = requestId,
@@ -410,6 +414,7 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
                             if (before.isNotEmpty()) emitToken(requestId, before)
                             pending.setLength(0)
                             if (activeStream.compareAndSet(handle, null)) {
+                                android.util.Log.d("LiteRTModule", "startSessionStream: EOS detected, cancelProcess+emitDone requestId=$requestId chunks=$chunksEmitted")
                                 try { session.cancelProcess() } catch (_: Throwable) {}
                                 emitDone(requestId)
                             }
@@ -435,6 +440,7 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
                                 pending.setLength(0)
                             }
                             if (activeStream.compareAndSet(handle, null)) {
+                                android.util.Log.d("LiteRTModule", "startSessionStream: cap reached ($chunksEmitted>=$maxTokens), cancelProcess+emitDone requestId=$requestId")
                                 try { session.cancelProcess() } catch (_: Throwable) {}
                                 emitDone(requestId)
                             }
@@ -442,6 +448,7 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
                     }
 
                     override fun onDone() {
+                        android.util.Log.d("LiteRTModule", "startSessionStream: onDone requestId=$requestId eosSeen=$eosSeen capReached=$capReached chunks=$chunksEmitted pendingLen=${pending.length}")
                         if (!eosSeen && pending.isNotEmpty()) {
                             emitToken(requestId, pending.toString())
                             pending.setLength(0)
@@ -452,26 +459,32 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
                     }
 
                     override fun onError(throwable: Throwable) {
+                        android.util.Log.e("LiteRTModule", "startSessionStream: onError requestId=$requestId: ${throwable.message}")
                         if (activeStream.compareAndSet(handle, null)) {
                             emitError(requestId, throwable.message ?: throwable.javaClass.simpleName)
                         }
                     }
                 }
 
+                android.util.Log.d("LiteRTModule", "startSessionStream: calling generateContentStream requestId=$requestId maxTokens=$maxTokens")
                 try {
                     session.generateContentStream(inputs, callback)
                 } catch (e: Throwable) {
+                    android.util.Log.e("LiteRTModule", "startSessionStream: generateContentStream threw requestId=$requestId: ${e.message}")
                     if (activeStream.compareAndSet(handle, null)) {
                         emitError(requestId, e.message ?: e.javaClass.simpleName)
                     }
                 }
+                android.util.Log.d("LiteRTModule", "startSessionStream: generateContentStream returned requestId=$requestId")
             } finally {
                 // Close on the executor thread, after generate has fully returned.
                 // This is the one-and-only place the session gets closed, which
                 // guarantees LiteRT-LM sees the close on the same thread that
                 // created the session and before the next executor task runs.
+                android.util.Log.d("LiteRTModule", "startSessionStream: finally: session.close() requestId=$requestId")
                 try { session.close() } catch (_: Throwable) {}
                 activeStream.compareAndSet(handle, null)
+                android.util.Log.d("LiteRTModule", "startSessionStream: executor task DONE requestId=$requestId")
             }
         }
     }

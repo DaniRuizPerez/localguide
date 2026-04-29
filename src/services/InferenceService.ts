@@ -135,13 +135,16 @@ export class InferenceService {
 
     try {
       const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
+      console.log(`[InferenceService] runInferenceStream START requestId=${requestId} maxTokens=${maxTokens}`);
       await LiteRTModule.runInferenceStream(
         prompt,
         requestId,
         maxTokens,
         options.imagePath ?? null
       );
+      console.log(`[InferenceService] runInferenceStream native promise resolved requestId=${requestId}`);
     } catch (err) {
+      console.warn(`[InferenceService] runInferenceStream native promise REJECTED requestId=${requestId}`, err);
       if (!settled) {
         settled = true;
         cleanup();
