@@ -1,5 +1,6 @@
 import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../theme/colors';
 import { Radii, Shadows } from '../theme/tokens';
 import { t } from '../i18n';
@@ -25,8 +26,13 @@ export function ChatInputBar({
   inferring,
   isListening,
 }: Props) {
+  // On Android with gesture-nav the system bar overlays the View; without
+  // adding the bottom inset to paddingBottom the mic / camera / send row
+  // sits underneath the gesture indicator and the chat-input bar visually
+  // disappears on shorter devices (Pixel 3, etc).
+  const insets = useSafeAreaInsets();
   return (
-    <View style={styles.inputRowWrap}>
+    <View style={[styles.inputRowWrap, { paddingBottom: INPUT_ROW_BASE_PADDING_BOTTOM + insets.bottom }]}>
       <View style={styles.inputCapsule}>
         <TouchableOpacity
           style={[styles.iconBtn, isListening && styles.micBtnActive]}
@@ -81,13 +87,15 @@ export function ChatInputBar({
   );
 }
 
+const INPUT_ROW_BASE_PADDING_BOTTOM = 14;
+
 const styles = StyleSheet.create({
   inputRowWrap: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
     paddingTop: 10,
-    paddingBottom: 14,
+    paddingBottom: INPUT_ROW_BASE_PADDING_BOTTOM,
     backgroundColor: Colors.background,
   },
   inputCapsule: {

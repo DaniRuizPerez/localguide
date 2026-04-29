@@ -327,7 +327,6 @@ export default function ChatScreen(props: Props) {
         onMicToggle={voice.isListening ? voice.stopListening : voice.startListening}
         inferring={inferring}
         isListening={voice.isListening}
-        cameraEnabled={features?.multimodal === true}
       />
 
       <VoiceRateControls
