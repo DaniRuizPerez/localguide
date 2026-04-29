@@ -290,33 +290,81 @@ function buildSingleQuizPrompt(
   });
 }
 
+// Strip a leading option prefix in any of the shapes the model produces:
+// "A:", "A.", "A)", "(A)", "[A]", with optional surrounding markdown emphasis.
+// Returns the trailing text or null if the line doesn't lead with this letter.
+function stripOptionPrefix(line: string, letter: string): string | null {
+  const re = new RegExp(`^[\\(\\[]?\\s*${letter}\\s*[\\)\\]]?\\s*[:.)\\-]?\\s+`, 'i');
+  const m = line.match(re);
+  if (!m) return null;
+  return line.slice(m[0].length).trim();
+}
+
 function parseQuizBlock(block: string): QuizQuestion | null {
-  const lines = block
+  const cleaned = stripMarkdownEmphasis(block);
+  const lines = cleaned
     .split(/\r?\n/)
-    .map((l) => stripMarkdownEmphasis(l.trim()))
+    .map((l) => l.trim())
     .filter(Boolean);
-  if (lines.length < 6) return null;
+
   // Tolerate a numbered prefix like "1. Q: ..." or "Question 1: ...".
   const qLine = lines.find((l) => /^(?:\d+[.)]\s*)?(?:Q|Question)\s*\d*\s*[:.)\-]/i.test(l));
   const q = qLine
     ?.replace(/^(?:\d+[.)]\s*)?(?:Q|Question)\s*\d*\s*[:.)\-]\s*/i, '')
     .trim();
+
   const opts: Record<string, string> = {};
   for (const letter of ['A', 'B', 'C', 'D']) {
-    const line = lines.find((l) => new RegExp(`^${letter}[.:)]`, 'i').test(l));
-    if (!line) continue;
-    opts[letter] = line.replace(new RegExp(`^${letter}[.:)]\\s*`, 'i'), '').trim();
+    for (const l of lines) {
+      const stripped = stripOptionPrefix(l, letter);
+      if (stripped) {
+        opts[letter] = stripped;
+        break;
+      }
+    }
   }
+
   // Accept "Correct:" and the common drifts "Answer:" / "Correct answer:".
   const correctLine = lines.find((l) => /^(correct(\s*answer)?|answer)\s*[:.\-]/i.test(l));
-  const correctLetter = correctLine
+  let correctLetter = correctLine
     ?.replace(/^(correct(\s*answer)?|answer)\s*[:.\-]\s*/i, '')
     .trim()
     .charAt(0)
     .toUpperCase();
+
+  // Fallback: model sometimes encodes the correct option by putting `(correct)`
+  // or a `*` next to one of the option lines instead of writing a Correct line.
+  if (!correctLetter || !['A', 'B', 'C', 'D'].includes(correctLetter)) {
+    for (const letter of ['A', 'B', 'C', 'D']) {
+      const flagged = lines.find((l) => {
+        const stripped = stripOptionPrefix(l, letter);
+        return stripped != null && /\b(correct|answer)\b|^\s*\*/i.test(stripped);
+      });
+      if (flagged) {
+        correctLetter = letter;
+        break;
+      }
+    }
+  }
+
   if (!q || !correctLetter) return null;
   if (!['A', 'B', 'C', 'D'].includes(correctLetter)) return null;
-  if (!opts.A || !opts.B || !opts.C || !opts.D) return null;
+  if (!opts.A || !opts.B || !opts.C || !opts.D) {
+    // Final attempt: split the original block on inline option boundaries
+    // (e.g. "Q: ... A: ... B: ... C: ... D: ...") in case the model put
+    // everything on one or two lines instead of the requested six.
+    const inline = cleaned.replace(/\s+/g, ' ');
+    for (const letter of ['A', 'B', 'C', 'D']) {
+      if (opts[letter]) continue;
+      const re = new RegExp(
+        `(?:^|[\\s\\(\\[])${letter}\\s*[\\)\\]]?\\s*[:.\\-]\\s*(.+?)(?=\\s+(?:[A-D]\\s*[\\)\\]]?\\s*[:.\\-]|Correct|Answer)|$)`,
+        'i'
+      );
+      const m = inline.match(re);
+      if (m) opts[letter] = m[1].trim().replace(/[\s.;,]+$/, '');
+    }
+    if (!opts.A || !opts.B || !opts.C || !opts.D) return null;
+  }
   return {
     question: q,
     options: [opts.A, opts.B, opts.C, opts.D],
@@ -563,8 +611,15 @@ export const localGuideService = {
     handlers: QuizStreamHandlers,
     locationLabel?: string
   ): QuizStreamHandle {
+    // Retries for the *same* slot. We use the same budget to cover both
+    // duplicate-of-prior and unparseable-output failures, since both are
+    // recoverable — a fresh inference call on the same prompt usually lands
+    // a different answer.
     const MAX_DEDUPE_RETRIES = 2;
-    const TOKENS_PER_QUESTION = 200;
+    // Bumped from 200: at 200 tokens the model frequently truncates before
+    // emitting the trailing "Correct: X" line, and the parser then throws
+    // the otherwise-valid block away.
+    const TOKENS_PER_QUESTION = 320;
 
     const emitted: QuizQuestion[] = [];
     const fingerprints = new Set<string>();
@@ -610,6 +665,21 @@ export const localGuideService = {
                   parsed = parseQuizBlock(block);
                   if (parsed) break;
                 }
+                // Last-ditch: try parsing the full untrimmed text as one
+                // block. The split-on-blank-line heuristic can fragment a
+                // legitimate question whose options were separated by
+                // accidental blank lines.
+                if (!parsed) parsed = parseQuizBlock(fullText);
+                if (!parsed && __DEV__) {
+                  // Log the raw output so we can diagnose what shape the
+                  // on-device model actually produces. Truncated to keep
+                  // logcat readable.
+                  // eslint-disable-next-line no-console
+                  console.warn(
+                    '[Quiz] parse failed for slot ' + questionIndex + ':\n' +
+                      fullText.slice(0, 600)
+                  );
+                }
                 resolve(parsed);
               },
               onError: (msg) => {
@@ -646,7 +716,10 @@ export const localGuideService = {
           for (let attempt = 0; attempt <= MAX_DEDUPE_RETRIES; attempt++) {
             if (aborted) break;
             const candidate = await runOne(i, attempt);
-            if (!candidate) break; // parse failure — stop retrying this slot
+            // Parse failure: small on-device models drop format roughly 1 in
+            // 5 tries. Keep retrying within this slot's budget rather than
+            // aborting the whole run.
+            if (!candidate) continue;
             const fp = questionFingerprint(candidate.question);
             if (!fingerprints.has(fp)) {
               accepted = candidate;
@@ -658,9 +731,10 @@ export const localGuideService = {
           }
           if (aborted) break;
           if (!accepted) {
-            // Either parse failed or all retries collided. Stop early —
-            // QuizModal will treat partial results as "done with what we have".
-            break;
+            // Three consecutive failures (parse or dupe) for this slot.
+            // Skip it but keep trying the rest — partial results are still
+            // useful.
+            continue;
           }
           emitted.push(accepted);
           handlers.onQuestion(accepted, emitted.length - 1);

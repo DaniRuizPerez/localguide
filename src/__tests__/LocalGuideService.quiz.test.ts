@@ -146,6 +146,42 @@ describe('generateQuiz', () => {
     expect(quiz[0].correctIndex).toBe(2);
   });
 
+  it('parses parenthesized option labels like "(A)" and "[A]"', async () => {
+    const task = localGuideService.generateQuiz([], 1);
+    const done = task.promise;
+    await flushMicrotasks();
+    sharedCallbacks.current.onToken(
+      `Q: Capital of France?\n` +
+      `(A) London\n` +
+      `(B) Berlin\n` +
+      `(C) Paris\n` +
+      `(D) Madrid\n` +
+      `Correct: C\n`
+    );
+    sharedCallbacks.current.onDone();
+    const quiz = await done;
+    expect(quiz).toHaveLength(1);
+    expect(quiz[0].options).toEqual(['London', 'Berlin', 'Paris', 'Madrid']);
+    expect(quiz[0].correctIndex).toBe(2);
+  });
+
+  it('infers correct answer from a "(correct)" tag on an option line', async () => {
+    const task = localGuideService.generateQuiz([], 1);
+    const done = task.promise;
+    await flushMicrotasks();
+    sharedCallbacks.current.onToken(
+      `Q: Largest planet?\n` +
+      `A: Earth\n` +
+      `B: Jupiter (correct)\n` +
+      `C: Mars\n` +
+      `D: Venus\n`
+    );
+    sharedCallbacks.current.onDone();
+    const quiz = await done;
+    expect(quiz).toHaveLength(1);
+    expect(quiz[0].correctIndex).toBe(1);
+  });
+
   it('skips malformed blocks (missing options, missing Correct line)', async () => {
     const task = localGuideService.generateQuiz([], 3);
     const done = task.promise;
@@ -329,14 +365,14 @@ describe('generateQuizStream', () => {
     expect(onDone.mock.calls[0][0]).toHaveLength(2);
   });
 
-  it('caps dedupe retries and finishes early with what we have', async () => {
+  it('caps dedupe retries per slot and skips to the next', async () => {
     const onQuestion = jest.fn();
     const onDone = jest.fn();
     const onError = jest.fn();
 
     localGuideService.generateQuizStream(
       [],
-      3,
+      2,
       { onQuestion, onDone, onError }
     );
 
@@ -345,6 +381,8 @@ describe('generateQuizStream', () => {
       `Q: First question?\nA: a\nB: b\nC: c\nD: d\nCorrect: A\n`
     );
     // Q2 slot: every attempt is a duplicate of Q1. Initial + 2 retries = 3.
+    // After all three collide, the slot is skipped; with count=2 the run
+    // ends with whatever was accepted (just Q1).
     await completeNextCallWith(
       `Q: First question?\nA: a\nB: b\nC: c\nD: d\nCorrect: A\n`
     );
@@ -356,8 +394,33 @@ describe('generateQuizStream', () => {
     );
 
     expect(onQuestion).toHaveBeenCalledTimes(1);
-    // After exhausting retries we stop the run rather than burning more
-    // tokens. onDone fires with whatever we collected.
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onDone.mock.calls[0][0]).toHaveLength(1);
+  });
+
+  it('skips a slot that fails to parse and continues with the next', async () => {
+    const onQuestion = jest.fn();
+    const onDone = jest.fn();
+    const onError = jest.fn();
+
+    localGuideService.generateQuizStream(
+      [],
+      2,
+      { onQuestion, onDone, onError }
+    );
+
+    // Q1: three attempts of unparseable garbage — the slot is skipped.
+    await completeNextCallWith('totally unstructured nonsense');
+    await completeNextCallWith('still no Q: prefix anywhere');
+    await completeNextCallWith('and a third dud');
+    // Q2: parses fine. The run should continue past the failed slot and
+    // land this question.
+    await completeNextCallWith(
+      `Q: Capital of Japan?\nA: Kyoto\nB: Osaka\nC: Tokyo\nD: Sapporo\nCorrect: C\n`
+    );
+
+    expect(onQuestion).toHaveBeenCalledTimes(1);
+    expect(onQuestion.mock.calls[0][0].question).toBe('Capital of Japan?');
     expect(onDone).toHaveBeenCalledTimes(1);
     expect(onDone.mock.calls[0][0]).toHaveLength(1);
   });
