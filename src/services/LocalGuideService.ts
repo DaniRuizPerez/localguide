@@ -106,6 +106,13 @@ function buildNearbyPlacesPrompt(
     radiusMeters >= 1000
       ? `${(radiusMeters / 1000).toFixed(radiusMeters % 1000 === 0 ? 0 : 1)} km`
       : `${radiusMeters} m`;
+  // Extract a human-readable city/place name so the model is grounded in the
+  // user's actual location rather than generating generic hallucinated names.
+  const cityLabel: string =
+    typeof location === 'string'
+      ? location
+      : (location as GPSContext).placeName ?? '';
+  const cityPhrase = cityLabel ? ` IN ${cityLabel}` : '';
   return buildNarratorPrompt({
     system: 'You are a local tourist expert helping a traveler find sights worth visiting.',
     directives: [hiddenGems && HIDDEN_GEMS_DIRECTIVE],
@@ -113,11 +120,11 @@ function buildNearbyPlacesPrompt(
     // The radius task needs coords to anchor even when we have a place name.
     omitCoordsWithPlace: false,
     extraContext:
-      `Task: list 6 TOURIST-WORTHY places WITHIN ${radiusLabel} of the visitor — a specific named attraction a traveler would actually go see.\n` +
+      `Task: list up to 6 TOURIST-WORTHY places${cityPhrase} WITHIN ${radiusLabel} of the visitor — specific named attractions a traveler would actually go see.\n` +
       `Allowed categories: landmarks, historic sites, famous buildings, parks, gardens, plazas, museums, art galleries, universities, libraries, theaters, monuments, scenic viewpoints, notable neighborhoods.\n` +
       `NEVER include: chain stores (7-Eleven, Starbucks, McDonald's), gas stations, supermarkets, convenience stores, ZIP codes, highways, streets, administrative areas (countries, states, counties), generic schools, bus or metro stations, corporate headquarters.\n` +
-      `Prefer real places you're confident exist there. If you're unsure of names within ${radiusLabel}, broaden to the nearest well-known landmarks of the surrounding city or town instead — but ALWAYS output 6 names. An empty answer is not allowed.\n` +
-      `Output ONLY the place names, one per line. No numbering. No bullets. No descriptions. No intro or closing text.`,
+      `Output ONLY real, named places that genuinely exist${cityPhrase}. Output up to 6 well-known real places — if you don't know any, output the city's most famous landmarks instead. Real, named places only. Do not invent or guess names.\n` +
+      `Output ONLY the place names, one per line. No numbering. No bullets. No markdown. No descriptions. No intro or closing text.`,
   });
 }
 
@@ -128,6 +135,10 @@ function parsePlaceList(text: string): string[] {
     .map((line) => line.trim())
     // Strip common LLM-added prefixes: bullets, numbers, dashes, asterisks.
     .map((line) => line.replace(/^[\s*•\-–—]*(\d+[.)]\s*)?/, '').trim())
+    // Strip markdown bold/emphasis that Gemma wraps around names:
+    // **Stonewall Historic District** → Stonewall Historic District
+    // *City Hall*, __Central Park__, _The Foundry_ → plain text
+    .map((line) => stripMarkdownEmphasis(line).trim())
     // Quoted names ("Stanford University") — unwrap.
     .map((line) => line.replace(/^["'"']|["'"']$/g, '').trim())
     .filter((line) => {
@@ -559,12 +570,17 @@ export const localGuideService = {
     // keep logcat readable.
     const parse = (raw: string): string[] => {
       const parsed = parsePlaceList(raw);
-      if (__DEV__ && parsed.length === 0) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          '[NearbyPlaces] parsePlaceList returned 0 names; raw output:\n' +
-            raw.slice(0, 600)
-        );
+      if (__DEV__) {
+        if (parsed.length === 0) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            '[NearbyPlaces] parsePlaceList returned 0 names; raw output:\n' +
+              raw.slice(0, 600)
+          );
+        } else {
+          // eslint-disable-next-line no-console
+          console.log('[NearbyPlaces] parsePlaceList returned', parsed.length, 'names:', parsed.join(', '));
+        }
       }
       return parsed;
     };
@@ -763,10 +779,16 @@ export const localGuideService = {
       try {
         for (let i = 0; i < count; i++) {
           if (aborted) break;
+          // eslint-disable-next-line no-console
+          console.log(`[Quiz] slot ${i}: starting (${emitted.length} emitted so far)`);
           let accepted: QuizQuestion | null = null;
           for (let attempt = 0; attempt <= MAX_DEDUPE_RETRIES; attempt++) {
             if (aborted) break;
+            // eslint-disable-next-line no-console
+            console.log(`[Quiz] slot ${i} attempt ${attempt}: calling runOne`);
             const candidate = await runOne(i, attempt);
+            // eslint-disable-next-line no-console
+            console.log(`[Quiz] slot ${i} attempt ${attempt}: runOne returned ${candidate ? `q="${candidate.question.slice(0, 40)}"` : 'null'}`);
             // Parse failure: small on-device models drop format roughly 1 in
             // 5 tries. Keep retrying within this slot's budget rather than
             // aborting the whole run.
@@ -777,6 +799,8 @@ export const localGuideService = {
               fingerprints.add(fp);
               break;
             }
+            // eslint-disable-next-line no-console
+            console.log(`[Quiz] slot ${i} attempt ${attempt}: duplicate detected, fingerprint="${fp}"`);
             // Duplicate: loop and retry. The next prompt will include the
             // already-emitted question texts as the avoid list.
           }
@@ -785,11 +809,17 @@ export const localGuideService = {
             // Three consecutive failures (parse or dupe) for this slot.
             // Skip it but keep trying the rest — partial results are still
             // useful.
+            // eslint-disable-next-line no-console
+            console.warn(`[Quiz] slot ${i}: all attempts exhausted, skipping slot`);
             continue;
           }
           emitted.push(accepted);
+          // eslint-disable-next-line no-console
+          console.log(`[Quiz] slot ${i}: accepted, emitting q="${accepted.question.slice(0, 40)}"`);
           handlers.onQuestion(accepted, emitted.length - 1);
         }
+        // eslint-disable-next-line no-console
+        console.log(`[Quiz] driver loop done: emitted=${emitted.length}`);
         if (!aborted) handlers.onDone(emitted);
       } catch (err) {
         if (aborted) return;
