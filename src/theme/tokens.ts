@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { Dimensions, Platform } from 'react-native';
 
 // Font family names match @expo-google-fonts exports; fall back to system
 // sans if fonts fail to load.
@@ -98,4 +98,23 @@ export const Motion = {
   quick: 150,
   base: 250,
   slow: 400,
+};
+
+// Responsive sizing helpers. The whole app renders inside a single window so a
+// snapshot at module-load time is good enough for static StyleSheet.create
+// values; for components that need to react to rotation/foldables, prefer
+// `useWindowDimensions()` directly. These exist so that hero blocks,
+// sheet/modal heights, image stand-ins, and any other "sized to the screen"
+// elements use a percentage-of-screen instead of a hardcoded pixel count and
+// therefore work on phones whose height/width differ from the design device.
+const _win = Dimensions.get('window');
+export const Sizing = {
+  /** Viewport width in pixels (snapshot). */
+  windowWidth: _win.width,
+  /** Viewport height in pixels (snapshot). */
+  windowHeight: _win.height,
+  /** percent of viewport width as pixels (e.g. vw(50) === half-screen wide). */
+  vw: (percent: number) => Math.round((_win.width * percent) / 100),
+  /** percent of viewport height as pixels. */
+  vh: (percent: number) => Math.round((_win.height * percent) / 100),
 };

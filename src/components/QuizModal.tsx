@@ -12,8 +12,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../theme/colors';
-import { Radii, Shadows, Spacing, Type } from '../theme/tokens';
+import { Radii, Shadows, Sizing, Spacing, Type } from '../theme/tokens';
 import { t } from '../i18n';
 import {
   localGuideService,
@@ -31,6 +32,13 @@ interface Props {
 const TARGET_QUESTIONS = 5;
 
 export function QuizModal({ visible, onClose, nearbyPois }: Props) {
+  // The Modal renders edge-to-edge (under any system gesture nav). Without
+  // accounting for the bottom inset, our pinned footer (which holds the
+  // primary "Start Quiz" CTA) ends up sitting *behind* the gesture bar on
+  // phones that have one — exactly the bug the user reported. Add
+  // insets.bottom to the sheet's paddingBottom so the CTA always clears the
+  // system UI regardless of device.
+  const insets = useSafeAreaInsets();
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
@@ -182,7 +190,13 @@ export function QuizModal({ visible, onClose, nearbyPois }: Props) {
     >
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Animated.View
-          style={[styles.sheet, { transform: [{ translateY: dragY }] }]}
+          style={[
+            styles.sheet,
+            // Add the system bottom inset on top of our static padding so the
+            // pinned footer never disappears under a gesture-nav bar.
+            { paddingBottom: Spacing.lg + insets.bottom },
+            { transform: [{ translateY: dragY }] },
+          ]}
           // Block backdrop press from firing when interacting with the sheet.
           onStartShouldSetResponder={() => true}
         >
@@ -315,17 +329,22 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.35)',
     justifyContent: 'flex-end',
   },
-  // Fixed height so the sheet always pulls up to a comfortable size — it
-  // used to use `maxHeight` which collapsed to content height on the start
-  // screen and made the sheet "barely visible".
+  // Percentage-based height so the sheet pulls up to a comfortable size on
+  // every device. `maxHeight` collapses to content size and made the sheet
+  // "barely visible" on the start screen, so we keep a hard `height` here;
+  // the bottom safe-area inset is added inline at render time so the pinned
+  // CTA never disappears under gesture-nav bars (the original bug).
   sheet: {
     height: '85%',
+    // Belt-and-braces: cap the sheet to 85vh so on very tall phones / split
+    // screens we don't grow taller than the available viewport.
+    maxHeight: Sizing.vh(90),
     backgroundColor: Colors.background,
     borderTopLeftRadius: Radii.xl,
     borderTopRightRadius: Radii.xl,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
-    paddingBottom: Spacing.xxl,
+    // paddingBottom is applied inline so we can add insets.bottom dynamically.
     ...Shadows.softFloating,
   },
   // The header strip captures the drag gesture; making it tall enough to be
