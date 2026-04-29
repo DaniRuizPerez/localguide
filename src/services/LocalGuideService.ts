@@ -279,19 +279,20 @@ function buildSingleQuizPrompt(
       `${avoidBlock}` +
       `Write exactly ONE multiple-choice question. 4 options labelled A, B, C, D. ONE correct answer. ` +
       `${QUIZ_GROUNDING_RULES}\n\n` +
-      // The 1B model is very good at copying a one-shot example shape, but
-      // it consistently dropped the trailing "Correct: <letter>" line — even
-      // with the example shown — on Pixel 3 (logcat: every retry truncated
-      // after option D). Move the correctness marker INLINE so it can't be
-      // truncated separately: tag the right option's line with [correct].
-      // The block parser accepts that annotation as the answer signal.
+      // The on-device 1B model consistently truncates after option D and
+      // drops any trailing answer marker — even an inline "[correct]" tag
+      // on the right option — observed across many runs on Pixel 3. Put
+      // the correct-letter line FIRST so it's emitted before the truncation
+      // point. The block parser already finds "Correct: <letter>"
+      // anywhere in the block.
       `Example of the exact format you must produce (do not reuse this content):\n` +
+      `Correct: B\n` +
       `Q: Which river runs through Paris?\n` +
       `A: The Thames\n` +
-      `B: The Seine [correct]\n` +
+      `B: The Seine\n` +
       `C: The Danube\n` +
       `D: The Rhine\n\n` +
-      `Now write your one question in that same five-line format. Mark exactly ONE option with " [correct]" at the end of its line; the other three must NOT be marked. No intro, no explanations, no question number, no closing remarks.`,
+      `Now write your one question in that same six-line format. The first line MUST be "Correct: <letter>" naming which of A/B/C/D is right; the next five lines are Q, A, B, C, D in order. No intro, no explanations, no question number, no closing remarks.`,
   });
 }
 
