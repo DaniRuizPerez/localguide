@@ -55,6 +55,8 @@ export const EN = {
     locationUnavailable: 'Location unavailable',
     retry: 'Retry',
     clearTrail: 'Clear trail',
+    unavailableTitle: 'Map unavailable',
+    unavailableBody: 'Add a Google Maps API key to enable the map view. Other features still work.',
   },
   download: {
     heading: 'Making a tiny brain\nfor your pocket.',

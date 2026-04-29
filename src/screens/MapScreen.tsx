@@ -106,6 +106,29 @@ export default function MapScreen({ navigation }: Props) {
 
   const initialRegion = gps ? buildRegion(gps) : undefined;
 
+  // Google Maps SDK throws IllegalStateException on a background thread when
+  // android:value="com.google.android.geo.API_KEY" is missing from the
+  // merged manifest, and that crash can't be caught by a React error
+  // boundary. Gate MapView so we render a friendly fallback instead of
+  // taking the whole app down.
+  const mapsApiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
+
+  if (!mapsApiKey) {
+    return (
+      <View style={[styles.container, styles.centered]} {...swipeBackHandlers}>
+        <Text style={[Type.h2, { color: Colors.text, textAlign: 'center', paddingHorizontal: Spacing.lg }]}>
+          {t('map.unavailableTitle')}
+        </Text>
+        <Text style={[Type.body, { color: Colors.textSecondary, textAlign: 'center', marginTop: Spacing.sm, paddingHorizontal: Spacing.lg }]}>
+          {t('map.unavailableBody')}
+        </Text>
+        <View style={{ marginTop: Spacing.lg }}>
+          <SoftButton label={t('nav.back')} onPress={goBackToChat} size="md" />
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container} {...swipeBackHandlers}>
       <MapView
