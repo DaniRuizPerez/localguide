@@ -118,6 +118,10 @@ export function useNearbyPois(
         // state flashing up while the model generates.
         const cached = llmCacheRef.current.get(cellKey);
         if (cached && Date.now() - cached.at < LLM_CACHE_TTL_MS) {
+          if (__DEV__) {
+            // eslint-disable-next-line no-console
+            console.log(`[NearbyPois] llm cache hit (${cached.pois.length})`);
+          }
           setPois(cached.pois);
           return;
         }
@@ -125,11 +129,19 @@ export function useNearbyPois(
           await llmFallbackTaskRef.current.abort();
           llmFallbackTaskRef.current = null;
         }
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.log('[NearbyPois] llm fallback start');
+        }
         const task = localGuideService.listNearbyPlaces(gps, radiusMeters);
         llmFallbackTaskRef.current = task;
         try {
           const names = await task.promise;
           if (cancelled) return;
+          if (__DEV__) {
+            // eslint-disable-next-line no-console
+            console.log(`[NearbyPois] llm fallback returned ${names.length} names`);
+          }
           const llmPois: Poi[] = names.map((name, i) => ({
             pageId: -(Date.now() + i),
             title: name,
@@ -140,8 +152,11 @@ export function useNearbyPois(
           }));
           llmCacheRef.current.set(cellKey, { at: Date.now(), pois: llmPois });
           setPois(llmPois);
-        } catch {
-          // aborted or inference error — leave pois empty
+        } catch (err) {
+          if (__DEV__) {
+            // eslint-disable-next-line no-console
+            console.warn(`[NearbyPois] llm fallback error: ${(err as Error)?.message ?? err}`);
+          }
         } finally {
           if (llmFallbackTaskRef.current === task) {
             llmFallbackTaskRef.current = null;
