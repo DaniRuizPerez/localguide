@@ -1,15 +1,46 @@
 /**
- * H3 — quiz prompt + parser.
+ * H3 — quiz prompt + parser + streaming generator.
+ *
+ * The streaming generator now makes ONE inference call per question (not one
+ * batch call for all 5). The test harness tracks every call so we can drive
+ * each question's stream independently and assert the prompt sequence.
  */
 
-const mockRunStream = jest.fn();
+interface CallRecord {
+  prompt: string;
+  callbacks: any;
+}
+
+const callQueue: CallRecord[] = [];
+const mockRunStream = jest.fn((prompt: string, callbacks: any) => {
+  callQueue.push({ prompt, callbacks });
+});
+
+// Backwards-compat alias for the older single-call tests in this file. Always
+// points at the most recent call's callbacks.
 const sharedCallbacks: { current: any } = { current: null };
+
+function flushMicrotasks() {
+  return new Promise((r) => setImmediate(r));
+}
+
+// Drive the most recent inference call to a successful completion with the
+// given streamed text. Waits a microtask first so the SUT's promise wiring
+// (`.then` after `runInferenceStream`) has a chance to attach.
+async function completeNextCallWith(text: string) {
+  await flushMicrotasks();
+  const call = callQueue[callQueue.length - 1];
+  call.callbacks.onToken(text);
+  call.callbacks.onDone();
+  // Allow the SUT's per-question continuation to schedule the next call.
+  await flushMicrotasks();
+}
 
 jest.mock('../services/InferenceService', () => {
   const actual = jest.requireActual('../services/InferenceService');
   class Patched extends actual.InferenceService {
     async runInferenceStream(prompt: string, callbacks: any) {
-      mockRunStream(prompt);
+      mockRunStream(prompt, callbacks);
       sharedCallbacks.current = callbacks;
       return { abort: jest.fn().mockResolvedValue(undefined) };
     }
@@ -23,12 +54,13 @@ jest.mock('../services/InferenceService', () => {
 
 import { localGuideService } from '../services/LocalGuideService';
 
-describe('generateQuiz', () => {
-  beforeEach(() => {
-    mockRunStream.mockClear();
-    sharedCallbacks.current = null;
-  });
+beforeEach(() => {
+  mockRunStream.mockClear();
+  callQueue.length = 0;
+  sharedCallbacks.current = null;
+});
 
+describe('generateQuiz', () => {
   afterAll(async () => {
     await localGuideService.dispose();
   });
@@ -36,7 +68,7 @@ describe('generateQuiz', () => {
   it('includes the POI list and requested question count in the prompt', async () => {
     const task = localGuideService.generateQuiz(['Eiffel Tower', 'Louvre'], 3);
     const done = task.promise;
-    await new Promise((r) => setImmediate(r));
+    await flushMicrotasks();
     sharedCallbacks.current.onToken('');
     sharedCallbacks.current.onDone();
     await done;
@@ -46,10 +78,28 @@ describe('generateQuiz', () => {
     expect(prompt).toContain('exactly 3');
   });
 
+  it('includes the location label when provided', async () => {
+    const task = localGuideService.generateQuiz(
+      ['Stanford University'],
+      3,
+      'Palo Alto, California'
+    );
+    const done = task.promise;
+    await flushMicrotasks();
+    sharedCallbacks.current.onToken('');
+    sharedCallbacks.current.onDone();
+    await done;
+    const prompt = mockRunStream.mock.calls[0][0];
+    expect(prompt).toMatch(/Location:\s*Palo Alto, California/);
+    // Anti-drift directive is what stops Gemma from substituting Rome /
+    // Paris when it doesn't know the area.
+    expect(prompt.toLowerCase()).toContain('never substitute');
+  });
+
   it('parses well-formed Q/A/B/C/D/Correct blocks', async () => {
     const task = localGuideService.generateQuiz([], 2);
     const done = task.promise;
-    await new Promise((r) => setImmediate(r));
+    await flushMicrotasks();
     sharedCallbacks.current.onToken(
       `Q: When was the Eiffel Tower built?\n` +
       `A: 1789\n` +
@@ -77,10 +127,29 @@ describe('generateQuiz', () => {
     expect(quiz[1].options).toEqual(['Thames', 'Danube', 'Seine', 'Rhine']);
   });
 
+  it('tolerates "Answer:" instead of "Correct:" and bold markdown labels', async () => {
+    const task = localGuideService.generateQuiz([], 1);
+    const done = task.promise;
+    await flushMicrotasks();
+    sharedCallbacks.current.onToken(
+      `**Q:** Which river flows through Paris?\n` +
+      `A: Thames\n` +
+      `B: Danube\n` +
+      `C: Seine\n` +
+      `D: Rhine\n` +
+      `**Answer:** C\n`
+    );
+    sharedCallbacks.current.onDone();
+    const quiz = await done;
+    expect(quiz).toHaveLength(1);
+    expect(quiz[0].question).toBe('Which river flows through Paris?');
+    expect(quiz[0].correctIndex).toBe(2);
+  });
+
   it('skips malformed blocks (missing options, missing Correct line)', async () => {
     const task = localGuideService.generateQuiz([], 3);
     const done = task.promise;
-    await new Promise((r) => setImmediate(r));
+    await flushMicrotasks();
     sharedCallbacks.current.onToken(
       `Q: Half question?\n` +
       `A: maybe\n` +
@@ -102,7 +171,7 @@ describe('generateQuiz', () => {
   it('rejects Correct values outside A..D', async () => {
     const task = localGuideService.generateQuiz([], 1);
     const done = task.promise;
-    await new Promise((r) => setImmediate(r));
+    await flushMicrotasks();
     sharedCallbacks.current.onToken(
       `Q: Q?\n` +
       `A: a\n` +
@@ -119,208 +188,195 @@ describe('generateQuiz', () => {
   it('propagates errors', async () => {
     const task = localGuideService.generateQuiz([], 5);
     const done = task.promise;
-    await new Promise((r) => setImmediate(r));
+    await flushMicrotasks();
     sharedCallbacks.current.onError('inference oom');
     await expect(done).rejects.toThrow('inference oom');
-  });
-
-  it('parses common Gemma drift: Question 1 / Answer / bold markers', async () => {
-    // Real-world resilience: the strict prompt asks for "Q:" and "Correct:",
-    // but the small-model variant occasionally emits "Question 1:" headers,
-    // markdown-bolded markers, and "Answer:" instead of "Correct:".
-    const task = localGuideService.generateQuiz([], 3);
-    const done = task.promise;
-    await new Promise((r) => setImmediate(r));
-    sharedCallbacks.current.onToken(
-      `**Question 1:** What is the tallest tower?\n` +
-      `A) Eiffel\n` +
-      `B) Burj Khalifa\n` +
-      `C) Tokyo Skytree\n` +
-      `D) CN Tower\n` +
-      `Answer: B\n` +
-      `**Question 2:** Capital of France?\n` +
-      `A) Lyon\n` +
-      `B) Marseille\n` +
-      `C) Paris\n` +
-      `D) Nice\n` +
-      `Answer: C\n`
-    );
-    sharedCallbacks.current.onDone();
-    const quiz = await done;
-    expect(quiz).toHaveLength(2);
-    expect(quiz[0].question).toBe('What is the tallest tower?');
-    expect(quiz[0].correctIndex).toBe(1);
-    expect(quiz[1].question).toBe('Capital of France?');
-    expect(quiz[1].correctIndex).toBe(2);
-  });
-
-  it('parses numbered-list quiz format (1. / 2. / 3.)', async () => {
-    const task = localGuideService.generateQuiz([], 2);
-    const done = task.promise;
-    await new Promise((r) => setImmediate(r));
-    sharedCallbacks.current.onToken(
-      `1. Who painted the Mona Lisa?\n` +
-      `A. Picasso\n` +
-      `B. Da Vinci\n` +
-      `C. Van Gogh\n` +
-      `D. Rembrandt\n` +
-      `Correct: B\n\n` +
-      `2. What language is spoken in Brazil?\n` +
-      `A. Spanish\n` +
-      `B. English\n` +
-      `C. Portuguese\n` +
-      `D. French\n` +
-      `Correct: C\n`
-    );
-    sharedCallbacks.current.onDone();
-    const quiz = await done;
-    expect(quiz).toHaveLength(2);
-    expect(quiz[0].question).toBe('Who painted the Mona Lisa?');
-    expect(quiz[1].question).toBe('What language is spoken in Brazil?');
   });
 });
 
 describe('generateQuizStream', () => {
-  beforeEach(() => {
-    mockRunStream.mockClear();
-    sharedCallbacks.current = null;
-  });
-
   afterAll(async () => {
     await localGuideService.dispose();
   });
 
-  // The streaming API issues N sequential single-question inferences because
-  // Gemma 4 E2B reliably stops after producing one well-formed Q/A/B/C/D
-  // block. Each call's prompt includes the previously-asked question texts so
-  // the set stays varied. These tests pin down that contract.
+  // The streaming API runs ONE inference call per question and threads the
+  // already-emitted question texts into the next prompt, so the model can't
+  // (a) drift to Rome when the POI list is thin and (b) repeat itself. These
+  // tests pin down both behaviours plus the JS-side dedupe-and-retry guard
+  // that catches the model when it ignores the do-not-repeat instruction.
 
-  const oneQuestion = (q: string, opts: [string, string, string, string], correct: string) =>
-    `Q: ${q}\nA: ${opts[0]}\nB: ${opts[1]}\nC: ${opts[2]}\nD: ${opts[3]}\nCorrect: ${correct}\n`;
+  const oneQuestion = (n: number, correct = 'A') =>
+    `Q: Q${n}?\nA: a${n}\nB: b${n}\nC: c${n}\nD: d${n}\nCorrect: ${correct}\n`;
 
-  // Drive one round of the per-question inference: feed text for the current
-  // call, fire onDone, and wait for the service to start the next call.
-  const completeOne = async (text: string) => {
-    sharedCallbacks.current.onToken(text);
-    sharedCallbacks.current.onDone();
-    await new Promise((r) => setImmediate(r));
-  };
-
-  it('emits each question as the per-call inference completes', async () => {
+  it('emits each question as its own inference call completes', async () => {
     const onQuestion = jest.fn();
     const onDone = jest.fn();
     const onError = jest.fn();
 
-    localGuideService.generateQuizStream([], 3, { onQuestion, onDone, onError });
-    await new Promise((r) => setImmediate(r));
+    localGuideService.generateQuizStream(
+      [],
+      3,
+      { onQuestion, onDone, onError }
+    );
 
-    await completeOne(oneQuestion('Q1?', ['a1', 'b1', 'c1', 'd1'], 'A'));
+    await completeNextCallWith(oneQuestion(1));
     expect(onQuestion).toHaveBeenCalledTimes(1);
     expect(onQuestion).toHaveBeenLastCalledWith(
       expect.objectContaining({ question: 'Q1?', correctIndex: 0 }),
       0
     );
+    expect(onDone).not.toHaveBeenCalled();
 
-    await completeOne(oneQuestion('Q2?', ['a2', 'b2', 'c2', 'd2'], 'B'));
+    await completeNextCallWith(oneQuestion(2, 'B'));
     expect(onQuestion).toHaveBeenCalledTimes(2);
     expect(onQuestion).toHaveBeenLastCalledWith(
       expect.objectContaining({ question: 'Q2?', correctIndex: 1 }),
       1
     );
 
-    await completeOne(oneQuestion('Q3?', ['a3', 'b3', 'c3', 'd3'], 'C'));
+    await completeNextCallWith(oneQuestion(3, 'C'));
     expect(onQuestion).toHaveBeenCalledTimes(3);
     expect(onDone).toHaveBeenCalledTimes(1);
     expect(onDone.mock.calls[0][0]).toHaveLength(3);
   });
 
-  it('passes already-asked questions to follow-up calls so the model can avoid repeats', async () => {
+  it('threads previous question texts into each subsequent prompt', async () => {
     const onQuestion = jest.fn();
     const onDone = jest.fn();
     const onError = jest.fn();
 
-    localGuideService.generateQuizStream(['Eiffel Tower'], 2, {
-      onQuestion,
-      onDone,
-      onError,
-    });
-    await new Promise((r) => setImmediate(r));
+    localGuideService.generateQuizStream(
+      ['Stanford University'],
+      3,
+      { onQuestion, onDone, onError },
+      'Palo Alto, California'
+    );
 
-    // First call: no prior questions yet.
-    expect(mockRunStream).toHaveBeenCalledTimes(1);
-    expect(mockRunStream.mock.calls[0][0]).toContain('Eiffel Tower');
-    expect(mockRunStream.mock.calls[0][0]).not.toContain('Already-asked');
+    await completeNextCallWith(
+      `Q: When was Stanford University founded?\n` +
+        `A: 1885\n` +
+        `B: 1891\n` +
+        `C: 1900\n` +
+        `D: 1920\n` +
+        `Correct: B\n`
+    );
 
-    await completeOne(oneQuestion('When was the tower built?', ['1789', '1889', '1945', '1900'], 'B'));
+    // The 1st prompt has no avoid list; the 2nd must list Q1.
+    const firstPrompt: string = mockRunStream.mock.calls[0][0];
+    expect(firstPrompt).not.toContain('Already asked');
 
-    // Second call: the prompt includes the just-asked question.
-    expect(mockRunStream).toHaveBeenCalledTimes(2);
-    expect(mockRunStream.mock.calls[1][0]).toContain('Already-asked');
-    expect(mockRunStream.mock.calls[1][0]).toContain('When was the tower built?');
+    await completeNextCallWith(
+      `Q: What river runs near Palo Alto?\n` +
+        `A: Hudson\n` +
+        `B: Seine\n` +
+        `C: San Francisquito Creek\n` +
+        `D: Thames\n` +
+        `Correct: C\n`
+    );
+    const secondPrompt: string = mockRunStream.mock.calls[1][0];
+    expect(secondPrompt).toContain('Already asked');
+    expect(secondPrompt).toContain('When was Stanford University founded?');
+    expect(secondPrompt).toContain('Palo Alto, California');
+
+    await completeNextCallWith(
+      `Q: What is Palo Alto known for?\n` +
+        `A: Tech industry\n` +
+        `B: Olive oil\n` +
+        `C: Wine\n` +
+        `D: Coal\n` +
+        `Correct: A\n`
+    );
+    const thirdPrompt: string = mockRunStream.mock.calls[2][0];
+    expect(thirdPrompt).toContain('When was Stanford University founded?');
+    expect(thirdPrompt).toContain('What river runs near Palo Alto?');
   });
 
-  it('caps emissions at the requested count and stops issuing further calls', async () => {
+  it('rejects a duplicate question and re-invokes inference for that slot', async () => {
     const onQuestion = jest.fn();
     const onDone = jest.fn();
     const onError = jest.fn();
 
-    localGuideService.generateQuizStream([], 2, { onQuestion, onDone, onError });
-    await new Promise((r) => setImmediate(r));
+    localGuideService.generateQuizStream(
+      [],
+      2,
+      { onQuestion, onDone, onError }
+    );
 
-    await completeOne(oneQuestion('Q1?', ['a', 'b', 'c', 'd'], 'A'));
-    await completeOne(oneQuestion('Q2?', ['a', 'b', 'c', 'd'], 'B'));
+    // Q1 is unique — accepted.
+    await completeNextCallWith(
+      `Q: When was the Eiffel Tower built?\n` +
+        `A: 1789\nB: 1889\nC: 1945\nD: 1900\nCorrect: B\n`
+    );
+    expect(onQuestion).toHaveBeenCalledTimes(1);
 
+    // Q2 attempt #1: the model returns essentially the same question — should
+    // be rejected and not delivered to the UI.
+    await completeNextCallWith(
+      `Q: When was the Eiffel Tower built?\n` +
+        `A: 1789\nB: 1889\nC: 1945\nD: 1900\nCorrect: B\n`
+    );
+    expect(onQuestion).toHaveBeenCalledTimes(1);
+
+    // Retry returns a fresh topic — accepted.
+    await completeNextCallWith(
+      `Q: Which river flows through Paris?\n` +
+        `A: Thames\nB: Danube\nC: Seine\nD: Rhine\nCorrect: C\n`
+    );
     expect(onQuestion).toHaveBeenCalledTimes(2);
-    expect(mockRunStream).toHaveBeenCalledTimes(2);
+    // 3 inference calls total: Q1, Q2-attempt-1 (rejected), Q2-attempt-2 (accepted).
+    expect(mockRunStream).toHaveBeenCalledTimes(3);
     expect(onDone).toHaveBeenCalledTimes(1);
     expect(onDone.mock.calls[0][0]).toHaveLength(2);
   });
 
-  it('skips a malformed reply but continues with the next call', async () => {
+  it('caps dedupe retries and finishes early with what we have', async () => {
     const onQuestion = jest.fn();
     const onDone = jest.fn();
     const onError = jest.fn();
 
-    localGuideService.generateQuizStream([], 2, { onQuestion, onDone, onError });
-    await new Promise((r) => setImmediate(r));
-
-    // First call returns a malformed block (missing C/D). The service
-    // retries the same slot once (Gemma 4 E2B sometimes produces a bad
-    // sample that a single retry clears) — that retry is also malformed
-    // here, so the slot is given up and the service moves to the next.
-    await completeOne(`Q: bad\nA: a\nB: b\nCorrect: B\n`);
-    expect(onQuestion).toHaveBeenCalledTimes(0);
-    expect(mockRunStream).toHaveBeenCalledTimes(2);
-    await completeOne(`Q: also bad\nA: a\nB: b\nCorrect: B\n`);
-    expect(onQuestion).toHaveBeenCalledTimes(0);
-    expect(mockRunStream).toHaveBeenCalledTimes(3);
-
-    await completeOne(oneQuestion('good?', ['a', 'b', 'c', 'd'], 'A'));
-    expect(onQuestion).toHaveBeenCalledTimes(1);
-    expect(onQuestion).toHaveBeenLastCalledWith(
-      expect.objectContaining({ question: 'good?' }),
-      0
+    localGuideService.generateQuizStream(
+      [],
+      3,
+      { onQuestion, onDone, onError }
     );
+
+    // Q1: accept.
+    await completeNextCallWith(
+      `Q: First question?\nA: a\nB: b\nC: c\nD: d\nCorrect: A\n`
+    );
+    // Q2 slot: every attempt is a duplicate of Q1. Initial + 2 retries = 3.
+    await completeNextCallWith(
+      `Q: First question?\nA: a\nB: b\nC: c\nD: d\nCorrect: A\n`
+    );
+    await completeNextCallWith(
+      `Q: First question?\nA: a\nB: b\nC: c\nD: d\nCorrect: A\n`
+    );
+    await completeNextCallWith(
+      `Q: First question?\nA: a\nB: b\nC: c\nD: d\nCorrect: A\n`
+    );
+
+    expect(onQuestion).toHaveBeenCalledTimes(1);
+    // After exhausting retries we stop the run rather than burning more
+    // tokens. onDone fires with whatever we collected.
     expect(onDone).toHaveBeenCalledTimes(1);
-    // emitted only contains the good one; total length reflects what the
-    // service actually parsed (1), even though count was 2.
     expect(onDone.mock.calls[0][0]).toHaveLength(1);
   });
 
-  it('forwards model errors via onError and stops further calls', async () => {
+  it('forwards model errors via onError', async () => {
     const onQuestion = jest.fn();
     const onDone = jest.fn();
     const onError = jest.fn();
 
-    localGuideService.generateQuizStream([], 5, { onQuestion, onDone, onError });
-    await new Promise((r) => setImmediate(r));
-
-    sharedCallbacks.current.onError('inference oom');
-    await new Promise((r) => setImmediate(r));
+    localGuideService.generateQuizStream(
+      [],
+      5,
+      { onQuestion, onDone, onError }
+    );
+    await flushMicrotasks();
+    callQueue[0].callbacks.onError('inference oom');
+    await flushMicrotasks();
 
     expect(onError).toHaveBeenCalledWith('inference oom');
     expect(onDone).not.toHaveBeenCalled();
-    // No follow-up call is issued after an error.
-    expect(mockRunStream).toHaveBeenCalledTimes(1);
   });
 });

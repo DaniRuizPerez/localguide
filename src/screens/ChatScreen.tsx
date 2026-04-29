@@ -355,7 +355,12 @@ export default function ChatScreen(props: Props) {
         location={effectiveLocation}
         nearbyPois={visiblePois}
       />
-      <QuizModal visible={quizOpen} onClose={() => setQuizOpen(false)} nearbyPois={visiblePois} />
+      <QuizModal
+        visible={quizOpen}
+        onClose={() => setQuizOpen(false)}
+        nearbyPois={visiblePois}
+        locationLabel={gps?.placeName ?? manualLocation}
+      />
     </KeyboardAvoidingView>
   );
 }

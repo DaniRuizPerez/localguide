@@ -27,11 +27,17 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   nearbyPois: Poi[];
+  /**
+   * Human-readable place label (e.g. "Palo Alto, California") used to
+   * ground the LLM. Without this the model drifts to famous landmarks
+   * elsewhere when the POI list is thin or unfamiliar.
+   */
+  locationLabel?: string | null;
 }
 
 const TARGET_QUESTIONS = 5;
 
-export function QuizModal({ visible, onClose, nearbyPois }: Props) {
+export function QuizModal({ visible, onClose, nearbyPois, locationLabel }: Props) {
   // The Modal renders edge-to-edge (under any system gesture nav). Without
   // accounting for the bottom inset, our pinned footer (which holds the
   // primary "Start Quiz" CTA) ends up sitting *behind* the gesture bar on
@@ -77,7 +83,8 @@ export function QuizModal({ visible, onClose, nearbyPois }: Props) {
           handleRef.current = null;
           setError(msg);
         },
-      }
+      },
+      locationLabel ?? undefined
     );
   };
 

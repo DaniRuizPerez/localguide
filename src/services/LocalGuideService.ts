@@ -181,17 +181,58 @@ export interface QuizStreamHandle {
   abort: () => Promise<void>;
 }
 
-function buildQuizPrompt(nearbyTitles: string[], count: number): string {
-  const placesLine = nearbyTitles.length
-    ? nearbyTitles.slice(0, 8).join(', ')
-    : '(no specific list — use any widely-known facts about this area)';
+// Strip markdown emphasis (**, *, _) Gemma sprinkles around field labels —
+// "**Q:**", "*Correct:*", etc. Run on a per-line basis before regex matching.
+function stripMarkdownEmphasis(line: string): string {
+  return line.replace(/^[*_]+/, '').replace(/[*_]+$/, '').replace(/\*\*/g, '').replace(/__/g, '');
+}
+
+// Render the location grounding line(s) shared by both the batch prompt
+// (generateQuiz) and the per-question prompt (generateQuizStream). The
+// difference between "near these places" and "in <city>" matters: when we
+// only have POI names, Gemma 3 1B/Gemma 4 E2B can drift to a famous landmark
+// elsewhere ("near Stanford" → trivia about Cambridge). The explicit
+// `Location:` line + the no-substitution rule below clamp it to the user's
+// real region.
+function quizGroundingBlock(
+  nearbyTitles: string[],
+  locationLabel: string | undefined
+): string {
+  const places = nearbyTitles.slice(0, 8);
+  const lines: string[] = [];
+  if (locationLabel && locationLabel.trim()) {
+    lines.push(`Location: ${locationLabel.trim()}`);
+  }
+  if (places.length) {
+    lines.push(`Nearby places: ${places.join(', ')}`);
+  } else {
+    lines.push('Nearby places: (no specific list — rely on the Location above)');
+  }
+  return lines.join('\n');
+}
+
+// Anti-drift directive shared by both quiz prompts. The "NEVER substitute a
+// famous landmark from a different country" line is the load-bearing one:
+// without it, Gemma reaches for Rome/Paris when it doesn't know Palo Alto.
+const QUIZ_GROUNDING_RULES =
+  `Ground every question in the Location and Nearby places above — never substitute a famous landmark or city from a different region or country. ` +
+  `If you do not have specific knowledge about the Location, ask a general-knowledge question about that country, state/province, or geography (rivers, climate, culture) that is true for the Location — NEVER about a more famous place elsewhere. ` +
+  `Use real, verifiable facts only — never invent specific names, dates, or numbers.`;
+
+function buildQuizPrompt(
+  nearbyTitles: string[],
+  count: number,
+  locationLabel?: string
+): string {
+  const grounding = quizGroundingBlock(nearbyTitles, locationLabel);
   return buildNarratorPrompt({
-    system: `You are writing a short local-trivia quiz for a visitor walking near these places: ${placesLine}.`,
+    system: `You are writing a short local-trivia quiz for a visitor.`,
     directives: [localePromptDirective()],
     extraContext:
+      `${grounding}\n\n` +
       `Write exactly ${count} multiple-choice questions. Each question has 4 options labelled A, B, C, D, and ONE correct answer. ` +
-      `Mix easy and medium difficulty. Ground questions in real, verifiable facts (history, geography, culture, architecture). ` +
-      `Never invent facts. If you are not sure about a place, use a well-established general-knowledge fact about the area.\n\n` +
+      `Mix easy and medium difficulty. Each question must cover a DIFFERENT topic (no two questions about the same place, person, or fact). ` +
+      `${QUIZ_GROUNDING_RULES}\n\n` +
       `Output strictly in this format, with a blank line between questions:\n` +
       `Q: <question>\n` +
       `A: <option>\n` +
@@ -203,93 +244,73 @@ function buildQuizPrompt(nearbyTitles: string[], count: number): string {
   });
 }
 
-// Single-question prompt used by the streaming generator. Gemma 4 E2B on a
-// Pixel 3 reliably emits EOS after one well-formed Q/A/B/C/D/Correct block,
-// so asking for "exactly 5" up front yielded only one. Generating one at a
-// time avoids that failure mode at the cost of N prefill passes — acceptable
-// because we only need 5 short ones.
-//
-// The "≤ 10 words per option" rule and explicit "≤ 80 characters" are
-// load-bearing: without them Gemma occasionally writes a multi-sentence
-// option that hits the per-call token limit before reaching B/C/D, leaving
-// the parser with nothing to parse.
-function buildSingleQuizPrompt(nearbyTitles: string[], previousQuestions: string[]): string {
-  const placesLine = nearbyTitles.length
-    ? nearbyTitles.slice(0, 8).join(', ')
-    : '(no specific list — use any widely-known facts about this area)';
-  const avoidLine = previousQuestions.length
-    ? `Already-asked topics (do NOT repeat or rephrase these):\n` +
+/**
+ * Per-question prompt used by the streaming generator. Receives the texts of
+ * questions already asked this run so we can demand a fresh topic.
+ *
+ * Why per-question: with one batch prompt the small on-device model often
+ * "echoes" the first question 5 times (we've seen identical Q1=Q2=Q3 on
+ * Pixel 3). Splitting each question into its own inference call lets us
+ * (a) inject the previous questions into the prompt as a do-not-repeat list
+ * and (b) reject and retry duplicates at the JS layer.
+ */
+function buildSingleQuizPrompt(
+  nearbyTitles: string[],
+  locationLabel: string | undefined,
+  previousQuestions: string[],
+  questionIndex: number,
+  total: number
+): string {
+  const grounding = quizGroundingBlock(nearbyTitles, locationLabel);
+  // Number the avoid-list. Listing them as "1. <text>" with an explicit
+  // "topic must be different" instruction is materially stronger than a
+  // plain "do not repeat" sentence — Gemma honours numbered constraints
+  // more reliably than freeform ones.
+  const avoidBlock = previousQuestions.length
+    ? `Already asked (your new question must be on a DIFFERENT topic — different place, person, fact, or angle — and must not repeat the wording of any of these):\n` +
       previousQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n') +
       `\n\n`
     : '';
-  // One-shot example with a concrete `Correct:` line is load-bearing for
-  // Gemma 4 E2B: when only the format spec was given, the model treated
-  // "Correct: A" as a literal value already provided and stopped after D
-  // without emitting its own Correct line. A real example pins it down.
   return buildNarratorPrompt({
-    system: `You are writing one local-trivia question for a visitor walking near these places: ${placesLine}.`,
+    system: `You are writing one local-trivia question (#${questionIndex + 1} of ${total}) for a visitor.`,
     directives: [localePromptDirective()],
     extraContext:
-      `${avoidLine}` +
-      `Write ONE multiple-choice question with 4 options labelled A, B, C, D and ONE correct answer. ` +
-      `Pick a topic different from any already-asked one above. ` +
-      `Easy or medium difficulty. Ground it in a real, verifiable fact (history, geography, culture, architecture). ` +
-      `Never invent facts. If unsure about a specific place, ask a general-knowledge question about the surrounding area or country instead.\n\n` +
-      `Length rules — strict:\n` +
-      `- Question line: at most 20 words.\n` +
-      `- Each option: at most 10 words and 80 characters. A single noun phrase or short clause, not a sentence. No explanations.\n` +
-      `- The four options must all be different.\n` +
-      `- The final line MUST be exactly "Correct:" followed by the single letter (A, B, C, or D) of the right answer. Do not stop until you have written it.\n\n` +
-      `Example of the exact format you must produce (one block, six lines):\n` +
-      `Q: When was the Eiffel Tower completed?\n` +
-      `A: 1789\n` +
-      `B: 1889\n` +
-      `C: 1945\n` +
-      `D: 1900\n` +
-      `Correct: B\n\n` +
-      `Now write your own question in the same six-line format, then stop. ` +
-      `No intro, no explanations, no second question.`,
+      `${grounding}\n\n` +
+      `${avoidBlock}` +
+      `Write exactly ONE multiple-choice question. 4 options labelled A, B, C, D. ONE correct answer. ` +
+      `${QUIZ_GROUNDING_RULES}\n\n` +
+      `Output strictly in this format and nothing else:\n` +
+      `Q: <question>\n` +
+      `A: <option>\n` +
+      `B: <option>\n` +
+      `C: <option>\n` +
+      `D: <option>\n` +
+      `Correct: A\n` +
+      `(no intro, no explanations, no question number, no closing remarks)`,
   });
 }
 
-// Recognises a "this line starts a question" header. Strict prompt asks for
-// `Q: …`, but Gemma 4 E2B sometimes drifts to `**Q:** …`, `Q1: …`,
-// `Question 1: …`, or `1. …`, so the predicate is broader than the prompt.
-const QUESTION_HEADER_RE = /^[*_`\s>]*(?:Q\s*\d*|Question\s*\d*)[.:)\]\s]|^[*_`\s>]*\d+[.):]\s+/i;
-// The trailing [*_`\s]* swallows the closing markdown bold/italic markers
-// when the header was wrapped (e.g. `**Question 1:**`).
-const QUESTION_HEADER_STRIP_RE = /^[*_`\s>]*(?:Q\s*\d*|Question\s*\d*)[.:)\]\s][*_`\s]*/i;
-const NUMBERED_HEADER_STRIP_RE = /^[*_`\s>]*\d+[.):][*_`\s]*/;
-
-function stripQuestionHeader(line: string): string {
-  if (QUESTION_HEADER_STRIP_RE.test(line)) {
-    return line.replace(QUESTION_HEADER_STRIP_RE, '').replace(/[*_`]+$/, '').trim();
-  }
-  return line.replace(NUMBERED_HEADER_STRIP_RE, '').replace(/[*_`]+$/, '').trim();
-}
-
 function parseQuizBlock(block: string): QuizQuestion | null {
-  const lines = block.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const lines = block
+    .split(/\r?\n/)
+    .map((l) => stripMarkdownEmphasis(l.trim()))
+    .filter(Boolean);
   if (lines.length < 6) return null;
-  const qLine = lines.find((l) => QUESTION_HEADER_RE.test(l));
-  const q = qLine ? stripQuestionHeader(qLine) : undefined;
+  // Tolerate a numbered prefix like "1. Q: ..." or "Question 1: ...".
+  const qLine = lines.find((l) => /^(?:\d+[.)]\s*)?(?:Q|Question)\s*\d*\s*[:.)\-]/i.test(l));
+  const q = qLine
+    ?.replace(/^(?:\d+[.)]\s*)?(?:Q|Question)\s*\d*\s*[:.)\-]\s*/i, '')
+    .trim();
   const opts: Record<string, string> = {};
   for (const letter of ['A', 'B', 'C', 'D']) {
-    // Accept "A:", "A.", "A)", and bold/markdown wrappers like "**A:**".
-    const line = lines.find((l) =>
-      new RegExp(`^[*_\\s]*${letter}[.:)]`, 'i').test(l)
-    );
+    const line = lines.find((l) => new RegExp(`^${letter}[.:)]`, 'i').test(l));
     if (!line) continue;
-    opts[letter] = line
-      .replace(new RegExp(`^[*_\\s]*${letter}[.:)]\\s*`, 'i'), '')
-      .replace(/[*_`]+$/, '')
-      .trim();
+    opts[letter] = line.replace(new RegExp(`^${letter}[.:)]\\s*`, 'i'), '').trim();
   }
-  // Accept "Correct:" or "Answer:" — both are common Gemma drifts.
-  const correctLine = lines.find((l) => /^[*_\s]*(correct|answer)\s*[:=]/i.test(l));
+  // Accept "Correct:" and the common drifts "Answer:" / "Correct answer:".
+  const correctLine = lines.find((l) => /^(correct(\s*answer)?|answer)\s*[:.\-]/i.test(l));
   const correctLetter = correctLine
-    ?.replace(/^[*_\s]*(correct|answer)\s*[:=]\s*/i, '')
-    .replace(/[*_`]+/g, '')
+    ?.replace(/^(correct(\s*answer)?|answer)\s*[:.\-]\s*/i, '')
     .trim()
     .charAt(0)
     .toUpperCase();
@@ -303,44 +324,32 @@ function parseQuizBlock(block: string): QuizQuestion | null {
   };
 }
 
-// Split a quiz response into one block per question. We split before every
-// line that starts with "Q:", because Gemma 4 E2B doesn't reliably honour the
-// "blank line between blocks" prompt rule on a Pixel 3 — when it doesn't, the
-// old blank-line splitter merged everything into a single block and only the
-// first Q ever parsed. The Q: marker is something the model cannot skip without
-// also breaking the question itself, so it's a sturdier separator.
-//
-// While streaming, the trailing block may still be growing. We classify a
-// block as `complete` when (a) another Q: follows it, or (b) it ends with a
-// blank line (the historical "Correct: X\n\n" terminator). Otherwise it goes
-// into `tail` and is held back until a final flush.
-function splitQuizBlocks(text: string): { complete: string[]; tail: string } {
-  // Split before any line that looks like a new question header. The header
-  // predicate intentionally matches the same shapes parseQuizBlock accepts.
-  const SPLIT_RE = /\r?\n(?=[*_`\s>]*(?:Q\s*\d*[.:)\]\s]|Question\s*\d*[.:)\]\s]|\d+[.):]\s))/i;
-  const parts = text.split(SPLIT_RE).filter((p) => QUESTION_HEADER_RE.test(p.trimStart()));
-  if (parts.length === 0) return { complete: [], tail: '' };
-  const last = parts[parts.length - 1];
-  const lastTerminated = /\n\s*\n\s*$/.test(last);
-  if (parts.length === 1) {
-    return lastTerminated ? { complete: [last], tail: '' } : { complete: [], tail: last };
-  }
-  const head = parts.slice(0, -1);
-  return lastTerminated
-    ? { complete: [...head, last], tail: '' }
-    : { complete: head, tail: last };
+function splitQuizBlocks(text: string): string[] {
+  return text.split(/\r?\n\s*\r?\n/);
 }
 
 function parseQuiz(text: string): QuizQuestion[] {
-  const { complete, tail } = splitQuizBlocks(text);
-  const blocks = tail ? [...complete, tail] : complete;
   const out: QuizQuestion[] = [];
-  for (const block of blocks) {
+  for (const block of splitQuizBlocks(text)) {
     const q = parseQuizBlock(block);
     if (q) out.push(q);
     if (out.length >= 10) break;
   }
   return out;
+}
+
+// Normalise a question for duplicate detection: lowercase, strip punctuation,
+// keep the first 8 words. Compares topic, not exact wording — "What year was
+// the Eiffel Tower built?" and "When was the Eiffel Tower built?" should
+// collide.
+function questionFingerprint(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 8)
+    .join(' ');
 }
 
 function buildTimelinePrompt(poiTitle: string, location: GPSContext | string | null): string {
@@ -519,132 +528,157 @@ export const localGuideService = {
 
   /**
    * Generate multiple-choice trivia questions about nearby places.
+   *
+   * Single inference call asking for all `count` questions in one prompt.
+   * Used by tests and any caller that doesn't need incremental UI.
+   * `locationLabel` (e.g. "Palo Alto, California") is injected into the
+   * prompt so the model grounds questions in the user's actual region —
+   * without it, Gemma drifts to whatever famous city it knows.
    */
-  generateQuiz(nearbyTitles: string[], count: number = 5): QuizTask {
-    const prompt = buildQuizPrompt(nearbyTitles, count);
+  generateQuiz(
+    nearbyTitles: string[],
+    count: number = 5,
+    locationLabel?: string
+  ): QuizTask {
+    const prompt = buildQuizPrompt(nearbyTitles, count, locationLabel);
     return runParsedStream(prompt, parseQuiz, { maxTokens: 700 });
   },
 
   /**
-   * Streaming variant: emits each question via `handlers.onQuestion` as soon
-   * as it has been generated. Implemented as N sequential single-question
-   * inferences because Gemma 4 E2B on a Pixel 3 reliably emits EOS after one
-   * well-formed Q/A/B/C/D/Correct block — asking for "exactly 5" up front
-   * yielded only one. Each follow-up call passes the previous question texts
-   * as a "do not repeat" list so the set stays varied.
+   * Streaming variant: makes one inference call per question and emits each
+   * via `handlers.onQuestion` as soon as it's parsed. The previous question
+   * texts are threaded into each subsequent prompt as a do-not-repeat list,
+   * and any duplicate that slips through is rejected and re-generated on
+   * the JS side (capped at MAX_DEDUPE_RETRIES per slot to avoid loops).
    *
-   * Per-call streaming still parses incrementally: once we see the next "Q:"
-   * inside a block the previous block is complete, and a final flush catches
-   * the last block. The same parser tolerates Gemma drifting to "Question 1:",
-   * "Answer:", or markdown bold wrappers around the markers.
+   * Why per-question rather than one batch prompt: on the small on-device
+   * model, a single prompt asking for 5 questions tends to (a) pad to a
+   * famous landmark when the POI list is thin and (b) repeat the first
+   * question several times. Per-question calls let us pass an explicit
+   * "already asked" list and cheaply retry duplicates.
    */
   generateQuizStream(
     nearbyTitles: string[],
     count: number,
-    handlers: QuizStreamHandlers
+    handlers: QuizStreamHandlers,
+    locationLabel?: string
   ): QuizStreamHandle {
-    const emitted: QuizQuestion[] = [];
-    let aborted = false;
-    let currentHandle: StreamHandle | null = null;
+    const MAX_DEDUPE_RETRIES = 2;
+    const TOKENS_PER_QUESTION = 200;
 
-    const runOne = (): Promise<QuizQuestion | null> => {
-      return new Promise((resolve, reject) => {
-        if (aborted) return resolve(null);
+    const emitted: QuizQuestion[] = [];
+    const fingerprints = new Set<string>();
+    let aborted = false;
+    let activeHandle: StreamHandle | null = null;
+    let activeAbortPromise: Promise<void> | null = null;
+
+    const runOne = (
+      questionIndex: number,
+      attempt: number
+    ): Promise<QuizQuestion | null> =>
+      new Promise((resolve, reject) => {
+        if (aborted) {
+          resolve(null);
+          return;
+        }
+        const previousTexts = emitted.map((e) => e.question);
         const prompt = buildSingleQuizPrompt(
           nearbyTitles,
-          emitted.map((q) => q.question)
+          locationLabel,
+          previousTexts,
+          questionIndex,
+          count
         );
         let fullText = '';
-        let settledOne = false;
-
+        let settled = false;
         inferenceService
           .runInferenceStream(
             prompt,
             {
               onToken: (delta) => {
-                if (settledOne) return;
+                if (settled) return;
                 fullText += delta;
               },
               onDone: () => {
-                if (settledOne) return;
-                settledOne = true;
-                currentHandle = null;
-                const parsed = parseQuiz(fullText);
-                const q = parsed[0] ?? null;
-                if (__DEV__ && !q) {
-                  // eslint-disable-next-line no-console
-                  console.warn(
-                    `[quiz] failed to parse single-question reply (${fullText.length} chars). Raw:\n` +
-                      fullText
-                  );
+                if (settled) return;
+                settled = true;
+                activeHandle = null;
+                // The model usually emits exactly one block; defensively
+                // pick the first parseable one in case it added padding.
+                let parsed: QuizQuestion | null = null;
+                for (const block of splitQuizBlocks(fullText)) {
+                  parsed = parseQuizBlock(block);
+                  if (parsed) break;
                 }
-                resolve(q);
+                resolve(parsed);
               },
               onError: (msg) => {
-                if (settledOne) return;
-                settledOne = true;
-                currentHandle = null;
+                if (settled) return;
+                settled = true;
+                activeHandle = null;
                 reject(new Error(msg));
               },
             },
-            // 220 was too tight: Gemma occasionally wrote a long option-A
-            // and ran out of budget before emitting B/C/D, leaving the
-            // parser with an unparseable half-block. 400 is comfortable for
-            // a Q + 4 short options + Correct line.
-            { maxTokens: 400 }
+            { maxTokens: TOKENS_PER_QUESTION }
           )
           .then((handle) => {
-            if (aborted || settledOne) {
+            if (aborted || settled) {
               handle.abort();
               return;
             }
-            currentHandle = handle;
+            activeHandle = handle;
           })
           .catch((err) => {
-            if (settledOne) return;
-            settledOne = true;
+            if (settled) return;
+            settled = true;
             reject(err instanceof Error ? err : new Error(String(err)));
           });
+        // attempt is only used for logging hooks in the future; kept on
+        // the closure so callers see the retry count if we ever expose it.
+        void attempt;
       });
-    };
 
     (async () => {
       try {
         for (let i = 0; i < count; i++) {
           if (aborted) break;
-          // Up to 2 attempts per slot. Gemma 4 E2B occasionally produces a
-          // Q + 4 options without a Correct line and then EOSes — a single
-          // retry usually clears the bad sample without doubling latency in
-          // the common case.
-          let q: QuizQuestion | null = null;
-          for (let attempt = 0; attempt < 2; attempt++) {
+          let accepted: QuizQuestion | null = null;
+          for (let attempt = 0; attempt <= MAX_DEDUPE_RETRIES; attempt++) {
             if (aborted) break;
-            q = await runOne();
-            if (q || aborted) break;
+            const candidate = await runOne(i, attempt);
+            if (!candidate) break; // parse failure — stop retrying this slot
+            const fp = questionFingerprint(candidate.question);
+            if (!fingerprints.has(fp)) {
+              accepted = candidate;
+              fingerprints.add(fp);
+              break;
+            }
+            // Duplicate: loop and retry. The next prompt will include the
+            // already-emitted question texts as the avoid list.
           }
           if (aborted) break;
-          if (q) {
-            emitted.push(q);
-            handlers.onQuestion(q, emitted.length - 1);
+          if (!accepted) {
+            // Either parse failed or all retries collided. Stop early —
+            // QuizModal will treat partial results as "done with what we have".
+            break;
           }
+          emitted.push(accepted);
+          handlers.onQuestion(accepted, emitted.length - 1);
         }
+        if (!aborted) handlers.onDone(emitted);
       } catch (err) {
-        if (!aborted) {
-          handlers.onError(err instanceof Error ? err.message : String(err));
-          return;
-        }
+        if (aborted) return;
+        handlers.onError(err instanceof Error ? err.message : String(err));
       }
-      if (!aborted) handlers.onDone(emitted);
     })();
 
     return {
       abort: async () => {
-        if (aborted) return;
+        if (aborted) return activeAbortPromise ?? Promise.resolve();
         aborted = true;
-        if (currentHandle) {
-          const h = currentHandle;
-          currentHandle = null;
-          await h.abort();
+        if (activeHandle) {
+          activeAbortPromise = activeHandle.abort();
+          await activeAbortPromise;
         }
       },
     };
