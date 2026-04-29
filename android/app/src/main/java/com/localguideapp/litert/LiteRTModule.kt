@@ -378,7 +378,14 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
             val handle = StreamHandle(
                 requestId = requestId,
                 cancel = { try { session.cancelProcess() } catch (_: Throwable) {} },
-                close = {},  // close happens in the finally block below, on this same thread.
+                // Close from inside the callback path (onDone/onError/EOS/cap)
+                // because session.generateContentStream is non-blocking on this
+                // LiteRT-LM build — it returns the moment it's queued the work.
+                // Closing in the executor's finally would race the engine and
+                // kill the session before any tokens stream (observed live: a
+                // 2 ms gap between "calling generateContentStream" and
+                // "generateContentStream returned" with zero callbacks fired).
+                close = { try { session.close() } catch (_: Throwable) {} },
             )
             activeStream.set(handle)
             promise.resolve(null)
@@ -414,9 +421,21 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
                             if (before.isNotEmpty()) emitToken(requestId, before)
                             pending.setLength(0)
                             if (activeStream.compareAndSet(handle, null)) {
-                                android.util.Log.d("LiteRTModule", "startSessionStream: EOS detected, cancelProcess+emitDone requestId=$requestId chunks=$chunksEmitted")
+                                android.util.Log.d("LiteRTModule", "startSessionStream: EOS detected, cancelProcess+emitDone+queueClose requestId=$requestId chunks=$chunksEmitted")
                                 try { session.cancelProcess() } catch (_: Throwable) {}
+                                // Emit FIRST, then queue close on the executor.
+                                // session.close() can block for tens of seconds; if we
+                                // emit-and-then-close inline JS gets a fast done
+                                // event but the engine's "session already exists"
+                                // precondition stays violated for the duration of
+                                // the close, so the very next createSession from
+                                // the next request fails with FAILED_PRECONDITION.
+                                // Queueing close on the inferenceExecutor serializes
+                                // it ahead of any future createSession task, so the
+                                // next request waits in the queue until close has
+                                // returned.
                                 emitDone(requestId)
+                                inferenceExecutor.execute { try { handle.close() } catch (_: Throwable) {} }
                             }
                             return
                         }
@@ -440,9 +459,10 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
                                 pending.setLength(0)
                             }
                             if (activeStream.compareAndSet(handle, null)) {
-                                android.util.Log.d("LiteRTModule", "startSessionStream: cap reached ($chunksEmitted>=$maxTokens), cancelProcess+emitDone requestId=$requestId")
+                                android.util.Log.d("LiteRTModule", "startSessionStream: cap reached ($chunksEmitted>=$maxTokens), cancelProcess+emitDone+queueClose requestId=$requestId")
                                 try { session.cancelProcess() } catch (_: Throwable) {}
                                 emitDone(requestId)
+                                inferenceExecutor.execute { try { handle.close() } catch (_: Throwable) {} }
                             }
                         }
                     }
@@ -454,14 +474,18 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
                             pending.setLength(0)
                         }
                         if (activeStream.compareAndSet(handle, null)) {
+                            // Emit before close, queue close on the executor — see EOS path comment.
                             emitDone(requestId)
+                            inferenceExecutor.execute { try { handle.close() } catch (_: Throwable) {} }
                         }
                     }
 
                     override fun onError(throwable: Throwable) {
                         android.util.Log.e("LiteRTModule", "startSessionStream: onError requestId=$requestId: ${throwable.message}")
                         if (activeStream.compareAndSet(handle, null)) {
+                            // Emit before close, queue close on the executor — see EOS path comment.
                             emitError(requestId, throwable.message ?: throwable.javaClass.simpleName)
+                            inferenceExecutor.execute { try { handle.close() } catch (_: Throwable) {} }
                         }
                     }
                 }
@@ -477,14 +501,15 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
                 }
                 android.util.Log.d("LiteRTModule", "startSessionStream: generateContentStream returned requestId=$requestId")
             } finally {
-                // Close on the executor thread, after generate has fully returned.
-                // This is the one-and-only place the session gets closed, which
-                // guarantees LiteRT-LM sees the close on the same thread that
-                // created the session and before the next executor task runs.
-                android.util.Log.d("LiteRTModule", "startSessionStream: finally: session.close() requestId=$requestId")
-                try { session.close() } catch (_: Throwable) {}
-                activeStream.compareAndSet(handle, null)
-                android.util.Log.d("LiteRTModule", "startSessionStream: executor task DONE requestId=$requestId")
+                // NOTE: do NOT close the session here. generateContentStream
+                // is non-blocking on this LiteRT-LM build (returns the moment
+                // it queues the work), so a finally close runs before the
+                // engine has emitted any tokens and silently kills the
+                // inference. Session close is now done from inside the
+                // callback (onDone / onError / EOS / cap path) via
+                // handle.close(), which fires AFTER the engine releases its
+                // own work on its own thread.
+                android.util.Log.d("LiteRTModule", "startSessionStream: executor task DONE (close deferred to callback) requestId=$requestId")
             }
         }
     }
@@ -627,12 +652,14 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
     private fun abortActiveStream() {
         val handle = activeStream.getAndSet(null) ?: return
         handle.cancel()
-        // handle.close is a no-op for Session streams (the executor's finally
-        // closes them on the thread that owns them — cross-thread close was
-        // what caused "FAILED_PRECONDITION: a session already exists"). For
-        // Conversation streams it still does the real close because the
-        // sendMessageAsync callback may not fire after cancel in every case
-        // and we'd otherwise leak the conversation.
+        // Both Session and Conversation streams close via handle.close() now.
+        // The Session path used to defer close to the executor's finally to
+        // keep close on the same thread (avoiding "FAILED_PRECONDITION: a
+        // session already exists") but generateContentStream turned out to be
+        // non-blocking, so the finally-close was killing inference before it
+        // could stream any tokens. cancelProcess() above tells the engine to
+        // wind down; the close that follows is safe because the engine drops
+        // its in-flight work synchronously on cancel.
         handle.close()
     }
 
