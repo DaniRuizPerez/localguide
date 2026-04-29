@@ -46,8 +46,19 @@ export interface LiteRTNativeModule {
    * `LiteRTError` on failure. Only one stream is active at a time — starting
    * a new one aborts any in-flight stream silently. Pass `imagePath` to feed
    * a photo to a multimodal model (null = text-only).
+   *
+   * `maxTokens` caps the number of streamed chunks before the native side
+   * cancels the session and emits `LiteRTDone`. Without it, prompts where
+   * Gemma fails to emit `<end_of_turn>` (small models drift on certain list
+   * tasks) run until they exhaust the model's KV cache and crash with
+   * "Maximum kv-cache size reached".
    */
-  runInferenceStream(prompt: string, requestId: string, imagePath: string | null): Promise<void>;
+  runInferenceStream(
+    prompt: string,
+    requestId: string,
+    maxTokens: number,
+    imagePath: string | null
+  ): Promise<void>;
 
   /** Aborts the currently running streaming inference, if any. */
   abortInference(): Promise<void>;

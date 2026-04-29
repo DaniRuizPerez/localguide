@@ -311,7 +311,13 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
     //                  already-preprocessed tensors; Conversation runs the vision encoder
     //                  natively when fed Content.ImageFile/ImageBytes.
     @ReactMethod
-    fun runInferenceStream(prompt: String, requestId: String, imagePath: String?, promise: Promise) {
+    fun runInferenceStream(
+        prompt: String,
+        requestId: String,
+        maxTokens: Int,
+        imagePath: String?,
+        promise: Promise,
+    ) {
         val currentEngine = engine
         if (currentEngine == null) {
             promise.reject("NOT_LOADED", "Model is not loaded")
@@ -320,10 +326,16 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
 
         abortActiveStream()
 
+        // Treat <= 0 as "unbounded" so callers (or older bundles still on the
+        // pre-cap signature) keep the previous behaviour rather than producing
+        // zero output. The reasonable cap for the on-device model is well
+        // below the engine's kv-cache size; the JS side passes the per-task
+        // budget here.
+        val cap = if (maxTokens > 0) maxTokens else Int.MAX_VALUE
         if (!imagePath.isNullOrBlank()) {
-            startConversationStream(currentEngine, prompt, requestId, imagePath, promise)
+            startConversationStream(currentEngine, prompt, requestId, cap, imagePath, promise)
         } else {
-            startSessionStream(currentEngine, prompt, requestId, promise)
+            startSessionStream(currentEngine, prompt, requestId, cap, promise)
         }
     }
 
@@ -331,6 +343,7 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
         engine: Engine,
         prompt: String,
         requestId: String,
+        maxTokens: Int,
         promise: Promise,
     ) {
         // Build inputs outside the executor so we can fail fast with a reject
@@ -376,13 +389,19 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
                     // trim it, emit what came before, cancel the session, and stop.
                     private val pending = StringBuilder()
                     private var eosSeen = false
+                    private var capReached = false
+                    // Each onNext chunk corresponds to roughly one decoded token in
+                    // LiteRT-LM's streaming callback, so chunk count is a close proxy
+                    // for token count without round-tripping through the tokenizer.
+                    private var chunksEmitted = 0
 
                     override fun onNext(response: String) {
-                        if (eosSeen) return
+                        if (eosSeen || capReached) return
                         if (activeStream.get()?.requestId != requestId) return
                         if (response.isEmpty()) return
 
                         pending.append(response)
+                        chunksEmitted += 1
 
                         val eosIdx = pending.indexOf(EOS_TOKEN)
                         if (eosIdx != -1) {
@@ -402,6 +421,23 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
                         if (safeLen > 0) {
                             emitToken(requestId, pending.substring(0, safeLen))
                             pending.delete(0, safeLen)
+                        }
+
+                        // Token cap: cancel cleanly so the engine releases the
+                        // session before kv-cache exhaustion. Without this, prompts
+                        // where Gemma fails to emit <end_of_turn> (small models
+                        // drift on certain list tasks) run until the engine raises
+                        // "Status Code: 13. Maximum kv-cache size reached".
+                        if (chunksEmitted >= maxTokens) {
+                            capReached = true
+                            if (pending.isNotEmpty()) {
+                                emitToken(requestId, pending.toString())
+                                pending.setLength(0)
+                            }
+                            if (activeStream.compareAndSet(handle, null)) {
+                                try { session.cancelProcess() } catch (_: Throwable) {}
+                                emitDone(requestId)
+                            }
                         }
                     }
 
@@ -444,6 +480,7 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
         engine: Engine,
         prompt: String,
         requestId: String,
+        maxTokens: Int,
         imagePath: String,
         promise: Promise,
     ) {
@@ -482,11 +519,24 @@ class LiteRTModule(reactContext: ReactApplicationContext) : ReactContextBaseJava
             // MessageCallback.onMessage fires per-chunk with the incremental delta
             // (not the cumulative message), so emit extractText(message) directly.
             val callback = object : MessageCallback {
+                private var chunksEmitted = 0
+                private var capReached = false
+
                 override fun onMessage(message: Message) {
+                    if (capReached) return
                     if (activeStream.get()?.requestId != requestId) return
                     val delta = extractText(message)
                     if (delta.isNotEmpty()) {
                         emitToken(requestId, delta)
+                        chunksEmitted += 1
+                        if (chunksEmitted >= maxTokens) {
+                            capReached = true
+                            if (activeStream.compareAndSet(handle, null)) {
+                                try { conversation.cancelProcess() } catch (_: Throwable) {}
+                                handle.close()
+                                emitDone(requestId)
+                            }
+                        }
                     }
                 }
 

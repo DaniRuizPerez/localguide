@@ -134,7 +134,13 @@ export class InferenceService {
     });
 
     try {
-      await LiteRTModule.runInferenceStream(prompt, requestId, options.imagePath ?? null);
+      const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
+      await LiteRTModule.runInferenceStream(
+        prompt,
+        requestId,
+        maxTokens,
+        options.imagePath ?? null
+      );
     } catch (err) {
       if (!settled) {
         settled = true;
