@@ -284,12 +284,16 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.35)',
     justifyContent: 'flex-end',
   },
+  // Match QuizModal exactly: an explicit `height: '85%'` forces the sheet
+  // up to the same height regardless of content; without it the itinerary
+  // sheet collapsed to content size and felt sluggish/short on tall
+  // phones. The `maxHeight: Sizing.vh(90)` belt-and-braces guards against
+  // the sheet growing past the viewport on split screen / very tall
+  // devices. paddingBottom is applied inline (insets.bottom) so the CTA
+  // never disappears under gesture-nav.
   sheet: {
-    // Percentage-of-viewport caps so the sheet adapts to phone size; bottom
-    // padding is added inline at render time using `useSafeAreaInsets()` so
-    // the trailing CTA never disappears under gesture-nav.
-    maxHeight: Sizing.vh(85),
-    minHeight: Sizing.vh(40),
+    height: '85%',
+    maxHeight: Sizing.vh(90),
     backgroundColor: Colors.background,
     borderTopLeftRadius: Radii.xl,
     borderTopRightRadius: Radii.xl,
