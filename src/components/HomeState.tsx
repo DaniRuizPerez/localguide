@@ -149,9 +149,33 @@ export function HomeState({
         )
       ) : (
         <View style={styles.poiList}>
-          {poiList.map((p) => (
-            <PoiRow key={p.pageId} poi={p} onPress={() => onNarratePoi(p)} disabled={disabled} />
-          ))}
+          {(() => {
+            // Split into real (geo/wikipedia) vs. LLM-suggested. Drop a
+            // labeled divider between the two groups so the user can tell
+            // at a glance which rows are verifiable and which are
+            // AI-suggested. Order is preserved within each group.
+            const realPois = poiList.filter((p) => p.source !== 'llm');
+            const aiPois = poiList.filter((p) => p.source === 'llm');
+            return (
+              <>
+                {realPois.map((p) => (
+                  <PoiRow key={p.pageId} poi={p} onPress={() => onNarratePoi(p)} disabled={disabled} />
+                ))}
+                {aiPois.length > 0 && (
+                  <View style={styles.aiDivider}>
+                    <View style={styles.aiDividerLine} />
+                    <Text style={styles.aiDividerText}>
+                      {t('home.aiHallucinationDivider')}
+                    </Text>
+                    <View style={styles.aiDividerLine} />
+                  </View>
+                )}
+                {aiPois.map((p) => (
+                  <PoiRow key={p.pageId} poi={p} onPress={() => onNarratePoi(p)} disabled={disabled} />
+                ))}
+              </>
+            );
+          })()}
         </View>
       )}
 
@@ -398,6 +422,28 @@ const styles = StyleSheet.create({
   poiWarnText: {
     ...Type.chip,
     color: Colors.error,
+  },
+  // Divider that visually separates verifiable (geo/wikipedia) POIs from
+  // AI-generated suggestions. The disclaimer sits inline between two
+  // hairline rules so it reads as a section header rather than a
+  // floating warning.
+  aiDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.xs,
+    paddingHorizontal: 4,
+  },
+  aiDividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: Colors.borderLight,
+  },
+  aiDividerText: {
+    ...Type.bodySm,
+    color: Colors.textTertiary,
+    fontStyle: 'italic',
   },
   emptyHint: {
     flexDirection: 'row',

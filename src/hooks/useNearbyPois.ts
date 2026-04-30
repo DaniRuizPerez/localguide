@@ -181,6 +181,21 @@ export function useNearbyPois(
         const llmFillCount = TARGET_COUNT - sorted.length;
         if (llmFillCount <= 0) return;
 
+        // Gate the LLM fallback on having a usable place name. Without it,
+        // both the listNearbyPlaces prompt AND the verify prompt drop the
+        // city anchor and we get generic East-Coast hallucinations
+        // ("Lake George", "Lake Erie"). The hook will re-run once
+        // reverse geocoding lands placeName (it's in the deps array).
+        if (!gps.placeName) {
+          if (__DEV__) {
+            // eslint-disable-next-line no-console
+            console.log(
+              '[NearbyPois] skipping LLM fallback — placeName not yet resolved by geocoder; will retry on next render'
+            );
+          }
+          return;
+        }
+
         if (__DEV__) {
           // eslint-disable-next-line no-console
           console.log(
@@ -316,7 +331,7 @@ export function useNearbyPois(
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gps && gps.latitude.toFixed(2), gps && gps.longitude.toFixed(2), radiusMeters, hiddenGems, offline]);
+  }, [gps && gps.latitude.toFixed(2), gps && gps.longitude.toFixed(2), gps?.placeName, radiusMeters, hiddenGems, offline]);
 
   return { pois, loading };
 }

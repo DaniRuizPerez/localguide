@@ -124,7 +124,8 @@ export const EN = {
     aiDisclaimer: 'AI-generated — some answers may be inaccurate.',
   },
   home: {
-    aiHallucinationBadge: 'AI · may be off',
+    aiHallucinationBadge: 'AI Generated',
+    aiHallucinationDivider: 'AI-generated suggestions — may not be in your area',
     youreIn: 'You\'re in {place}.',
     youreHere: 'You\'re here.',
     wantToWander: 'Want to wander?',
