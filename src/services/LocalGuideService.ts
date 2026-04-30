@@ -148,6 +148,13 @@ function parsePlaceList(text: string): string[] {
       if (line.length > 60) return false;
       if (/[.!?]$/.test(line) && line.split(' ').length > 5) return false;
       if (/^(here|sure|okay|ok|sorry|i )/i.test(line)) return false;
+      // Reject digit-only / phone-number / coordinate-style garbage. When the
+      // 1B model hits its token cap mid-thought it sometimes emits sequences
+      // like "125-677-6666" or "37.4232, -122.1494" — neither passes the
+      // "is this a place name" sniff test. A real place name always
+      // contains at least one letter (Latin or Unicode), so anchor on that.
+      // \p{L} covers letters in any script (Stanford, München, 京都, etc.).
+      if (!/\p{L}/u.test(line)) return false;
       const key = line.toLowerCase();
       if (seen.has(key)) return false;
       seen.add(key);

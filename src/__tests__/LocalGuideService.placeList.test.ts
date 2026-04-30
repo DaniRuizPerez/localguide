@@ -85,6 +85,23 @@ describe('parsePlaceList — markdown bold stripping', () => {
     const names = await donePromise;
     expect(names).toEqual(['Palo Alto Art Center', 'Stanford University']);
   });
+
+  it('rejects digit-only / phone-number / coordinate-style garbage', async () => {
+    // The 1B model occasionally emits sequences like "125-677-6666" or
+    // "37.4232, -122.1494" when it hits the token cap mid-thought. Without
+    // a letter-presence check, parsePlaceList passed those straight through
+    // and the home screen rendered them as place names.
+    const task = localGuideService.listNearbyPlaces({ latitude: 37.44, longitude: -122.14 });
+    const donePromise = task.promise;
+    await completeWith(
+      '125-677-6666\n' +
+      '37.4232, -122.1494\n' +
+      '12345\n' +
+      'Stanford University\n'
+    );
+    const names = await donePromise;
+    expect(names).toEqual(['Stanford University']);
+  });
 });
 
 describe('listNearbyPlaces — city grounding in prompt', () => {
