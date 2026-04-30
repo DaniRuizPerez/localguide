@@ -885,6 +885,16 @@ export const localGuideService = {
           // eslint-disable-next-line no-console
           console.log(`[Quiz] slot ${i}: accepted, emitting q="${accepted.question.slice(0, 40)}"`);
           handlers.onQuestion(accepted, emitted.length - 1);
+          // Explicit handoff log: confirms the preload pipeline. The next
+          // slot's runOne will be entered on the very next iteration of this
+          // for-loop, BEFORE the user has had a chance to interact with
+          // the question we just emitted. If you're trying to verify
+          // preload behavior in logcat, look for this line followed
+          // shortly by "[Quiz] slot N+1 attempt 0: calling runOne".
+          if (i + 1 < count) {
+            // eslint-disable-next-line no-console
+            console.log(`[Quiz] PRELOAD slot ${i + 1} starting NOW while user reviews Q${i + 1}`);
+          }
         }
         // eslint-disable-next-line no-console
         console.log(`[Quiz] driver loop done: emitted=${emitted.length}`);
