@@ -251,7 +251,11 @@ function PoiRow({ poi, onPress, disabled }: { poi: Poi; onPress: () => void; dis
           </Text>
         ) : null}
       </View>
-      {isLlm ? null : (
+      {isLlm ? (
+        <View style={styles.poiWarnBadge}>
+          <Text style={styles.poiWarnText}>{t('home.aiHallucinationBadge')}</Text>
+        </View>
+      ) : (
         <View style={styles.poiDistanceBadge}>
           <Text style={styles.poiDistanceText}>{formatDistance(poi.distanceMeters)}</Text>
         </View>
@@ -380,6 +384,20 @@ const styles = StyleSheet.create({
   poiDistanceText: {
     ...Type.chip,
     color: Colors.primaryDark,
+  },
+  // Warning badge for LLM-sourced suggestions: same shape as distance badge
+  // but in a clearly different colour (warning amber-ish — uses
+  // Colors.error's surface so it stands out against the soft primary
+  // backdrop). Tells the user the row may be hallucinated.
+  poiWarnBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radii.sm,
+    backgroundColor: Colors.errorLight,
+  },
+  poiWarnText: {
+    ...Type.chip,
+    color: Colors.error,
   },
   emptyHint: {
     flexDirection: 'row',

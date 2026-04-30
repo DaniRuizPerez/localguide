@@ -24,6 +24,27 @@ interface LlmCacheEntry {
 }
 
 const LLM_CACHE_TTL_MS = 10 * 60 * 1000;
+// Target number of "Around you" rows. We always show all real (geo /
+// Wikipedia) results we got and only top up with LLM-sourced suggestions
+// to reach this count. 6 matches the quiz + listNearbyPlaces conventions.
+const TARGET_COUNT = 6;
+
+/**
+ * Append `extras` to `base` skipping anything whose title (case-insensitive)
+ * already appears in base. Used to merge real geo POIs with LLM-suggested
+ * ones without duplicates.
+ */
+function mergeUnique(base: Poi[], extras: Poi[]): Poi[] {
+  const seen = new Set(base.map((p) => p.title.toLowerCase().trim()));
+  const out = [...base];
+  for (const extra of extras) {
+    const key = extra.title.toLowerCase().trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(extra);
+  }
+  return out;
+}
 
 /**
  * Fetch nearby POIs for the current GPS fix. Prefers Wikipedia (real coords,
@@ -148,27 +169,33 @@ export function useNearbyPois(
         if (__DEV__) {
           // eslint-disable-next-line no-console
           console.log(
-            `[NearbyPois] wikipedia raw=${raw.length} after-radius=${sorted.length}`
+            `[NearbyPois] geo+wikipedia raw=${raw.length} after-radius=${sorted.length} target=${TARGET_COUNT}`
           );
         }
 
-        if (sorted.length > 0) {
-          setPois(sorted);
-          return;
+        // We always show whatever the geo path produced first — those names
+        // are real and verified. Then if the list is short of TARGET_COUNT,
+        // top it up with LLM-sourced suggestions (clearly labeled). When
+        // geo returned 0 we skip straight to the LLM.
+        if (sorted.length > 0) setPois(sorted);
+        const llmFillCount = TARGET_COUNT - sorted.length;
+        if (llmFillCount <= 0) return;
+
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.log(
+            `[NearbyPois] geo short ${sorted.length}/${TARGET_COUNT} — asking LLM for ${llmFillCount} more`
+          );
         }
 
-        // Wikipedia gave us nothing (offline mode, offline network, or simply
-        // no matching articles) — fall through to the on-device LLM. We keep
-        // `loading` true through this path so the user sees a single "looking
-        // around you" state instead of the misleading "walk around" empty
-        // state flashing up while the model generates.
         const cached = llmCacheRef.current.get(cellKey);
         if (cached && Date.now() - cached.at < LLM_CACHE_TTL_MS) {
           if (__DEV__) {
             // eslint-disable-next-line no-console
             console.log(`[NearbyPois] llm cache hit (${cached.pois.length})`);
           }
-          setPois(cached.pois);
+          // Combine geo (real) + cached LLM (warning), dedupe by title.
+          setPois(mergeUnique(sorted, cached.pois.slice(0, llmFillCount)));
           return;
         }
         if (llmFallbackTaskRef.current) {
@@ -179,16 +206,8 @@ export function useNearbyPois(
           // eslint-disable-next-line no-console
           console.log('[NearbyPois] llm fallback start');
         }
-        // Up to 2 LLM attempts per cell. With maxTokens=256 the model
-        // usually returns a usable list on the first try; the second
-        // attempt only kicks in if the response was empty (e.g. the
-        // parsePlaceList letter-presence filter stripped everything to
-        // zero because the model emitted a digit-only line). More than
-        // 2 attempts isn't worth it — by the time we've spent ~70 s on
-        // two failed tries, the user has long since assumed the feature
-        // is broken.
         let attempt = 0;
-        let llmPois: Poi[] = [];
+        let candidateNames: string[] = [];
         while (attempt < 2 && !cancelled) {
           if (attempt > 0 && __DEV__) {
             // eslint-disable-next-line no-console
@@ -203,15 +222,10 @@ export function useNearbyPois(
               // eslint-disable-next-line no-console
               console.log(`[NearbyPois] llm fallback returned ${names.length} names (attempt ${attempt})`);
             }
-            llmPois = names.map((name, i) => ({
-              pageId: -(Date.now() + i),
-              title: name,
-              latitude: gps.latitude,
-              longitude: gps.longitude,
-              distanceMeters: 0,
-              source: 'llm' as const,
-            }));
-            if (llmPois.length > 0) break;
+            if (names.length > 0) {
+              candidateNames = names;
+              break;
+            }
           } catch (err) {
             if (__DEV__) {
               // eslint-disable-next-line no-console
@@ -222,19 +236,69 @@ export function useNearbyPois(
           attempt += 1;
         }
         if (cancelled) return;
-        // Skip caching empty results: when Gemma drifts on a single call
-        // (every-line filtered out by parsePlaceList, or simply produced
-        // nothing) we'd otherwise pin the user to "[]" for the full
-        // LLM_CACHE_TTL_MS even if the very next call would have come back
-        // with real names. Also skip the setPois call when empty — that
-        // keeps any previously-good list on screen instead of flashing
-        // empty when the model has a bad run; the cache TTL handles
-        // staleness on its own once the user moves to a new cell.
+        llmFallbackTaskRef.current = null;
+
+        if (candidateNames.length === 0) return;
+
+        // Self-verification step: ask the model whether each candidate is
+        // actually in/near the user's location. Drops obvious out-of-region
+        // hallucinations ("Mont Saint-Michel" for Palo Alto) before we ever
+        // show them. Skipped when we have no place name to ground against.
+        const locationLabel = gps.placeName ?? '';
+        let acceptedNames = candidateNames;
+        if (locationLabel) {
+          if (__DEV__) {
+            // eslint-disable-next-line no-console
+            console.log(
+              `[NearbyPois] verify ${candidateNames.length} candidates against "${locationLabel}": ${candidateNames.join(', ')}`
+            );
+          }
+          try {
+            const verifyTask = localGuideService.verifyNearbyPlaces(candidateNames, locationLabel);
+            llmFallbackTaskRef.current = verifyTask as unknown as ListPlacesTask;
+            acceptedNames = await verifyTask.promise;
+            llmFallbackTaskRef.current = null;
+            if (cancelled) return;
+            if (__DEV__) {
+              // eslint-disable-next-line no-console
+              console.log(
+                `[NearbyPois] verify accepted ${acceptedNames.length}/${candidateNames.length}: ${acceptedNames.join(', ')}`
+              );
+            }
+          } catch (err) {
+            if (__DEV__) {
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[NearbyPois] verify error: ${(err as Error)?.message ?? err} — falling back to unverified list`
+              );
+            }
+            // On verify failure, keep the unverified list rather than blank
+            // the user. The UI warning already tells them these may be
+            // hallucinated.
+            llmFallbackTaskRef.current = null;
+          }
+        }
+
+        const llmPois: Poi[] = acceptedNames.slice(0, llmFillCount).map((name, i) => ({
+          pageId: -(Date.now() + i),
+          title: name,
+          latitude: gps.latitude,
+          longitude: gps.longitude,
+          distanceMeters: 0,
+          source: 'llm' as const,
+        }));
+
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.log(
+            `[NearbyPois] final llm fill ${llmPois.length} (cap=${llmFillCount}): ${llmPois.map((p) => p.title).join(', ')}`
+          );
+        }
+
         if (llmPois.length > 0) {
           llmCacheRef.current.set(cellKey, { at: Date.now(), pois: llmPois });
-          setPois(llmPois);
         }
-        llmFallbackTaskRef.current = null;
+        setPois(mergeUnique(sorted, llmPois));
       })
       .catch((err) => {
         // fetchNearbyStreaming should swallow its own errors, but a stray

@@ -59,10 +59,10 @@ const RATE_STEP = 0.05;
 // The radii the UI exposes as segmented options. Keep in sync with the
 // inner clamp in poiService.fetchNearby (10..10000).
 const RADIUS_OPTIONS: Array<{ label: string; meters: number }> = [
-  { label: '500m', meters: 500 },
   { label: '1km', meters: 1000 },
   { label: '2km', meters: 2000 },
   { label: '5km', meters: 5000 },
+  { label: '10km', meters: 10000 },
 ];
 
 function formatRate(rate: number): string {

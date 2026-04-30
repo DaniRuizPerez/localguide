@@ -62,7 +62,7 @@ export default function ChatScreen(props: Props) {
     return initial ? [initial] : ['everything'];
   });
   const [speakResponses, setSpeakResponses] = useState(true);
-  const [poiRadiusMeters, setPoiRadiusMeters] = useState(1000);
+  const [poiRadiusMeters, setPoiRadiusMeters] = useState(5000);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [itineraryOpen, setItineraryOpen] = useState(false);
   const [quizOpen, setQuizOpen] = useState(false);

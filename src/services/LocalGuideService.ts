@@ -710,6 +710,71 @@ export const localGuideService = {
     return runParsedStream(prompt, parse, { maxTokens: 256 });
   },
 
+  /**
+   * Ask the model to self-verify a candidate list: "Are these places really
+   * in/near <city>?". Returns the subset of names the model marks as YES.
+   * Used as a sanity check after listNearbyPlaces / before showing
+   * LLM-sourced suggestions to the user, so we don't display obvious
+   * out-of-region hallucinations (e.g. "Mont Saint-Michel" for Palo Alto).
+   *
+   * Format: the model is asked for one line per input place, "YES" or "NO".
+   * We map back to names by index. If the response is unparseable we err
+   * on the side of dropping the entry — better to show a shorter list than
+   * to leak hallucinations through.
+   */
+  verifyNearbyPlaces(
+    candidates: string[],
+    locationLabel: string
+  ): AbortableTask<string[]> {
+    if (candidates.length === 0) {
+      // Nothing to verify — fast-path.
+      return {
+        promise: Promise.resolve([]),
+        abort: async () => {},
+      };
+    }
+    const numbered = candidates.map((c, i) => `${i + 1}. ${c}`).join('\n');
+    const prompt = buildNarratorPrompt({
+      system: 'You are a knowledgeable local guide.',
+      extraContext:
+        `For each candidate place below, answer YES if it is genuinely in or very close to ${locationLabel}, ` +
+        `or NO if it is not (e.g. it is in a different city, region, or country, or it doesn't really exist).\n\n` +
+        `Candidates:\n${numbered}\n\n` +
+        `Output exactly ${candidates.length} lines, one per candidate, in the same order. ` +
+        `Each line is just "YES" or "NO" — no explanations, no extra text.`,
+    });
+    const parse = (raw: string): string[] => {
+      // Pull YES/NO tokens in order. The model sometimes wraps them with
+      // numbering ("1. YES", "1) NO") or quotes; tolerate both.
+      const verdicts = raw
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .map((line) => line.replace(/^[\s*•\-–—\d.()\s]+/, '').trim())
+        .map((line) => line.toUpperCase())
+        .filter((line) => line === 'YES' || line === 'NO');
+      const accepted: string[] = [];
+      for (let i = 0; i < candidates.length; i++) {
+        if (verdicts[i] === 'YES') accepted.push(candidates[i]);
+      }
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[NearbyPlaces] verify '${locationLabel}': in=${candidates.length} ` +
+            `verdicts=[${verdicts.join(',')}] accepted=${accepted.length}`
+        );
+        if (accepted.length === 0) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[NearbyPlaces] verify rejected ALL candidates; raw verdict text:\n${raw.slice(0, 400)}`
+          );
+        }
+      }
+      return accepted;
+    };
+    // Verifier output is tiny (one YES/NO per line); cap is forgiving.
+    return runParsedStream(prompt, parse, { maxTokens: 96, priority: 'low' });
+  },
+
   async ask(
     userQuery: string,
     location: GPSContext | string,
