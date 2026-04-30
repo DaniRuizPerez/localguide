@@ -121,6 +121,7 @@ export const EN = {
     openButton: 'Trivia',
     progress: 'Question {current} of {total}',
     empty: 'Could not generate a quiz for this area offline — try a more landmark-dense spot.',
+    aiDisclaimer: 'AI-generated — some answers may be inaccurate.',
   },
   home: {
     youreIn: 'You\'re in {place}.',

@@ -227,7 +227,13 @@ function quizGroundingBlock(
 // without it, Gemma reaches for Rome/Paris when it doesn't know Palo Alto.
 const QUIZ_GROUNDING_RULES =
   `Ground every question in the Location and Nearby places above — never substitute a famous landmark or city from a different region or country. ` +
-  `If you do not have specific knowledge about the Location, ask a general-knowledge question about that country, state/province, or geography (rivers, climate, culture) that is true for the Location — NEVER about a more famous place elsewhere. ` +
+  // Confidence rule + widening cascade. The 1B on-device model is not great
+  // at calibration, but this nudge moves the failure mode from "invent a
+  // detail about X" to "fall back to a fact about the broader region",
+  // which is far less wrong. Order matters: try the user's specific place
+  // first, then concentric supersets, ending at US-level general knowledge
+  // that is almost certainly true.
+  `Only ask about facts you are highly confident are correct. If you are not sure of a specific detail about the Location, widen the scope step by step until you reach a fact you are confident about: the immediate place → its surrounding metro area (e.g. Bay Area for Palo Alto) → the larger region (Northern California) → the state/province → the country. Never invent details to keep the question local. ` +
   `Use real, verifiable facts only — never invent specific names, dates, or numbers.`;
 
 function buildQuizPrompt(
@@ -317,7 +323,7 @@ function buildSingleQuizPrompt(
     ? `\nDo NOT repeat or paraphrase the previous question: "${lastQuestion}". Pick a different fact within the topic above.`
     : '';
   const locationGuard = locationLabel
-    ? `The question MUST be specifically about ${locationLabel} (or its surrounding region) — never a generic question that could apply to any city. `
+    ? `Aim the question at ${locationLabel} first. If you don't know a confident fact at that scale, widen to the surrounding metro / region / state / country (in that order) — never a generic worldwide question. `
     : '';
   return buildNarratorPrompt({
     system: `You are writing one local-trivia question (#${questionIndex + 1} of ${total}) for a visitor.`,

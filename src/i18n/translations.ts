@@ -94,6 +94,7 @@ const ES: Partials = {
     generating: 'Escribiendo preguntas…',
     nextButton: 'Siguiente',
     scoreLine: 'Acertaste {correct} de {total}',
+    aiDisclaimer: 'Generado por IA — algunas respuestas pueden no ser exactas.',
   },
   topics: {
     everything: 'Todo',
@@ -188,6 +189,7 @@ const FR: Partials = {
     generating: 'Écriture des questions…',
     nextButton: 'Suivant',
     scoreLine: 'Tu as trouvé {correct} sur {total}',
+    aiDisclaimer: 'Généré par IA — certaines réponses peuvent être inexactes.',
   },
   topics: {
     everything: 'Tout',

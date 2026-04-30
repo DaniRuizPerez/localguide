@@ -227,6 +227,7 @@ export function QuizModal({ visible, onClose, nearbyPois, locationLabel }: Props
           <View style={styles.handleArea} {...dragResponder.panHandlers}>
             <View style={styles.handle} />
             <Text style={styles.heading}>{t('quiz.title')}</Text>
+            <Text style={styles.disclaimer}>{t('quiz.aiDisclaimer')}</Text>
           </View>
 
           <ScrollView
@@ -388,7 +389,17 @@ const styles = StyleSheet.create({
   heading: {
     ...Type.h1,
     color: Colors.text,
+    marginBottom: 4,
+  },
+  // AI-generated content warning shown directly below the title. Kept small
+  // and tertiary-colored so it doesn't compete with the question itself,
+  // but visible from the moment the sheet opens so the user sees it before
+  // they start grading their score against the model.
+  disclaimer: {
+    ...Type.bodySm,
+    color: Colors.textTertiary,
     marginBottom: Spacing.md,
+    fontStyle: 'italic',
   },
   scroll: {
     flex: 1,
