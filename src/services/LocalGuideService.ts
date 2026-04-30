@@ -620,7 +620,9 @@ function buildItineraryPrompt(
   const optionList = nearbyTitles.length
     ? nearbyTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')
     : '(no list available — choose what makes sense near this place)';
-  const count = durationHours <= 1.5 ? 3 : durationHours <= 5 ? 5 : 7;
+  // Scale up monotonically: more time → more stops.
+  // 1 h ≤ 1.5 h → 3 stops, half-day (≤ 5 h) → 5 stops, full-day → 8 stops.
+  const count = durationHours <= 1.5 ? 3 : durationHours <= 5 ? 5 : 8;
   const placeRef =
     typeof location === 'string' ? location : location.placeName ?? formatCoordinates(location);
   return buildNarratorPrompt({
@@ -638,7 +640,7 @@ function buildItineraryPrompt(
   });
 }
 
-function parseItinerary(text: string): ItineraryStop[] {
+function parseItinerary(text: string, maxStops: number = 10): ItineraryStop[] {
   const stops: ItineraryStop[] = [];
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
@@ -658,7 +660,7 @@ function parseItinerary(text: string): ItineraryStop[] {
       if (title) stops.push({ title, note: '' });
     }
   }
-  return stops.slice(0, 10);
+  return stops.slice(0, maxStops);
 }
 
 export const localGuideService = {
@@ -816,18 +818,20 @@ export const localGuideService = {
     durationHours: number,
     nearbyTitles: string[] = []
   ): ItineraryTask {
+    // Derive the same stop count used in the prompt so JS enforces the cap
+    // even when the model ignores the instruction and emits more lines.
+    // 1 h ≤ 1.5 h → 3 stops, half-day (≤ 5 h) → 5 stops, full-day → 8.
+    const maxStops = durationHours <= 1.5 ? 3 : durationHours <= 5 ? 5 : 8;
     const prompt = buildItineraryPrompt(location, durationHours, nearbyTitles);
     // Low priority so the auto-fired plan-my-day generation yields to the
     // around-you list and any user-initiated guide query — the user opening
     // the sheet is a hint, not a commitment, and they should never wait
     // because background work hogged the model.
-    // maxTokens scales with stop count: 7 stops × ~50 tokens for "Name —
-    // reason" lines ≈ 350, plus any preamble the model leaks before the
-    // first numbered line. 400 was tight for full-day plans (count=7) and
-    // truncated mid-list — full-day showed half the stops of half-day.
-    // 700 is safely past the worst-case length while still capping run
-    // time at ~30 s on Pixel 3.
-    return runParsedStream(prompt, parseItinerary, { maxTokens: 700, priority: 'low' });
+    // maxTokens scales with stop count: 8 stops × ~50 tokens for "Name —
+    // reason" lines ≈ 400, plus any preamble the model leaks before the
+    // first numbered line. 700 is safely past the worst-case length while
+    // still capping run time at ~30 s on Pixel 3.
+    return runParsedStream(prompt, (text) => parseItinerary(text, maxStops), { maxTokens: 700, priority: 'low' });
   },
 
   /**

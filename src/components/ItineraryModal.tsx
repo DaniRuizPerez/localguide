@@ -68,10 +68,52 @@ export function ItineraryModal({ visible, onClose, location, nearbyPois }: Props
 
   const stops = plans.get(duration) ?? [];
 
-  const nearbyTitles = useMemo(
-    () => nearbyPois.map((p) => p.title).slice(0, 12),
-    [nearbyPois]
-  );
+  // Nearest-neighbor ordering of POIs from the user's start position.
+  // At each step we pick the unvisited POI closest to the current position,
+  // which eliminates obvious backtracking (e.g. A → C → B when B sits
+  // between A and C geographically). We only do this for POIs with real
+  // coordinates (source !== 'llm'); LLM-sourced entries keep their original
+  // order at the end because they carry placeholder coords.
+  const nearbyTitles = useMemo(() => {
+    // Split into real-coord POIs (can be route-optimised) and LLM stubs.
+    const realPois = nearbyPois.filter((p) => p.source !== 'llm');
+    const llmPois = nearbyPois.filter((p) => p.source === 'llm');
+
+    // Determine start lat/lon from the GPSContext if available.
+    const startLat =
+      location && typeof location !== 'string' ? location.latitude : null;
+    const startLon =
+      location && typeof location !== 'string' ? location.longitude : null;
+
+    let ordered: Poi[];
+    if (startLat !== null && startLon !== null && realPois.length > 1) {
+      // Nearest-neighbor greedy TSP from the user's position.
+      const remaining = [...realPois];
+      ordered = [];
+      let curLat = startLat;
+      let curLon = startLon;
+      while (remaining.length > 0) {
+        let bestIdx = 0;
+        let bestDist = distanceMeters(curLat, curLon, remaining[0].latitude, remaining[0].longitude);
+        for (let i = 1; i < remaining.length; i++) {
+          const d = distanceMeters(curLat, curLon, remaining[i].latitude, remaining[i].longitude);
+          if (d < bestDist) {
+            bestDist = d;
+            bestIdx = i;
+          }
+        }
+        const chosen = remaining.splice(bestIdx, 1)[0];
+        ordered.push(chosen);
+        curLat = chosen.latitude;
+        curLon = chosen.longitude;
+      }
+    } else {
+      // No GPS context or only one real POI — keep original distance sort.
+      ordered = realPois;
+    }
+
+    return [...ordered, ...llmPois].map((p) => p.title).slice(0, 12);
+  }, [nearbyPois, location]);
 
   // Match each generated stop to a real POI (by exact title) so we can
   // compute walking-time hints between consecutive stops when possible.
@@ -242,6 +284,8 @@ export function ItineraryModal({ visible, onClose, location, nearbyPois }: Props
           // Block backdrop press from firing when interacting with the sheet.
           onStartShouldSetResponder={() => true}
         >
+          {/* flex: 1 column so the ScrollView expands to fill remaining height */}
+          <View style={styles.sheetInner}>
           <View style={styles.handleArea} {...dragResponder.panHandlers}>
             <View style={styles.handle} />
             <Text style={styles.heading}>{t(`itinerary.${durationLabel}`)}</Text>
@@ -320,6 +364,7 @@ export function ItineraryModal({ visible, onClose, location, nearbyPois }: Props
               </TouchableOpacity>
             </View>
           )}
+          </View>
         </Animated.View>
       </Pressable>
     </Modal>
@@ -348,6 +393,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
     ...Shadows.softFloating,
+  },
+  // Full-height flex column so the ScrollView inside gets all remaining
+  // space after the handle, heading, and chip row. Without flex: 1 the
+  // ScrollView collapses to content height and the last items are clipped.
+  sheetInner: {
+    flex: 1,
   },
   // Tall enough to be an easy grab target on touch.
   handleArea: {
@@ -415,7 +466,10 @@ const styles = StyleSheet.create({
   },
   listContent: {
     gap: 10,
-    paddingBottom: Spacing.md,
+    // Extra bottom padding so the last stop card clears the gesture-nav bar
+    // and any visible CTA footer. Spacing.xl ≈ 32 dp is enough on all
+    // common Android gesture-bar heights.
+    paddingBottom: Spacing.xl,
   },
   stopCard: {
     flexDirection: 'row',
