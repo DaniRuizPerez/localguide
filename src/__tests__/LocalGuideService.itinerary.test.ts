@@ -4,13 +4,15 @@
 
 const mockRunStream = jest.fn();
 const sharedCallbacks: { current: any } = { current: null };
+const lastOptions: { current: any } = { current: null };
 
 jest.mock('../services/InferenceService', () => {
   const actual = jest.requireActual('../services/InferenceService');
   class Patched extends actual.InferenceService {
-    async runInferenceStream(prompt: string, callbacks: any) {
-      mockRunStream(prompt);
+    async runInferenceStream(prompt: string, callbacks: any, options: any) {
+      mockRunStream(prompt, options);
       sharedCallbacks.current = callbacks;
+      lastOptions.current = options;
       return { abort: jest.fn().mockResolvedValue(undefined) };
     }
   }
@@ -29,6 +31,7 @@ describe('planItinerary', () => {
   beforeEach(() => {
     mockRunStream.mockClear();
     sharedCallbacks.current = null;
+    lastOptions.current = null;
   });
 
   afterAll(async () => {
@@ -48,6 +51,20 @@ describe('planItinerary', () => {
     expect(prompt).toContain('Eiffel Tower');
     expect(prompt).toContain('Louvre');
     expect(prompt).toContain('Paris');
+  });
+
+  it('runs at low priority so it yields to user-initiated queries', async () => {
+    // The plan-my-day sheet auto-fires on open. If this regressed to "normal"
+    // priority, the around-you list and any user-typed question would queue
+    // behind the auto-fired plan and feel laggy.
+    const task = localGuideService.planItinerary(paris, 4, ['Eiffel Tower']);
+    const done = task.promise;
+    await new Promise((r) => setImmediate(r));
+    sharedCallbacks.current.onToken('1. Eiffel Tower — iconic\n');
+    sharedCallbacks.current.onDone();
+    await done;
+
+    expect(lastOptions.current).toMatchObject({ priority: 'low' });
   });
 
   it('parses numbered Title — note lines', async () => {
@@ -103,6 +120,6 @@ describe('planItinerary', () => {
     const longPrompt = mockRunStream.mock.calls[mockRunStream.mock.calls.length - 1][0];
 
     expect(shortPrompt).toContain('Pick 3 stops');
-    expect(longPrompt).toContain('Pick 7 stops');
+    expect(longPrompt).toContain('Pick 8 stops');
   });
 });
