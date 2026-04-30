@@ -640,6 +640,23 @@ function buildItineraryPrompt(
   });
 }
 
+// Gemma (especially the 1B variant) sometimes gets stuck in a loop and emits
+// the same note sentence repeatedly, separated by " – " (em-dash with spaces)
+// or " - " (hyphen with spaces). E.g.:
+//   "Great views – Great views – Great views – …"
+// This helper detects the pattern and returns only the first unique segment.
+function dedupeNote(note: string): string {
+  // Try splitting on " – " (em-dash) or " - " (hyphen) separators.
+  // We deliberately require a space on both sides so we don't split on
+  // hyphens that are part of place names ("Menlo Park – great!" is fine).
+  const parts = note.split(/\s+[–\-—]\s+/);
+  if (parts.length <= 1) return note;
+  const first = parts[0].trim();
+  // Check if every segment is effectively the same as the first.
+  const allSame = parts.every((p) => p.trim().toLowerCase() === first.toLowerCase());
+  return allSame ? first : note;
+}
+
 function parseItinerary(text: string, maxStops: number = 10): ItineraryStop[] {
   const stops: ItineraryStop[] = [];
   for (const raw of text.split(/\r?\n/)) {
@@ -649,7 +666,7 @@ function parseItinerary(text: string, maxStops: number = 10): ItineraryStop[] {
     const match = line.match(/^\s*\d+[.)]\s*(.+?)\s*[—\-–]\s*(.+)$/);
     if (match) {
       const title = match[1].trim().replace(/^["'"]|["'"]$/g, '');
-      const note = match[2].trim();
+      const note = dedupeNote(match[2].trim());
       if (title && note) stops.push({ title, note });
       continue;
     }
