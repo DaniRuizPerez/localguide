@@ -138,7 +138,12 @@ function buildNearbyPlacesPrompt(
     place: location,
     omitCoordsWithPlace: true,
     extraContext:
-      `Name 6 famous, real landmarks in ${targetCity} (or, if you don't know any specific to ${targetCity}, in the surrounding metro area or state). ` +
+      // No example here. A two-shot example (e.g. Paris → Eiffel Tower)
+      // caused the model to imitate the *region* of the example rather
+      // than answer for the target city — Palo Alto came back as
+      // "Mont Saint-Michel, Swiss Alps". A short, plain ask works
+      // better in practice on this 1B model.
+      `Name 6 famous, real landmarks in ${targetCity} (or, if you don't know any specific to ${targetCity}, in its metro area or state). ` +
       `Output the names ONE PER LINE with NOTHING ELSE — no greetings, no descriptions, no colons, no addresses, no numbers, no markdown.`,
   });
 }
