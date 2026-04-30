@@ -30,6 +30,41 @@ Rules:
 // Topic the user wants the guide to focus on. "everything" means no bias.
 export type GuideTopic = 'everything' | 'history' | 'nature' | 'geography' | 'food' | 'culture';
 
+/**
+ * One past turn fed back to the model so it can reference earlier topics
+ * across POI taps in the same chat session. Only role + text — coordinates,
+ * timing, and image URIs add no value here and bloat the prompt.
+ */
+export interface ChatTurn {
+  role: 'user' | 'guide';
+  text: string;
+}
+
+// Keep the prompt manageable on Pixel 3 (Gemma 3 1B). Past four messages =
+// up to two prior exchanges; per-turn cap stops a long narration from
+// blowing past the model's effective context window.
+const MAX_HISTORY_TURNS = 4;
+const MAX_CHARS_PER_TURN = 280;
+
+function renderHistoryBlock(history: readonly ChatTurn[] | undefined): string | undefined {
+  if (!history || history.length === 0) return undefined;
+  const lines: string[] = ['Previous conversation in this session:'];
+  for (const turn of history.slice(-MAX_HISTORY_TURNS)) {
+    const text = turn.text.trim();
+    if (!text) continue;
+    const clipped = text.length > MAX_CHARS_PER_TURN
+      ? `${text.slice(0, MAX_CHARS_PER_TURN - 1).trimEnd()}…`
+      : text;
+    const label = turn.role === 'user' ? 'Visitor' : 'Guide';
+    lines.push(`${label}: ${clipped}`);
+  }
+  if (lines.length === 1) return undefined;
+  // Tell the model how to use it — without this, Gemma 1B sometimes
+  // re-narrates the prior turn instead of building on it.
+  lines.push('Use this only to keep continuity (refer back, compare, avoid repeating yourself); the new Cue is what to answer now.');
+  return lines.join('\n');
+}
+
 const TOPIC_LABELS: Record<GuideTopic, string> = {
   everything: 'everything',
   history: 'history',
@@ -57,12 +92,14 @@ function buildPrompt(
   location: GPSContext | string,
   userQuery: string,
   topics?: readonly GuideTopic[],
-  length?: NarrationLength
+  length?: NarrationLength,
+  history?: readonly ChatTurn[]
 ): string {
   return buildNarratorPrompt({
     system: SYSTEM_PROMPT,
     directives: [topicFocusDirective(topics), localePromptDirective(), lengthDirective(length)],
     place: location,
+    extraContext: renderHistoryBlock(history),
     cue: userQuery.trim() || 'Narrate what is interesting about this place.',
   });
 }
@@ -77,8 +114,12 @@ function buildImagePrompt(
   location: GPSContext | string,
   userQuery: string,
   topics?: readonly GuideTopic[],
-  length?: NarrationLength
+  length?: NarrationLength,
+  history?: readonly ChatTurn[]
 ): string {
+  const imageContext =
+    "The visitor shared a photo from this spot. Identify what's in it and narrate its story — what it is, why it matters, the history and cultural background a local would share. Ground every claim in what's actually visible; use Place/Coordinates only to disambiguate. If image and location disagree, trust the image.";
+  const historyBlock = renderHistoryBlock(history);
   return buildNarratorPrompt({
     system: SYSTEM_PROMPT,
     directives: [topicFocusDirective(topics), localePromptDirective(), lengthDirective(length)],
@@ -87,8 +128,7 @@ function buildImagePrompt(
     // uses them to disambiguate when the photo contents and named place
     // disagree.
     omitCoordsWithPlace: false,
-    extraContext:
-      "The visitor shared a photo from this spot. Identify what's in it and narrate its story — what it is, why it matters, the history and cultural background a local would share. Ground every claim in what's actually visible; use Place/Coordinates only to disambiguate. If image and location disagree, trust the image.",
+    extraContext: historyBlock ? `${historyBlock}\n\n${imageContext}` : imageContext,
     cue: userQuery.trim() || 'Narrate what is in this photo.',
   });
 }
@@ -1198,9 +1238,10 @@ export const localGuideService = {
     userQuery: string,
     location: GPSContext | string,
     callbacks: StreamCallbacks,
-    topics?: readonly GuideTopic[]
+    topics?: readonly GuideTopic[],
+    history?: readonly ChatTurn[]
   ): Promise<StreamHandle> {
-    const prompt = buildPrompt(location, userQuery, topics);
+    const prompt = buildPrompt(location, userQuery, topics, undefined, history);
     return inferenceService.runInferenceStream(prompt, callbacks);
   },
 
@@ -1209,9 +1250,10 @@ export const localGuideService = {
     location: GPSContext | string,
     imagePath: string,
     callbacks: StreamCallbacks,
-    topics?: readonly GuideTopic[]
+    topics?: readonly GuideTopic[],
+    history?: readonly ChatTurn[]
   ): Promise<StreamHandle> {
-    const prompt = buildImagePrompt(location, userQuery, topics);
+    const prompt = buildImagePrompt(location, userQuery, topics, undefined, history);
     return inferenceService.runInferenceStream(prompt, callbacks, { imagePath });
   },
 

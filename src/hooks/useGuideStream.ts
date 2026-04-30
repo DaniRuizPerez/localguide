@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { localGuideService, type GuideTopic } from '../services/LocalGuideService';
+import { localGuideService, type ChatTurn, type GuideTopic } from '../services/LocalGuideService';
 import { speechService } from '../services/SpeechService';
 import { SpeechChunker } from '../services/SpeechChunker';
 import type { GPSContext, StreamHandle } from '../services/InferenceService';
+import type { Message } from '../types/chat';
 import type { ChatMessagesApi } from './useChatMessages';
 
 export interface GuideStreamDeps {
@@ -69,6 +70,12 @@ export function useGuideStream({ messages, speakResponsesRef, topicRef, onScroll
       location: GPSContext | string;
       imageUri?: string;
     }): Promise<void> => {
+      // Snapshot prior turns for the model so a follow-up POI tap (or typed
+      // question) lands in the same conversation thread instead of starting
+      // fresh. addUserMessage queued a setState in the caller; React hasn't
+      // re-rendered yet, so messages.messages is the state from BEFORE the
+      // new user cue was appended — which is exactly the history we want.
+      const history = priorTurnsFor(messages.messages);
       setInferring(true);
       const guideId = messages.addGuidePlaceholder(location);
       onScroll?.();
@@ -110,9 +117,16 @@ export function useGuideStream({ messages, speakResponsesRef, topicRef, onScroll
                     location,
                     imageUri,
                     callbacks,
-                    topicRef.current
+                    topicRef.current,
+                    history
                   )
-                : await localGuideService.askStream(query, location, callbacks, topicRef.current);
+                : await localGuideService.askStream(
+                    query,
+                    location,
+                    callbacks,
+                    topicRef.current,
+                    history
+                  );
             streamRef.current = handle;
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
@@ -128,4 +142,16 @@ export function useGuideStream({ messages, speakResponsesRef, topicRef, onScroll
   );
 
   return { inferring, stream, stop };
+}
+
+/**
+ * Map the chat message log to the small ChatTurn shape the model wants.
+ * Drops the empty placeholder bubble that's still streaming, drops messages
+ * with no text (errors that resolved to ''), and lets LocalGuideService
+ * apply the turn-count + length caps.
+ */
+function priorTurnsFor(messages: readonly Message[]): ChatTurn[] {
+  return messages
+    .filter((m) => m.text && m.text.trim().length > 0)
+    .map((m) => ({ role: m.role, text: m.text }));
 }
