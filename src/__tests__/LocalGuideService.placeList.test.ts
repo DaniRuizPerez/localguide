@@ -116,7 +116,7 @@ describe('listNearbyPlaces — city grounding in prompt', () => {
     await completeWith('Rodin Sculpture Garden\n');
     await donePromise;
     const [prompt] = mockRunStream.mock.calls[mockRunStream.mock.calls.length - 1];
-    expect(prompt).toContain('IN Palo Alto, California');
+    expect(prompt).toContain('Palo Alto, California');
   });
 
   it('omits the city phrase when placeName is absent', async () => {

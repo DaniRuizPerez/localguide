@@ -50,7 +50,7 @@ describe('listNearbyPlaces — hidden gems directive', () => {
     await localGuideService.listNearbyPlaces(paris, 1000).promise;
     const [prompt] = mockRunStream.mock.calls[0];
     expect(prompt).toContain(HIDDEN_GEMS_DIRECTIVE);
-    // Prompt should still ask for tourist-worthy places.
-    expect(prompt).toContain('TOURIST-WORTHY');
+    // Prompt should still ask for landmarks.
+    expect(prompt).toContain('landmarks');
   });
 });

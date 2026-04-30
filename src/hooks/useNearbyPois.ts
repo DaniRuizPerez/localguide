@@ -179,43 +179,62 @@ export function useNearbyPois(
           // eslint-disable-next-line no-console
           console.log('[NearbyPois] llm fallback start');
         }
-        const task = localGuideService.listNearbyPlaces(gps, radiusMeters);
-        llmFallbackTaskRef.current = task;
-        try {
-          const names = await task.promise;
-          if (cancelled) return;
-          if (__DEV__) {
+        // Up to 2 LLM attempts per cell. With maxTokens=256 the model
+        // usually returns a usable list on the first try; the second
+        // attempt only kicks in if the response was empty (e.g. the
+        // parsePlaceList letter-presence filter stripped everything to
+        // zero because the model emitted a digit-only line). More than
+        // 2 attempts isn't worth it — by the time we've spent ~70 s on
+        // two failed tries, the user has long since assumed the feature
+        // is broken.
+        let attempt = 0;
+        let llmPois: Poi[] = [];
+        while (attempt < 2 && !cancelled) {
+          if (attempt > 0 && __DEV__) {
             // eslint-disable-next-line no-console
-            console.log(`[NearbyPois] llm fallback returned ${names.length} names`);
+            console.log(`[NearbyPois] llm retry ${attempt} (previous returned 0 names)`);
           }
-          const llmPois: Poi[] = names.map((name, i) => ({
-            pageId: -(Date.now() + i),
-            title: name,
-            latitude: gps.latitude,
-            longitude: gps.longitude,
-            distanceMeters: 0,
-            source: 'llm',
-          }));
-          // Skip caching empty results: when Gemma drifts on a single call
-          // (every-line filtered out by parsePlaceList, or simply produced
-          // nothing) we'd otherwise pin the user to "[]" for the full
-          // LLM_CACHE_TTL_MS even if the very next call would have come back
-          // with real names. The model is non-deterministic — let the next
-          // fetch try fresh.
-          if (llmPois.length > 0) {
-            llmCacheRef.current.set(cellKey, { at: Date.now(), pois: llmPois });
+          const task = localGuideService.listNearbyPlaces(gps, radiusMeters);
+          llmFallbackTaskRef.current = task;
+          try {
+            const names = await task.promise;
+            if (cancelled) return;
+            if (__DEV__) {
+              // eslint-disable-next-line no-console
+              console.log(`[NearbyPois] llm fallback returned ${names.length} names (attempt ${attempt})`);
+            }
+            llmPois = names.map((name, i) => ({
+              pageId: -(Date.now() + i),
+              title: name,
+              latitude: gps.latitude,
+              longitude: gps.longitude,
+              distanceMeters: 0,
+              source: 'llm' as const,
+            }));
+            if (llmPois.length > 0) break;
+          } catch (err) {
+            if (__DEV__) {
+              // eslint-disable-next-line no-console
+              console.warn(`[NearbyPois] llm fallback error (attempt ${attempt}): ${(err as Error)?.message ?? err}`);
+            }
+            break;
           }
-          setPois(llmPois);
-        } catch (err) {
-          if (__DEV__) {
-            // eslint-disable-next-line no-console
-            console.warn(`[NearbyPois] llm fallback error: ${(err as Error)?.message ?? err}`);
-          }
-        } finally {
-          if (llmFallbackTaskRef.current === task) {
-            llmFallbackTaskRef.current = null;
-          }
+          attempt += 1;
         }
+        if (cancelled) return;
+        // Skip caching empty results: when Gemma drifts on a single call
+        // (every-line filtered out by parsePlaceList, or simply produced
+        // nothing) we'd otherwise pin the user to "[]" for the full
+        // LLM_CACHE_TTL_MS even if the very next call would have come back
+        // with real names. Also skip the setPois call when empty — that
+        // keeps any previously-good list on screen instead of flashing
+        // empty when the model has a bad run; the cache TTL handles
+        // staleness on its own once the user moves to a new cell.
+        if (llmPois.length > 0) {
+          llmCacheRef.current.set(cellKey, { at: Date.now(), pois: llmPois });
+          setPois(llmPois);
+        }
+        llmFallbackTaskRef.current = null;
       })
       .catch((err) => {
         // fetchNearbyStreaming should swallow its own errors, but a stray

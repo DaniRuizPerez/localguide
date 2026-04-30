@@ -113,18 +113,33 @@ function buildNearbyPlacesPrompt(
       ? location
       : (location as GPSContext).placeName ?? '';
   const cityPhrase = cityLabel ? ` IN ${cityLabel}` : '';
+  // Keep this prompt minimal. Live on Pixel 3 the long version (with
+  // allow-list, deny-list, "do not invent", "Real, named places only"
+  // etc.) caused the 1B model to collapse into a token-repetition loop
+  // and emit phone-number-shaped patterns ("125-676-789-125" repeating)
+  // instead of place names — a well-known training-data artifact (place
+  // names co-occur with phone numbers in Yellow-Pages-style listings).
+  // The model interpreted "list places" + many constraints as "list
+  // contact entries". A short, single-instruction prompt that names the
+  // city directly and asks for landmark NAMES (with a worked example)
+  // gives the decoder a much narrower target and stops the collapse.
+  // Keep this prompt SHORT. The 1B model on Pixel 3 collapses into a
+  // token-repetition loop (e.g. emitting "125-676-789" repeating) the
+  // moment the prompt gets dense — even a single extra paragraph of
+  // "use real names, never invent" pushed it back into the broken state.
+  // The widening cascade is conveyed in ONE sentence; if the model
+  // doesn't know specific places in the target city, it falls back to
+  // famous places in the surrounding region. That's enough — extra
+  // verbiage made the output worse, not better.
+  const targetCity = cityLabel || 'this city';
   return buildNarratorPrompt({
-    system: 'You are a local tourist expert helping a traveler find sights worth visiting.',
+    system: 'You are a knowledgeable local guide.',
     directives: [hiddenGems && HIDDEN_GEMS_DIRECTIVE],
     place: location,
-    // The radius task needs coords to anchor even when we have a place name.
-    omitCoordsWithPlace: false,
+    omitCoordsWithPlace: true,
     extraContext:
-      `Task: list up to 6 TOURIST-WORTHY places${cityPhrase} WITHIN ${radiusLabel} of the visitor — specific named attractions a traveler would actually go see.\n` +
-      `Allowed categories: landmarks, historic sites, famous buildings, parks, gardens, plazas, museums, art galleries, universities, libraries, theaters, monuments, scenic viewpoints, notable neighborhoods.\n` +
-      `NEVER include: chain stores (7-Eleven, Starbucks, McDonald's), gas stations, supermarkets, convenience stores, ZIP codes, highways, streets, administrative areas (countries, states, counties), generic schools, bus or metro stations, corporate headquarters.\n` +
-      `Output ONLY real, named places that genuinely exist${cityPhrase}. Output up to 6 well-known real places — if you don't know any, output the city's most famous landmarks instead. Real, named places only. Do not invent or guess names.\n` +
-      `Output ONLY the place names, one per line. No numbering. No bullets. No markdown. No descriptions. No intro or closing text.`,
+      `Name 6 famous, real landmarks in ${targetCity} (or, if you don't know any specific to ${targetCity}, in the surrounding metro area or state). ` +
+      `Output the names ONE PER LINE with NOTHING ELSE — no greetings, no descriptions, no colons, no addresses, no numbers, no markdown.`,
   });
 }
 
@@ -141,6 +156,16 @@ function parsePlaceList(text: string): string[] {
     .map((line) => stripMarkdownEmphasis(line).trim())
     // Quoted names ("Stanford University") — unwrap.
     .map((line) => line.replace(/^["'"']|["'"']$/g, '').trim())
+    // If the model went chatty and emitted "Name: description" or
+    // "Name – description" or "Name - description", grab just the name
+    // before the separator. Only does this when a separator is present
+    // AND the prefix is a plausible place-name length (≤ 60 chars).
+    // Plain names without separators pass through unchanged.
+    .map((line) => {
+      const m = line.match(/^([^:–\-]{2,60}?)\s*[:–]\s*\S/);
+      if (m && m[1].trim().length >= 3) return m[1].trim();
+      return line;
+    })
     .filter((line) => {
       if (!line) return false;
       // Reject obvious non-name output: questions, sentences with verbs,
@@ -669,7 +694,15 @@ export const localGuideService = {
       }
       return parsed;
     };
-    return runParsedStream(prompt, parse, { maxTokens: 180 });
+    // 180 tokens turned out to be too tight: the EOS-detection holdback in
+    // LiteRTModule (12 chars) plus the prompt's "no intro, no closing
+    // text" framing means the model frequently emits a long preamble that
+    // gets held back, then hits the cap before ANY content has been
+    // released to JS — fullText comes back empty and the around-you list
+    // shows nothing. 256 tokens gives enough headroom for the model to
+    // get past any preamble and emit at least a few names, even on bad
+    // runs.
+    return runParsedStream(prompt, parse, { maxTokens: 256 });
   },
 
   async ask(
