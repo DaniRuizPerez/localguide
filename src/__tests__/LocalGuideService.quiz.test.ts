@@ -270,6 +270,41 @@ describe('generateQuiz', () => {
     expect(quiz[0].question).toBe('Good question?');
   });
 
+  it('rejects blocks where two or more options are duplicates', async () => {
+    const task = localGuideService.generateQuiz([], 2);
+    const done = task.promise;
+    await flushMicrotasks();
+    sharedCallbacks.current.onToken(
+      // First block: A and B both "1850" — duplicate distractor, must be
+      // dropped so the user never sees a 4-way choice that is really 3.
+      `Q: When was X founded?\n` +
+      `A: 1850\n` +
+      `B: 1850\n` +
+      `C: 1894\n` +
+      `D: 1920\n` +
+      `Correct: C\n\n` +
+      // Whitespace/case-only differences also collapse — "Seine " vs
+      // "seine" should not both appear in the option list.
+      `Q: River?\n` +
+      `A: Thames\n` +
+      `B: Seine \n` +
+      `C: seine\n` +
+      `D: Rhine\n` +
+      `Correct: B\n\n` +
+      // Clean block — survives.
+      `Q: Capital?\n` +
+      `A: Paris\n` +
+      `B: London\n` +
+      `C: Rome\n` +
+      `D: Berlin\n` +
+      `Correct: A\n`
+    );
+    sharedCallbacks.current.onDone();
+    const quiz = await done;
+    expect(quiz).toHaveLength(1);
+    expect(quiz[0].question).toBe('Capital?');
+  });
+
   it('rejects Correct values outside A..D', async () => {
     const task = localGuideService.generateQuiz([], 1);
     const done = task.promise;

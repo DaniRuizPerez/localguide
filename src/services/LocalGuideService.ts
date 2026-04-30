@@ -353,6 +353,7 @@ function buildQuizPrompt(
     extraContext:
       `${grounding}\n\n` +
       `Write exactly ${count} multiple-choice questions. Each question has 4 options labelled A, B, C, D, and ONE correct answer. ` +
+      `Within each question, all four options must be DIFFERENT from each other — no repeated values. ` +
       `Mix easy and medium difficulty. Each question must cover a DIFFERENT topic (no two questions about the same place, person, or fact). ` +
       `${QUIZ_GROUNDING_RULES}\n\n` +
       `Output strictly in this format, with a blank line between questions:\n` +
@@ -437,6 +438,12 @@ function buildSingleQuizPrompt(
       `${grounding}\n\n` +
       `TOPIC for this question: ${locatedTopic}.\n` +
       `Write exactly ONE multiple-choice question on that topic. 4 options labelled A, B, C, D. ONE correct answer. ` +
+      // Anti-duplicate-options directive — the 1B model on Pixel 3 has
+      // emitted "A: 1850 / B: 1850 / C: 1894 / D: 1920" (two identical
+      // distractors). The parser also rejects duplicates as a hard
+      // safety net, but stating the requirement up front cuts the
+      // retry rate.
+      `All four options must be DIFFERENT from each other — no repeated values, no near-duplicates. ` +
       // Length cap — on the 1B model every emitted token is ~50–100 ms
       // of decode on a Pixel 3, so a 25-word question with paragraph-long
       // options pushes a single quiz slot past 30 s. Capping the question
@@ -561,14 +568,28 @@ function parseQuizBlock(block: string): QuizQuestion | null {
       .replace(/\s*[\[(]\s*(?:correct|answer)\s*[\])]\s*$/i, '')
       .replace(/\s*\*+\s*$/, '')
       .trim();
+  const options = [
+    stripCorrectnessMarker(opts.A),
+    stripCorrectnessMarker(opts.B),
+    stripCorrectnessMarker(opts.C),
+    stripCorrectnessMarker(opts.D),
+  ];
+  // Reject blocks where two or more options collapse to the same text.
+  // The 1B model on Pixel 3 occasionally emits "A: 1850 / B: 1850 / C:
+  // 1894 / D: 1920" — visually a 4-way choice but really a 3-way one,
+  // and if the duplicate is the correct answer the user picks the wrong
+  // copy and gets marked wrong. Returning null lets the per-question
+  // stream's retry loop ask again with a different angle.
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+  const seen = new Set<string>();
+  for (const o of options) {
+    const k = norm(o);
+    if (!k || seen.has(k)) return null;
+    seen.add(k);
+  }
   return {
     question: q,
-    options: [
-      stripCorrectnessMarker(opts.A),
-      stripCorrectnessMarker(opts.B),
-      stripCorrectnessMarker(opts.C),
-      stripCorrectnessMarker(opts.D),
-    ],
+    options,
     correctIndex: { A: 0, B: 1, C: 2, D: 3 }[correctLetter as 'A' | 'B' | 'C' | 'D'],
   };
 }
