@@ -821,7 +821,13 @@ export const localGuideService = {
     // around-you list and any user-initiated guide query — the user opening
     // the sheet is a hint, not a commitment, and they should never wait
     // because background work hogged the model.
-    return runParsedStream(prompt, parseItinerary, { maxTokens: 400, priority: 'low' });
+    // maxTokens scales with stop count: 7 stops × ~50 tokens for "Name —
+    // reason" lines ≈ 350, plus any preamble the model leaks before the
+    // first numbered line. 400 was tight for full-day plans (count=7) and
+    // truncated mid-list — full-day showed half the stops of half-day.
+    // 700 is safely past the worst-case length while still capping run
+    // time at ~30 s on Pixel 3.
+    return runParsedStream(prompt, parseItinerary, { maxTokens: 700, priority: 'low' });
   },
 
   /**

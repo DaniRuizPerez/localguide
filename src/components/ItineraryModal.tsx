@@ -55,12 +55,18 @@ function minutesBetween(
 export function ItineraryModal({ visible, onClose, location, nearbyPois }: Props) {
   const insets = useSafeAreaInsets();
   const [duration, setDuration] = useState<number>(DEFAULT_HOURS);
-  const [stops, setStops] = useState<ItineraryStop[]>([]);
+  // Per-duration cache of generated plans. Persists across modal close/
+  // reopen and across duration switches so the user can flip 1h → half →
+  // full and back without losing what was already planned. Cleared only
+  // by an explicit re-plan tap on the CTA.
+  const [plans, setPlans] = useState<Map<number, ItineraryStop[]>>(() => new Map());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   // Tracked in a ref so the visibility/cleanup effects always see the live
   // task, not a stale state snapshot.
   const taskRef = useRef<ItineraryTask | null>(null);
+
+  const stops = plans.get(duration) ?? [];
 
   const nearbyTitles = useMemo(
     () => nearbyPois.map((p) => p.title).slice(0, 12),
@@ -83,7 +89,13 @@ export function ItineraryModal({ visible, onClose, location, nearbyPois }: Props
   const plan = (hours: number) => {
     if (!location) return;
     taskRef.current?.abort();
-    setStops([]);
+    setPlans((prev) => {
+      // Clear only THIS duration's cache so a re-plan starts from a clean
+      // empty list; other durations keep their previously-generated plans.
+      const next = new Map(prev);
+      next.delete(hours);
+      return next;
+    });
     setError(null);
     setLoading(true);
     const task = localGuideService.planItinerary(location, hours, nearbyTitles);
@@ -92,8 +104,15 @@ export function ItineraryModal({ visible, onClose, location, nearbyPois }: Props
       .then((result) => {
         // Drop late results from a superseded request.
         if (taskRef.current !== task) return;
-        setStops(result);
-        if (result.length === 0) setError(t('itinerary.empty'));
+        if (result.length === 0) {
+          setError(t('itinerary.empty'));
+          return;
+        }
+        setPlans((prev) => {
+          const next = new Map(prev);
+          next.set(hours, result);
+          return next;
+        });
       })
       .catch((err: unknown) => {
         if (taskRef.current !== task) return;
@@ -106,26 +125,35 @@ export function ItineraryModal({ visible, onClose, location, nearbyPois }: Props
       });
   };
 
-  // Auto-start the plan as soon as the sheet opens — mirrors QuizModal so
-  // the user sees content immediately instead of staring at an empty sheet
-  // waiting to tap a button. Re-plans whenever they change the duration.
+  // Auto-start the plan only when the sheet is open AND the current
+  // duration has no cached plan AND we're not already generating one.
+  // This means: closing and reopening the modal restores whatever was
+  // last shown; switching to a different duration with a cached plan
+  // shows it instantly; switching to a duration with no plan triggers
+  // generation. Errors don't auto-retry — the CTA does that.
   useEffect(() => {
     if (!visible) return;
     if (!location) return;
+    if (loading) return;
+    if (stops.length > 0) return;
+    if (error) return;
     plan(duration);
-    // We intentionally exclude `plan` (recreated each render) and
-    // `nearbyTitles` (covered by the duration/visible deps) — listing them
-    // would re-fire on every keystroke-induced re-render.
+    // We intentionally exclude `plan`, `nearbyTitles` (recreated each
+    // render). `stops` and `loading` are read above to gate the call;
+    // `error` too. Listing them in deps would re-fire on every state
+    // settle and double-plan.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, duration, location]);
 
-  // Abort and reset when the user dismisses the modal so a stale streamed
-  // result doesn't pop in the next time they open it.
+  // Abort the in-flight task on close so a stale streamed result doesn't
+  // pop in next time. The cached `plans` map and `duration` survive — that
+  // is the persistence the user wanted.
   useEffect(() => {
     if (visible) return;
     taskRef.current?.abort();
     taskRef.current = null;
     setLoading(false);
+    setError(null);
   }, [visible]);
 
   // Hard cleanup on unmount.
@@ -161,7 +189,14 @@ export function ItineraryModal({ visible, onClose, location, nearbyPois }: Props
               duration: 180,
               useNativeDriver: true,
             }).start(() => {
-              dragY.setValue(0);
+              // Don't reset dragY here — that would snap the sheet back to
+              // its open translateY=0 for a frame before Modal's own slide-
+              // out animation kicks in, producing the flicker the user
+              // reported (sheet briefly reappears before disappearing).
+              // Instead leave dragY at screenHeight so the sheet stays
+              // offscreen until onClose flips visible=false; the
+              // visible-effect below resets dragY to 0 the next time the
+              // modal is reopened, before any frame is rendered.
               onClose();
             });
           } else {
@@ -228,6 +263,12 @@ export function ItineraryModal({ visible, onClose, location, nearbyPois }: Props
             style={styles.list}
             contentContainerStyle={styles.listContent}
             showsVerticalScrollIndicator={false}
+            // nestedScrollEnabled lets the list scroll independently of the
+            // sheet's own drag-to-dismiss gesture on Android. Without this,
+            // a downward swipe inside the list area was sometimes captured
+            // by the parent and the user couldn't reach later stops on a
+            // full-day plan.
+            nestedScrollEnabled
           >
             {loading && stops.length === 0 && (
               <View style={styles.loadingRow}>
@@ -261,11 +302,18 @@ export function ItineraryModal({ visible, onClose, location, nearbyPois }: Props
           </ScrollView>
 
           {/*
-            Action footer mirrors QuizModal: pinned outside the ScrollView so
-            the primary CTA stays reachable. Shown only after a finished plan
-            so the user has an explicit re-plan affordance.
+            CTA visibility rules per user request:
+            - If the current duration already has a generated plan, hide
+              the button entirely. The plan is the result; no re-plan
+              needed unless the user explicitly switches durations.
+            - If we're generating, hide the button (the loading spinner
+              inside the list area communicates progress).
+            - Show the button only when the sheet is empty: either the
+              user just switched to a duration we haven't planned yet
+              and somehow the auto-plan didn't fire (e.g. no location),
+              or generation errored out and the user wants to retry.
           */}
-          {!loading && (stops.length > 0 || error) && (
+          {!loading && stops.length === 0 && (
             <View style={styles.footer}>
               <TouchableOpacity style={styles.cta} onPress={() => plan(duration)}>
                 <Text style={styles.ctaLabel}>{t('itinerary.button')}</Text>
