@@ -116,7 +116,7 @@ export default function MapScreen({ navigation }: Props) {
   if (!mapsApiKey) {
     return (
       <View style={[styles.container, styles.centered]} {...swipeBackHandlers}>
-        <Text style={[Type.h2, { color: Colors.text, textAlign: 'center', paddingHorizontal: Spacing.lg }]}>
+        <Text style={[Type.h1, { color: Colors.text, textAlign: 'center', paddingHorizontal: Spacing.lg }]}>
           {t('map.unavailableTitle')}
         </Text>
         <Text style={[Type.body, { color: Colors.textSecondary, textAlign: 'center', marginTop: Spacing.sm, paddingHorizontal: Spacing.lg }]}>

@@ -89,17 +89,19 @@ describe('InferenceService.runInferenceStream', () => {
     return lastCall[1];
   }
 
-  it('calls native runInferenceStream with prompt, requestId, and null image', async () => {
+  it('calls native runInferenceStream with prompt, requestId, maxTokens, and null image', async () => {
     await service.runInferenceStream('Hello', {
       onToken: jest.fn(),
       onDone: jest.fn(),
       onError: jest.fn(),
     });
     expect(mockRunInferenceStream).toHaveBeenCalledTimes(1);
-    const [prompt, requestId, imagePath] = mockRunInferenceStream.mock.calls[0];
+    const [prompt, requestId, maxTokens, imagePath] = mockRunInferenceStream.mock.calls[0];
     expect(prompt).toBe('Hello');
     expect(typeof requestId).toBe('string');
     expect(requestId.length).toBeGreaterThan(0);
+    expect(typeof maxTokens).toBe('number');
+    expect(maxTokens).toBeGreaterThan(0);
     expect(imagePath).toBeNull();
   });
 
@@ -109,7 +111,7 @@ describe('InferenceService.runInferenceStream', () => {
       { onToken: jest.fn(), onDone: jest.fn(), onError: jest.fn() },
       { imagePath: 'file:///tmp/photo.jpg' }
     );
-    expect(mockRunInferenceStream.mock.calls[0][2]).toBe('file:///tmp/photo.jpg');
+    expect(mockRunInferenceStream.mock.calls[0][3]).toBe('file:///tmp/photo.jpg');
   });
 
   it('fires onToken for each matching LiteRTToken event', async () => {
