@@ -817,7 +817,11 @@ export const localGuideService = {
     nearbyTitles: string[] = []
   ): ItineraryTask {
     const prompt = buildItineraryPrompt(location, durationHours, nearbyTitles);
-    return runParsedStream(prompt, parseItinerary, { maxTokens: 400 });
+    // Low priority so the auto-fired plan-my-day generation yields to the
+    // around-you list and any user-initiated guide query — the user opening
+    // the sheet is a hint, not a commitment, and they should never wait
+    // because background work hogged the model.
+    return runParsedStream(prompt, parseItinerary, { maxTokens: 400, priority: 'low' });
   },
 
   /**
