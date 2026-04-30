@@ -101,6 +101,23 @@ export function QuizModal({ visible, onClose, nearbyPois, locationLabel }: Props
     []
   );
 
+  // Auto-start generation as soon as the modal opens with a fresh state, so
+  // the user doesn't sit through 25 s of Q1 generation after tapping a
+  // dedicated "Start Quiz" button. Generation is low-priority, so it yields
+  // to nearby-places / guide-facts requests if the user keeps interacting
+  // with the home screen behind the sheet. Aborts on close (handled by the
+  // unmount effect above and by the `finished` effect below).
+  useEffect(() => {
+    if (!visible) return;
+    if (handleRef.current) return; // already generating
+    if (questions.length > 0) return; // already have a quiz in flight or finished
+    if (error) return; // don't auto-restart after a failure
+    start();
+    // start() doesn't depend on any state used elsewhere; rebuilding the
+    // closure on every render would re-trigger the effect spuriously.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
   const currentQ = questions[currentIdx];
   const answered = selectedIdx != null;
   const reachedTarget = questions.length >= TARGET_QUESTIONS;

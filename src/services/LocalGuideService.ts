@@ -301,6 +301,14 @@ function buildSingleQuizPrompt(
   // same string. Bumping the angle on retry breaks that symmetry.
   const angle =
     QUIZ_TOPIC_ANGLES[(questionIndex + attempt) % QUIZ_TOPIC_ANGLES.length];
+  // Bake the location into the topic phrase. With just "TOPIC: history",
+  // the model would happily write a generic "primary color used by artists"
+  // question that has nothing to do with the user's place; saying
+  // "history of Palo Alto" forces the location into the same instruction
+  // line the model is most likely to follow.
+  const locatedTopic = locationLabel
+    ? `${angle.instruction} of ${locationLabel}`
+    : angle.instruction;
   // Avoid-list is kept as a soft secondary signal so retries (which reuse
   // the same slot index, hence the same angle) still get hint about what
   // not to repeat.
@@ -308,13 +316,22 @@ function buildSingleQuizPrompt(
   const avoidLine = previousQuestions.length
     ? `\nDo NOT repeat or paraphrase the previous question: "${lastQuestion}". Pick a different fact within the topic above.`
     : '';
+  const locationGuard = locationLabel
+    ? `The question MUST be specifically about ${locationLabel} (or its surrounding region) — never a generic question that could apply to any city. `
+    : '';
   return buildNarratorPrompt({
     system: `You are writing one local-trivia question (#${questionIndex + 1} of ${total}) for a visitor.`,
     directives: [localePromptDirective()],
     extraContext:
       `${grounding}\n\n` +
-      `TOPIC for this question: ${angle.instruction}.\n` +
+      `TOPIC for this question: ${locatedTopic}.\n` +
       `Write exactly ONE multiple-choice question on that topic. 4 options labelled A, B, C, D. ONE correct answer. ` +
+      // Length cap — on the 1B model every emitted token is ~50–100 ms
+      // of decode on a Pixel 3, so a 25-word question with paragraph-long
+      // options pushes a single quiz slot past 30 s. Capping the question
+      // and options to phrases keeps each slot under ~10 s.
+      `Keep it short: the question must be ONE sentence of at most 14 words; each option must be at most 5 words (a noun phrase, a year, a name). ` +
+      `${locationGuard}` +
       `${QUIZ_GROUNDING_RULES}` +
       `${avoidLine}\n\n` +
       // The on-device 1B model consistently truncates after option D and
@@ -325,12 +342,12 @@ function buildSingleQuizPrompt(
       // anywhere in the block.
       `Example of the exact format you must produce (do not reuse this content):\n` +
       `Correct: B\n` +
-      `Q: Which river runs through Paris?\n` +
-      `A: The Thames\n` +
-      `B: The Seine\n` +
-      `C: The Danube\n` +
-      `D: The Rhine\n\n` +
-      `Now write your one question on the TOPIC above, in the same six-line format. The first line MUST be "Correct: <letter>" naming which of A/B/C/D is right; the next five lines are Q, A, B, C, D in order. No intro, no explanations, no question number, no closing remarks.`,
+      `Q: What year was X founded?\n` +
+      `A: 1850\n` +
+      `B: 1894\n` +
+      `C: 1920\n` +
+      `D: 1952\n\n` +
+      `Now write your one short question on the TOPIC above, in the same six-line format. The first line MUST be "Correct: <letter>" naming which of A/B/C/D is right; the next five lines are Q, A, B, C, D in order. No intro, no explanations, no question number, no closing remarks.`,
   });
 }
 
@@ -710,10 +727,11 @@ export const localGuideService = {
     // recoverable — a fresh inference call on the same prompt usually lands
     // a different answer.
     const MAX_DEDUPE_RETRIES = 2;
-    // Bumped from 200: at 200 tokens the model frequently truncates before
-    // emitting the trailing "Correct: X" line, and the parser then throws
-    // the otherwise-valid block away.
-    const TOKENS_PER_QUESTION = 320;
+    // Lowered from 320: paired with the in-prompt length cap (≤14 word
+    // question, ≤5 word options) the model now produces a complete
+    // 6-line block well under 200 tokens, and capping decode time keeps
+    // each slot under ~10 s on Pixel 3 instead of 25–40 s.
+    const TOKENS_PER_QUESTION = 200;
 
     const emitted: QuizQuestion[] = [];
     const fingerprints = new Set<string>();
@@ -721,15 +739,19 @@ export const localGuideService = {
     let activeHandle: StreamHandle | null = null;
     let activeAbortPromise: Promise<void> | null = null;
 
-    const runOne = (
+    const runOne = async (
       questionIndex: number,
       attempt: number
-    ): Promise<QuizQuestion | null> =>
-      new Promise((resolve, reject) => {
-        if (aborted) {
-          resolve(null);
-          return;
-        }
+    ): Promise<QuizQuestion | null> => {
+      if (aborted) return null;
+      // Yield to any foreground work (nearby places, guide facts) before
+      // queueing the next quiz slot. The native LiteRT executor is
+      // single-threaded, so without this a quiz call sitting in the queue
+      // would block a freshly-issued nearby request behind it for tens of
+      // seconds.
+      await inferenceService.waitForIdleSlot();
+      if (aborted) return null;
+      return new Promise((resolve, reject) => {
         const previousTexts = emitted.map((e) => e.question);
         const prompt = buildSingleQuizPrompt(
           nearbyTitles,
@@ -795,7 +817,7 @@ export const localGuideService = {
                 reject(new Error(msg));
               },
             },
-            { maxTokens: TOKENS_PER_QUESTION }
+            { maxTokens: TOKENS_PER_QUESTION, priority: 'low' }
           )
           .then((handle) => {
             if (aborted || settled) {
@@ -813,6 +835,7 @@ export const localGuideService = {
         // the closure so callers see the retry count if we ever expose it.
         void attempt;
       });
+    };
 
     (async () => {
       try {

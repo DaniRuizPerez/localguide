@@ -16,6 +16,13 @@ export interface InferenceOptions {
   maxTokens?: number;
   /** Optional file://, absolute, or content:// URI passed to the multimodal model. */
   imagePath?: string | null;
+  /**
+   * Scheduling hint. 'normal' (default) calls bump a counter that 'low'
+   * callers can wait for via {@link InferenceService.waitForIdleSlot}.
+   * Used to keep background work like quiz pre-generation off the critical
+   * path of foreground requests (nearby places, guide facts).
+   */
+  priority?: 'normal' | 'low';
 }
 
 export interface GPSContext {
@@ -45,6 +52,14 @@ export class InferenceService {
   private loading = false;
   private emitter: NativeEventEmitter | null = null;
   private nextRequestId = 1;
+  /**
+   * Number of in-flight 'normal' priority calls. 'low' callers (the quiz
+   * preloader) await this hitting zero before issuing their next request,
+   * which keeps foreground features (nearby places, guide facts) ahead of
+   * background work on the single-threaded LiteRT executor.
+   */
+  private pendingNormal = 0;
+  private idleWaiters: Array<() => void> = [];
 
   async initialize(): Promise<void> {
     if (this.loaded || this.loading) return;
@@ -85,7 +100,13 @@ export class InferenceService {
       return this.mockResponse(prompt);
     }
 
-    return LiteRTModule.runInference(prompt, maxTokens, options.imagePath ?? null);
+    const priority = options.priority ?? 'normal';
+    if (priority === 'normal') this.beginNormal();
+    try {
+      return await LiteRTModule.runInference(prompt, maxTokens, options.imagePath ?? null);
+    } finally {
+      if (priority === 'normal') this.endNormal();
+    }
   }
 
   /**
@@ -106,14 +127,25 @@ export class InferenceService {
       return this.mockStream(prompt, callbacks);
     }
 
+    const priority = options.priority ?? 'normal';
+    if (priority === 'normal') this.beginNormal();
+
     const requestId = `req-${Date.now()}-${this.nextRequestId++}`;
     const emitter = this.getEmitter();
     let settled = false;
+    let releasedNormal = false;
+
+    const releaseNormal = () => {
+      if (priority !== 'normal' || releasedNormal) return;
+      releasedNormal = true;
+      this.endNormal();
+    };
 
     const cleanup = () => {
       tokenSub.remove();
       doneSub.remove();
       errorSub.remove();
+      releaseNormal();
     };
 
     const tokenSub = emitter.addListener(LITERT_EVENT_TOKEN, (evt: LiteRTTokenEvent) => {
@@ -135,7 +167,7 @@ export class InferenceService {
 
     try {
       const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
-      console.log(`[InferenceService] runInferenceStream START requestId=${requestId} maxTokens=${maxTokens}`);
+      console.log(`[InferenceService] runInferenceStream START requestId=${requestId} maxTokens=${maxTokens} priority=${priority}`);
       await LiteRTModule.runInferenceStream(
         prompt,
         requestId,
@@ -165,6 +197,36 @@ export class InferenceService {
         }
       },
     };
+  }
+
+  /**
+   * Resolves once there are no in-flight 'normal' priority calls. Used by
+   * background work (the quiz preloader) to yield the model to foreground
+   * features. Returns immediately if already idle.
+   */
+  waitForIdleSlot(): Promise<void> {
+    if (this.pendingNormal === 0) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      this.idleWaiters.push(resolve);
+    });
+  }
+
+  /** Number of in-flight 'normal' priority requests — useful for diagnostics. */
+  get pendingNormalCount(): number {
+    return this.pendingNormal;
+  }
+
+  private beginNormal(): void {
+    this.pendingNormal += 1;
+  }
+
+  private endNormal(): void {
+    this.pendingNormal = Math.max(0, this.pendingNormal - 1);
+    if (this.pendingNormal === 0 && this.idleWaiters.length > 0) {
+      const waiters = this.idleWaiters;
+      this.idleWaiters = [];
+      for (const w of waiters) w();
+    }
   }
 
   async dispose(): Promise<void> {
