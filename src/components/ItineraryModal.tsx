@@ -24,12 +24,17 @@ import {
 } from '../services/LocalGuideService';
 import type { GPSContext } from '../services/InferenceService';
 import { distanceMeters, type Poi } from '../services/PoiService';
+import { visitedStore } from '../services/VisitedStore';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
   location: GPSContext | string | null;
   nearbyPois: Poi[];
+  // Fired when the user taps a stop card — typically dismisses the sheet
+  // and switches the chat to that place. Optional so the modal renders in
+  // contexts (tests, previews) where chat isn't wired up.
+  onChatAboutStop?: (title: string) => void;
 }
 
 const DURATIONS: Array<{ hours: number; labelKey: 'oneHour' | 'halfDay' | 'fullDay' }> = [
@@ -39,18 +44,6 @@ const DURATIONS: Array<{ hours: number; labelKey: 'oneHour' | 'halfDay' | 'fullD
 ];
 
 const DEFAULT_HOURS = 4;
-
-// Rough pedestrian speed — ~5 km/h = ~83 m/min. Used for "N min between stops"
-// hints between consecutive itinerary items that we can match to real POIs.
-const WALKING_METERS_PER_MIN = 83;
-
-function minutesBetween(
-  a: { latitude: number; longitude: number },
-  b: { latitude: number; longitude: number }
-): number {
-  const meters = distanceMeters(a.latitude, a.longitude, b.latitude, b.longitude);
-  return Math.max(1, Math.round(meters / WALKING_METERS_PER_MIN));
-}
 
 // NN + 2-opt route optimisation over an arbitrary set of geo-points starting
 // from `start`. Used twice: once pre-LLM to feed candidates in a sensible
@@ -116,8 +109,25 @@ function optimizeWalkingOrder<T extends { latitude: number; longitude: number }>
   return ordered;
 }
 
-export function ItineraryModal({ visible, onClose, location, nearbyPois }: Props) {
+export function ItineraryModal({
+  visible,
+  onClose,
+  location,
+  nearbyPois,
+  onChatAboutStop,
+}: Props) {
   const insets = useSafeAreaInsets();
+
+  // Subscribe to the visited-titles store so the checkmarks rerender when
+  // the user toggles one. We hydrate at app boot in App.tsx; here we just
+  // mirror the store into local state.
+  const [visitedTitles, setVisitedTitles] = useState<Record<string, true>>(
+    () => visitedStore.get().titles
+  );
+  useEffect(() => {
+    setVisitedTitles(visitedStore.get().titles);
+    return visitedStore.subscribe((s) => setVisitedTitles(s.titles));
+  }, []);
   const [duration, setDuration] = useState<number>(DEFAULT_HOURS);
   // Per-duration cache of generated plans. Persists across modal close/
   // reopen and across duration switches so the user can flip 1h → half →
@@ -399,24 +409,53 @@ export function ItineraryModal({ visible, onClose, location, nearbyPois }: Props
 
             {error && !loading && <Text style={styles.error}>{error}</Text>}
 
+            {/*
+              We deliberately don't show a between-stops walking-time hint:
+              the great-circle/constant-speed estimate we'd compute is just
+              a guess. A real "N min walk" needs a routing API, which we
+              only have when online — and even then we haven't wired one
+              up yet. Leaving it out is more honest than showing a number
+              that's frequently wrong by 2x on hilly or non-grid streets.
+            */}
             {enrichedStops.map(({ stop, poi }, i) => {
-              const prev = i > 0 ? enrichedStops[i - 1]?.poi : null;
-              const walkMin = prev && poi ? minutesBetween(prev, poi) : null;
+              const visited = visitedTitles[stop.title.trim().toLowerCase()] === true;
               return (
-                <View key={`${i}-${stop.title}`}>
-                  {walkMin != null && (
-                    <Text style={styles.walkHint}>
-                      ↓ {t('itinerary.walkMinutes', { minutes: walkMin })}
+                <Pressable
+                  key={`${i}-${stop.title}`}
+                  style={({ pressed }) => [
+                    styles.stopCard,
+                    visited && styles.stopCardVisited,
+                    pressed && styles.stopCardPressed,
+                  ]}
+                  onPress={() => onChatAboutStop?.(stop.title)}
+                >
+                  <Text style={[styles.stopIndex, visited && styles.stopIndexVisited]}>
+                    {i + 1}
+                  </Text>
+                  <View style={styles.stopBody}>
+                    <Text
+                      style={[styles.stopTitle, visited && styles.stopTitleVisited]}
+                    >
+                      {stop.title}
                     </Text>
-                  )}
-                  <View style={styles.stopCard}>
-                    <Text style={styles.stopIndex}>{i + 1}</Text>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.stopTitle}>{stop.title}</Text>
-                      {stop.note ? <Text style={styles.stopNote}>{stop.note}</Text> : null}
-                    </View>
+                    {stop.note ? <Text style={styles.stopNote}>{stop.note}</Text> : null}
                   </View>
-                </View>
+                  {/*
+                    Hit-slop on the checkbox so a fingertip-sized tap reliably
+                    toggles the visited state without firing the card's own
+                    onPress (which would open chat). The checkbox stops touch
+                    propagation via its own Pressable.
+                  */}
+                  <Pressable
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: visited }}
+                    hitSlop={10}
+                    onPress={() => visitedStore.setVisited(stop.title, !visited)}
+                    style={[styles.checkbox, visited && styles.checkboxChecked]}
+                  >
+                    {visited ? <Text style={styles.checkmark}>✓</Text> : null}
+                  </Pressable>
+                </Pressable>
               );
             })}
           </ScrollView>
@@ -551,6 +590,7 @@ const styles = StyleSheet.create({
   },
   stopCard: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 12,
     backgroundColor: Colors.surface,
     padding: 12,
@@ -558,25 +598,64 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.borderLight,
   },
+  // Visited cards fade slightly so the unvisited ones stand out as the
+  // remaining work; we keep the same border so the row's footprint is
+  // stable as the user toggles state.
+  stopCardVisited: {
+    backgroundColor: Colors.borderLight,
+    opacity: 0.7,
+  },
+  // Tactile feedback while the user is pressing — subtle dim, no scale,
+  // since the card sits inside a scrollable list and a transform would
+  // feel jumpy under flicks.
+  stopCardPressed: {
+    opacity: 0.6,
+  },
+  stopBody: {
+    flex: 1,
+  },
   stopIndex: {
     ...Type.h1,
     color: Colors.primary,
     width: 24,
     textAlign: 'center',
   },
+  stopIndexVisited: {
+    color: Colors.textTertiary,
+  },
   stopTitle: {
     ...Type.poi,
     color: Colors.text,
+  },
+  stopTitleVisited: {
+    textDecorationLine: 'line-through',
+    color: Colors.textSecondary,
   },
   stopNote: {
     ...Type.bodySm,
     color: Colors.textSecondary,
     marginTop: 4,
   },
-  walkHint: {
-    ...Type.metaUpper,
-    color: Colors.textTertiary,
-    textAlign: 'center',
-    marginBottom: 4,
+  // Square checkbox; sized for a comfortable thumb tap and visually
+  // matches the card's border treatment so it reads as part of the row.
+  checkbox: {
+    width: 28,
+    height: 28,
+    borderRadius: Radii.sm,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.background,
+  },
+  checkboxChecked: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary,
+  },
+  checkmark: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+    lineHeight: 20,
   },
 });

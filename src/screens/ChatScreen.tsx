@@ -376,6 +376,18 @@ export default function ChatScreen(props: Props) {
         onClose={() => setItineraryOpen(false)}
         location={effectiveLocation}
         nearbyPois={visiblePois}
+        // Tapping a stop closes the sheet and asks the on-device guide
+        // about that place. We don't require a real-coord match — even
+        // pure LLM-generated stop names get a "Tell me about X." cue,
+        // which is what the user expects when entering chat mode.
+        onChatAboutStop={(title) => {
+          setItineraryOpen(false);
+          if (!effectiveLocation) return;
+          if (inferring) stop();
+          const cue = `Tell me about ${title}.`;
+          messages.addUserMessage(cue);
+          stream({ intent: 'text', query: cue, location: effectiveLocation });
+        }}
       />
       <QuizModal
         visible={quizOpen}

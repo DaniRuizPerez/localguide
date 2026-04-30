@@ -101,7 +101,6 @@ export const EN = {
     fullDay: 'Full day',
     pickDuration: 'How long do you have to explore?',
     empty: 'Could not assemble a route — try a different duration or move to a more populated area.',
-    walkMinutes: 'walk {minutes} min',
   },
   timeline: {
     title: 'Timeline',
