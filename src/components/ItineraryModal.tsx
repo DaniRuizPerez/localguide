@@ -52,6 +52,70 @@ function minutesBetween(
   return Math.max(1, Math.round(meters / WALKING_METERS_PER_MIN));
 }
 
+// NN + 2-opt route optimisation over an arbitrary set of geo-points starting
+// from `start`. Used twice: once pre-LLM to feed candidates in a sensible
+// order, and once post-LLM to reorder whatever stops the model picked back
+// into a coherent route. Without the post-LLM pass the model's "best visit
+// order" instruction is unreliable — Gemma typically lists candidates in the
+// order it processed them, ignoring spatial layout, which produced the
+// "Palo Alto → Menlo Park → Stanford" loop the user originally reported.
+function optimizeWalkingOrder<T extends { latitude: number; longitude: number }>(
+  start: { latitude: number; longitude: number },
+  items: T[]
+): T[] {
+  if (items.length < 2) return [...items];
+
+  // Step 1: greedy nearest-neighbor.
+  const remaining = [...items];
+  let ordered: T[] = [];
+  let cur = start;
+  while (remaining.length > 0) {
+    let bestIdx = 0;
+    let bestDist = distanceMeters(cur.latitude, cur.longitude, remaining[0].latitude, remaining[0].longitude);
+    for (let i = 1; i < remaining.length; i++) {
+      const d = distanceMeters(cur.latitude, cur.longitude, remaining[i].latitude, remaining[i].longitude);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+    }
+    const chosen = remaining.splice(bestIdx, 1)[0];
+    ordered.push(chosen);
+    cur = chosen;
+  }
+
+  // Step 2: 2-opt sweeps. Open tour (no return), so only the two edges
+  // adjacent to the reversed subsegment change weight. 1 m hysteresis
+  // prevents float ping-pong; safety counter bounds total sweeps.
+  const edgeAt = (a: number, b: number): number => {
+    const A = a === -1 ? start : ordered[a];
+    const B = ordered[b];
+    return distanceMeters(A.latitude, A.longitude, B.latitude, B.longitude);
+  };
+  let improved = true;
+  let safety = 30;
+  while (improved && safety-- > 0) {
+    improved = false;
+    for (let i = 0; i < ordered.length - 1; i++) {
+      for (let j = i + 1; j < ordered.length; j++) {
+        const before =
+          edgeAt(i - 1, i) + (j + 1 < ordered.length ? edgeAt(j, j + 1) : 0);
+        const after =
+          edgeAt(i - 1, j) + (j + 1 < ordered.length ? edgeAt(i, j + 1) : 0);
+        if (after + 1 < before) {
+          ordered = [
+            ...ordered.slice(0, i),
+            ...ordered.slice(i, j + 1).reverse(),
+            ...ordered.slice(j + 1),
+          ];
+          improved = true;
+        }
+      }
+    }
+  }
+  return ordered;
+}
+
 export function ItineraryModal({ visible, onClose, location, nearbyPois }: Props) {
   const insets = useSafeAreaInsets();
   const [duration, setDuration] = useState<number>(DEFAULT_HOURS);
@@ -68,65 +132,68 @@ export function ItineraryModal({ visible, onClose, location, nearbyPois }: Props
 
   const stops = plans.get(duration) ?? [];
 
-  // Nearest-neighbor ordering of POIs from the user's start position.
-  // At each step we pick the unvisited POI closest to the current position,
-  // which eliminates obvious backtracking (e.g. A → C → B when B sits
-  // between A and C geographically). We only do this for POIs with real
-  // coordinates (source !== 'llm'); LLM-sourced entries keep their original
-  // order at the end because they carry placeholder coords.
+  // Pull start lat/lon out once so both the pre-LLM candidate-ordering
+  // memo and the post-LLM reorder memo can share it. Null when the user
+  // entered a location manually (string) — in that case we skip TSP
+  // entirely since we have nothing to measure distance from.
+  const startCoord = useMemo(
+    () =>
+      location && typeof location !== 'string'
+        ? { latitude: location.latitude, longitude: location.longitude }
+        : null,
+    [location]
+  );
+
+  // Route-optimised candidate list fed to the LLM as visit-order hints.
+  // Only POIs with real coordinates are routed; LLM-sourced entries keep
+  // their original order at the end because they carry placeholder coords
+  // (the user's own position) that would dominate any distance calculation.
+  // Capped at 12 entries — the prompt only sends 12 titles anyway.
   const nearbyTitles = useMemo(() => {
-    // Split into real-coord POIs (can be route-optimised) and LLM stubs.
-    const realPois = nearbyPois.filter((p) => p.source !== 'llm');
+    const realPois = nearbyPois.filter((p) => p.source !== 'llm').slice(0, 12);
     const llmPois = nearbyPois.filter((p) => p.source === 'llm');
-
-    // Determine start lat/lon from the GPSContext if available.
-    const startLat =
-      location && typeof location !== 'string' ? location.latitude : null;
-    const startLon =
-      location && typeof location !== 'string' ? location.longitude : null;
-
-    let ordered: Poi[];
-    if (startLat !== null && startLon !== null && realPois.length > 1) {
-      // Nearest-neighbor greedy TSP from the user's position.
-      const remaining = [...realPois];
-      ordered = [];
-      let curLat = startLat;
-      let curLon = startLon;
-      while (remaining.length > 0) {
-        let bestIdx = 0;
-        let bestDist = distanceMeters(curLat, curLon, remaining[0].latitude, remaining[0].longitude);
-        for (let i = 1; i < remaining.length; i++) {
-          const d = distanceMeters(curLat, curLon, remaining[i].latitude, remaining[i].longitude);
-          if (d < bestDist) {
-            bestDist = d;
-            bestIdx = i;
-          }
-        }
-        const chosen = remaining.splice(bestIdx, 1)[0];
-        ordered.push(chosen);
-        curLat = chosen.latitude;
-        curLon = chosen.longitude;
-      }
-    } else {
-      // No GPS context or only one real POI — keep original distance sort.
-      ordered = realPois;
-    }
-
+    const ordered = startCoord ? optimizeWalkingOrder(startCoord, realPois) : realPois;
     return [...ordered, ...llmPois].map((p) => p.title).slice(0, 12);
-  }, [nearbyPois, location]);
+  }, [nearbyPois, startCoord]);
 
   // Match each generated stop to a real POI (by exact title) so we can
-  // compute walking-time hints between consecutive stops when possible.
+  // compute walking-time hints between consecutive stops when possible —
+  // and, more importantly, reorder the LLM's pick into a coherent walking
+  // route. Gemma usually lists the candidates back in the order it
+  // processed them, ignoring the "best visit order" instruction; without
+  // this post-pass the user sees the original zigzag (e.g. PA → MP →
+  // Stanford instead of PA → Stanford → MP).
   const enrichedStops = useMemo(() => {
     const byTitle = new Map<string, Poi>();
     for (const poi of nearbyPois) {
       byTitle.set(poi.title.toLowerCase(), poi);
     }
-    return stops.map((s) => ({
+    const enriched = stops.map((s) => ({
       stop: s,
       poi: byTitle.get(s.title.toLowerCase()) ?? null,
     }));
-  }, [stops, nearbyPois]);
+
+    // Without a GPS start or fewer than two matched stops, there's
+    // nothing to reorder — pass through.
+    if (!startCoord) return enriched;
+    const matched = enriched.filter(
+      (e): e is { stop: ItineraryStop; poi: Poi } => e.poi !== null
+    );
+    const unmatched = enriched.filter((e) => e.poi === null);
+    if (matched.length < 2) return enriched;
+
+    // optimizeWalkingOrder operates on objects with latitude/longitude;
+    // we wrap each matched entry so the helper can sort it directly.
+    const reordered = optimizeWalkingOrder(
+      startCoord,
+      matched.map((m) => ({ ...m, latitude: m.poi.latitude, longitude: m.poi.longitude }))
+    ).map(({ stop, poi }) => ({ stop, poi }));
+
+    // Unmatched stops (LLM hallucinated names not in the real-POI set)
+    // can't be routed; keep them at the end in their original relative
+    // order so we don't drop information.
+    return [...reordered, ...unmatched];
+  }, [stops, nearbyPois, startCoord]);
 
   const plan = (hours: number) => {
     if (!location) return;
@@ -274,15 +341,24 @@ export function ItineraryModal({ visible, onClose, location, nearbyPois }: Props
       onRequestClose={onClose}
       hardwareAccelerated
     >
-      <Pressable style={styles.backdrop} onPress={onClose}>
+      {/*
+        Sibling-backdrop layout: the dimmed Pressable lives behind the sheet
+        as a separate sibling rather than wrapping it. The previous structure
+        wrapped the sheet inside the Pressable and used a JS responder hijack
+        on the sheet to block backdrop presses; that hijack also swallowed
+        all native gesture events, breaking the inner ScrollView (which felt
+        sluggish or didn't scroll at all). With siblings the sheet renders on
+        top via absolute positioning, the ScrollView gets normal native
+        scroll handling, and tapping outside the sheet still closes it.
+      */}
+      <View style={styles.modalRoot}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <Animated.View
           style={[
             styles.sheet,
             { paddingBottom: Spacing.lg + insets.bottom },
             { transform: [{ translateY: dragY }] },
           ]}
-          // Block backdrop press from firing when interacting with the sheet.
-          onStartShouldSetResponder={() => true}
         >
           {/* flex: 1 column so the ScrollView expands to fill remaining height */}
           <View style={styles.sheetInner}>
@@ -366,13 +442,15 @@ export function ItineraryModal({ visible, onClose, location, nearbyPois }: Props
           )}
           </View>
         </Animated.View>
-      </Pressable>
+      </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
+  // Root container holds the absolute-fill backdrop Pressable and the sheet
+  // as siblings. justifyContent: flex-end pushes the sheet to the bottom.
+  modalRoot: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.35)',
     justifyContent: 'flex-end',
