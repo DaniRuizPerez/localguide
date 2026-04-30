@@ -363,9 +363,11 @@ describe('generateQuizStream', () => {
         `Correct: B\n`
     );
 
-    // The 1st prompt has no avoid list; the 2nd must list Q1.
+    // The 1st prompt has no avoid line; the 2nd must reference Q1.
+    // Both prompts must carry a TOPIC angle (rotation drives variety).
     const firstPrompt: string = mockRunStream.mock.calls[0][0];
-    expect(firstPrompt).not.toContain('FORBIDDEN');
+    expect(firstPrompt).not.toContain('Do NOT repeat');
+    expect(firstPrompt).toContain('TOPIC for this question:');
 
     await completeNextCallWith(
       `Q: What river runs near Palo Alto?\n` +
@@ -376,9 +378,17 @@ describe('generateQuizStream', () => {
         `Correct: C\n`
     );
     const secondPrompt: string = mockRunStream.mock.calls[1][0];
-    expect(secondPrompt).toContain('FORBIDDEN');
+    expect(secondPrompt).toContain('Do NOT repeat');
     expect(secondPrompt).toContain('When was Stanford University founded?');
     expect(secondPrompt).toContain('Palo Alto, California');
+    expect(secondPrompt).toContain('TOPIC for this question:');
+    // Slot 0 and slot 1 must request different topic angles, otherwise
+    // the rotation has degenerated.
+    const firstAngle = firstPrompt.match(/TOPIC for this question: ([^\n]+)/)?.[1];
+    const secondAngle = secondPrompt.match(/TOPIC for this question: ([^\n]+)/)?.[1];
+    expect(firstAngle).toBeTruthy();
+    expect(secondAngle).toBeTruthy();
+    expect(firstAngle).not.toBe(secondAngle);
 
     await completeNextCallWith(
       `Q: What is Palo Alto known for?\n` +
@@ -389,8 +399,12 @@ describe('generateQuizStream', () => {
         `Correct: A\n`
     );
     const thirdPrompt: string = mockRunStream.mock.calls[2][0];
-    expect(thirdPrompt).toContain('When was Stanford University founded?');
+    // Avoid-line names only the most recent question; full history is
+    // implicit via topic rotation.
     expect(thirdPrompt).toContain('What river runs near Palo Alto?');
+    const thirdAngle = thirdPrompt.match(/TOPIC for this question: ([^\n]+)/)?.[1];
+    expect(thirdAngle).toBeTruthy();
+    expect(thirdAngle).not.toBe(secondAngle);
   });
 
   it('rejects a duplicate question and re-invokes inference for that slot', async () => {
@@ -429,6 +443,17 @@ describe('generateQuizStream', () => {
     expect(mockRunStream).toHaveBeenCalledTimes(3);
     expect(onDone).toHaveBeenCalledTimes(1);
     expect(onDone.mock.calls[0][0]).toHaveLength(2);
+
+    // Each retry of the same slot must request a *different* topic angle —
+    // otherwise the model regenerates the same prompt and the dedupe
+    // budget is wasted (observed live on Pixel 3 before this fix).
+    const slot1Initial: string = mockRunStream.mock.calls[1][0];
+    const slot1Retry: string = mockRunStream.mock.calls[2][0];
+    const slot1InitialAngle = slot1Initial.match(/TOPIC for this question: ([^\n]+)/)?.[1];
+    const slot1RetryAngle = slot1Retry.match(/TOPIC for this question: ([^\n]+)/)?.[1];
+    expect(slot1InitialAngle).toBeTruthy();
+    expect(slot1RetryAngle).toBeTruthy();
+    expect(slot1InitialAngle).not.toBe(slot1RetryAngle);
   });
 
   it('caps dedupe retries per slot and skips to the next', async () => {

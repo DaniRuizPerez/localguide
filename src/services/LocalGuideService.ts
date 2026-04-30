@@ -265,36 +265,58 @@ function buildQuizPrompt(
  * (a) inject the previous questions into the prompt as a do-not-repeat list
  * and (b) reject and retry duplicates at the JS layer.
  */
+// Topic angles rotated through the per-question prompts. The 1B on-device
+// model can't reliably follow a "do not repeat" instruction (we observed
+// it emit identical Q0=Q1=Q2 even with the previous questions listed and
+// labeled FORBIDDEN), so instead we hand it a fundamentally different
+// *positive* request each slot. Asking for "a question about HISTORY"
+// then "about FOOD" produces variety because each prompt is genuinely
+// asking for a different thing — the model doesn't need to reason about
+// what to avoid, only what to write about.
+const QUIZ_TOPIC_ANGLES: ReadonlyArray<{ key: string; instruction: string }> = [
+  { key: 'history', instruction: 'history, founding, or notable past events' },
+  { key: 'geography', instruction: 'geography, landscape, neighborhoods, or layout' },
+  { key: 'culture', instruction: 'culture, traditions, customs, or daily life' },
+  { key: 'food', instruction: 'food, drink, or culinary traditions' },
+  { key: 'people', instruction: 'famous people, residents, or historical figures' },
+  { key: 'landmarks', instruction: 'landmarks, buildings, or architecture' },
+  { key: 'nature', instruction: 'nature, wildlife, climate, or natural features' },
+  { key: 'industry', instruction: 'industry, economy, or what the area is known for' },
+];
+
 function buildSingleQuizPrompt(
   nearbyTitles: string[],
   locationLabel: string | undefined,
   previousQuestions: string[],
   questionIndex: number,
-  total: number
+  total: number,
+  attempt: number = 0
 ): string {
   const grounding = quizGroundingBlock(nearbyTitles, locationLabel);
-  // The avoid-list is placed RIGHT BEFORE the "Now write" instruction —
-  // the small on-device model has strong recency bias and consistently
-  // ignored the avoid-list when it sat earlier in the prompt (we observed
-  // identical Q1=Q2=Q3 even with previousQuestions populated). Pulling it
-  // to the tail and phrasing it as a hard FORBIDDEN list, plus an explicit
-  // "do not write any question similar to" callout naming the most recent
-  // one, gets the model to actually pick a new topic.
+  // Pick the angle by (slot + attempt) so each retry of the same slot uses
+  // a *different* topic — otherwise the model regenerates the same question
+  // from the same prompt and the dedupe loop wastes its budget. Confirmed
+  // live on Pixel 3: slot 3 attempt 0 emitted "primary color used by
+  // artists" and attempt 1 (with identical prompt) emitted exactly the
+  // same string. Bumping the angle on retry breaks that symmetry.
+  const angle =
+    QUIZ_TOPIC_ANGLES[(questionIndex + attempt) % QUIZ_TOPIC_ANGLES.length];
+  // Avoid-list is kept as a soft secondary signal so retries (which reuse
+  // the same slot index, hence the same angle) still get hint about what
+  // not to repeat.
   const lastQuestion = previousQuestions[previousQuestions.length - 1];
-  const forbiddenBlock = previousQuestions.length
-    ? `\n\nFORBIDDEN — do NOT write any of these questions, do NOT paraphrase them, ` +
-      `and do NOT ask about the same topic, place, person, or fact as any of them:\n` +
-      previousQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n') +
-      `\n\nYour new question MUST be on a completely different subject from #${previousQuestions.length} ("${lastQuestion}"). ` +
-      `Pick a new angle: if the previous one was about a place, ask about people or history; if it was about food, ask about geography; etc.`
+  const avoidLine = previousQuestions.length
+    ? `\nDo NOT repeat or paraphrase the previous question: "${lastQuestion}". Pick a different fact within the topic above.`
     : '';
   return buildNarratorPrompt({
     system: `You are writing one local-trivia question (#${questionIndex + 1} of ${total}) for a visitor.`,
     directives: [localePromptDirective()],
     extraContext:
       `${grounding}\n\n` +
-      `Write exactly ONE multiple-choice question. 4 options labelled A, B, C, D. ONE correct answer. ` +
-      `${QUIZ_GROUNDING_RULES}\n\n` +
+      `TOPIC for this question: ${angle.instruction}.\n` +
+      `Write exactly ONE multiple-choice question on that topic. 4 options labelled A, B, C, D. ONE correct answer. ` +
+      `${QUIZ_GROUNDING_RULES}` +
+      `${avoidLine}\n\n` +
       // The on-device 1B model consistently truncates after option D and
       // drops any trailing answer marker — even an inline "[correct]" tag
       // on the right option — observed across many runs on Pixel 3. Put
@@ -307,9 +329,8 @@ function buildSingleQuizPrompt(
       `A: The Thames\n` +
       `B: The Seine\n` +
       `C: The Danube\n` +
-      `D: The Rhine` +
-      `${forbiddenBlock}\n\n` +
-      `Now write your one question in that same six-line format. The first line MUST be "Correct: <letter>" naming which of A/B/C/D is right; the next five lines are Q, A, B, C, D in order. No intro, no explanations, no question number, no closing remarks.`,
+      `D: The Rhine\n\n` +
+      `Now write your one question on the TOPIC above, in the same six-line format. The first line MUST be "Correct: <letter>" naming which of A/B/C/D is right; the next five lines are Q, A, B, C, D in order. No intro, no explanations, no question number, no closing remarks.`,
   });
 }
 
@@ -715,8 +736,20 @@ export const localGuideService = {
           locationLabel,
           previousTexts,
           questionIndex,
-          count
+          count,
+          attempt
         );
+        if (__DEV__) {
+          // Dump prompt tail so we can verify on device that the topic
+          // angle and avoid-line are actually present in the bytes the
+          // model received. The first ~500 chars are the static system
+          // header — skip them to keep logcat readable.
+          const tail = prompt.length > 500 ? prompt.slice(-700) : prompt;
+          // eslint-disable-next-line no-console
+          console.log(
+            `[Quiz] slot ${questionIndex} attempt ${attempt} prompt-tail (last ${tail.length} of ${prompt.length}):\n${tail}`
+          );
+        }
         let fullText = '';
         let settled = false;
         inferenceService
