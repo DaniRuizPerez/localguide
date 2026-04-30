@@ -66,24 +66,43 @@ export function QuizModal({ visible, onClose, nearbyPois, locationLabel }: Props
     setGenerating(true);
 
     const titles = nearbyPois.map((p) => p.title).slice(0, 8);
+    const callbacks = {
+      onQuestion: (q: QuizQuestion) => {
+        setQuestions((prev) => [...prev, q]);
+      },
+      onDone: (all: QuizQuestion[]) => {
+        setGenerating(false);
+        handleRef.current = null;
+        if (all.length === 0) setError(t('quiz.empty'));
+      },
+      onError: (msg: string) => {
+        setGenerating(false);
+        handleRef.current = null;
+        setError(msg);
+      },
+    };
+
+    // Try to take over an in-flight background prefetch first. If it exists
+    // for this exact (location, POIs) key we get any already-generated
+    // questions immediately and continue receiving the rest as the
+    // background stream produces them — no double-generation, no wait.
+    const attached = localGuideService.attachPrefetchedQuiz(
+      titles,
+      locationLabel ?? undefined,
+      callbacks
+    );
+    if (attached) {
+      // Seed the buffered questions; subsequent ones will arrive via the
+      // forwarded onQuestion callback above.
+      setQuestions(attached.initial);
+      handleRef.current = attached.handle;
+      return;
+    }
+
     handleRef.current = localGuideService.generateQuizStream(
       titles,
       TARGET_QUESTIONS,
-      {
-        onQuestion: (q) => {
-          setQuestions((prev) => [...prev, q]);
-        },
-        onDone: (all) => {
-          setGenerating(false);
-          handleRef.current = null;
-          if (all.length === 0) setError(t('quiz.empty'));
-        },
-        onError: (msg) => {
-          setGenerating(false);
-          handleRef.current = null;
-          setError(msg);
-        },
-      },
+      callbacks,
       locationLabel ?? undefined
     );
   };

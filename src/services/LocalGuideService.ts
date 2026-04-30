@@ -192,6 +192,34 @@ export interface QuizStreamHandle {
   abort: () => Promise<void>;
 }
 
+// Singleton holding an in-flight quiz prefetch — populated by ChatScreen
+// when the home screen has settled and the model is idle, drained by
+// QuizModal on open. Keyed by location + first-N nearby titles so we don't
+// hand a Palo Alto prefetch to a user who just teleported to Lisbon. There
+// is at most one prefetch live at a time; opening a new prefetch for a
+// different key aborts the previous one.
+interface PrefetchObserver {
+  onQuestion: (question: QuizQuestion, index: number) => void;
+  onDone: (questions: QuizQuestion[]) => void;
+  onError: (message: string) => void;
+}
+interface QuizPrefetchEntry {
+  key: string;
+  questions: QuizQuestion[];
+  stream: QuizStreamHandle | null;
+  observers: PrefetchObserver[];
+  done: boolean;
+  doneAll: QuizQuestion[];
+  errorMsg: string | null;
+}
+let activePrefetch: QuizPrefetchEntry | null = null;
+
+function quizPrefetchKey(nearbyTitles: string[], locationLabel: string | undefined): string {
+  // First three titles are enough to detect a meaningfully different POI
+  // mix without making the key brittle to ordering churn deeper in the list.
+  return `${locationLabel ?? '?'}|${nearbyTitles.slice(0, 3).join('||')}`;
+}
+
 // Strip markdown emphasis (**, *, _) Gemma sprinkles around field labels —
 // "**Q:**", "*Correct:*", etc. Run on a per-line basis before regex matching.
 function stripMarkdownEmphasis(line: string): string {
@@ -913,6 +941,114 @@ export const localGuideService = {
           activeAbortPromise = activeHandle.abort();
           await activeAbortPromise;
         }
+      },
+    };
+  },
+
+  /**
+   * Kick off a low-priority quiz generation in the background so the modal
+   * has questions waiting (or partially waiting) when the user opens it.
+   * Idempotent for the same (location, POI mix); a different key aborts the
+   * prior prefetch. Does NOT compete with foreground inference: each slot
+   * awaits inferenceService.waitForIdleSlot() before issuing its native call.
+   */
+  prefetchQuiz(
+    nearbyTitles: string[],
+    count: number,
+    locationLabel?: string
+  ): void {
+    const key = quizPrefetchKey(nearbyTitles, locationLabel);
+    if (activePrefetch && activePrefetch.key === key && !activePrefetch.errorMsg) {
+      // Already prefetching (or finished) for this key — nothing to do.
+      return;
+    }
+    if (activePrefetch?.stream) {
+      activePrefetch.stream.abort().catch(() => {});
+    }
+    const entry: QuizPrefetchEntry = {
+      key,
+      questions: [],
+      stream: null,
+      observers: [],
+      done: false,
+      doneAll: [],
+      errorMsg: null,
+    };
+    activePrefetch = entry;
+    // eslint-disable-next-line no-console
+    console.log(`[QuizPrefetch] starting for key="${key}" count=${count}`);
+    entry.stream = this.generateQuizStream(
+      nearbyTitles,
+      count,
+      {
+        onQuestion: (q, i) => {
+          entry.questions.push(q);
+          for (const obs of entry.observers) obs.onQuestion(q, i);
+        },
+        onDone: (all) => {
+          entry.done = true;
+          entry.doneAll = all;
+          entry.stream = null;
+          // eslint-disable-next-line no-console
+          console.log(`[QuizPrefetch] done — buffered ${all.length} questions for key="${key}"`);
+          for (const obs of entry.observers) obs.onDone(all);
+        },
+        onError: (msg) => {
+          entry.errorMsg = msg;
+          entry.stream = null;
+          // eslint-disable-next-line no-console
+          console.warn(`[QuizPrefetch] error for key="${key}": ${msg}`);
+          for (const obs of entry.observers) obs.onError(msg);
+        },
+      },
+      locationLabel
+    );
+  },
+
+  /**
+   * Modal-side hook: try to attach to an in-flight (or finished) prefetch
+   * for the given key. Returns the buffered questions plus a handle that
+   * forwards future onQuestion / onDone / onError events to the supplied
+   * callbacks, or null if no matching prefetch exists. Aborting the handle
+   * tears down the underlying prefetch stream too — the modal owns the
+   * lifecycle once it has attached.
+   */
+  attachPrefetchedQuiz(
+    nearbyTitles: string[],
+    locationLabel: string | undefined,
+    callbacks: PrefetchObserver
+  ): { initial: QuizQuestion[]; handle: QuizStreamHandle } | null {
+    const key = quizPrefetchKey(nearbyTitles, locationLabel);
+    if (!activePrefetch || activePrefetch.key !== key) return null;
+    const entry = activePrefetch;
+    entry.observers.push(callbacks);
+    // eslint-disable-next-line no-console
+    console.log(
+      `[QuizPrefetch] attach for key="${key}" — buffer=${entry.questions.length} done=${entry.done}`
+    );
+    // If the prefetch already finished or errored before the modal opened,
+    // fire the matching event on the next tick so the modal can react in
+    // its own effect cycle rather than synchronously inside attach.
+    if (entry.done) {
+      setTimeout(() => callbacks.onDone(entry.doneAll), 0);
+    } else if (entry.errorMsg) {
+      const msg = entry.errorMsg;
+      setTimeout(() => callbacks.onError(msg), 0);
+    }
+    return {
+      initial: entry.questions.slice(),
+      handle: {
+        abort: async () => {
+          // Detach this observer; if it was the only one, clear the active
+          // prefetch slot so the next prefetchQuiz call can start fresh.
+          entry.observers = entry.observers.filter((o) => o !== callbacks);
+          if (entry.observers.length === 0) {
+            if (entry.stream) {
+              await entry.stream.abort().catch(() => {});
+            }
+            if (activePrefetch === entry) activePrefetch = null;
+          }
+        },
       },
     };
   },

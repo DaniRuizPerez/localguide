@@ -21,7 +21,7 @@ import { useNearbyPois } from '../hooks/useNearbyPois';
 import { useProximityNarration } from '../hooks/useProximityNarration';
 import { useDwellDetection } from '../hooks/useDwellDetection';
 import { useFeatureTier } from '../hooks/useFeatureTier';
-import { type GuideTopic } from '../services/LocalGuideService';
+import { type GuideTopic, localGuideService } from '../services/LocalGuideService';
 import { filterPoisByTopics } from '../services/poiTopic';
 import { speechService } from '../services/SpeechService';
 import { guidePrefs } from '../services/GuidePrefs';
@@ -117,6 +117,28 @@ export default function ChatScreen(props: Props) {
   // generic buildings) are kept regardless so the list isn't unexpectedly
   // empty when none of the local places match the picked topic.
   const visiblePois = useMemo(() => filterPoisByTopics(pois, topics), [pois, topics]);
+
+  // Background quiz prefetch. Fires once nearby places have settled and the
+  // location label is known; the prefetch itself uses priority='low' and
+  // awaits inferenceService.waitForIdleSlot() before each slot, so a
+  // foreground guide-fact or nearby-places call always jumps the queue.
+  // Net effect: by the time the user taps the Quiz card, the modal can
+  // attach to the in-flight prefetch and either show buffered questions
+  // immediately or pick up the in-flight stream mid-generation.
+  useEffect(() => {
+    if (visiblePois.length === 0) return;
+    const locationLabel = gps?.placeName ?? manualLocation ?? undefined;
+    // Wait a few seconds after the POI list lands so we don't trigger a
+    // prefetch on a flicker / partial fetch. The hysteresis on
+    // useNearbyPois already filters most thrash, but the extra debounce
+    // also lets the more important around-you LLM fallback (if any)
+    // start first.
+    const t = setTimeout(() => {
+      const titles = visiblePois.map((p) => p.title).slice(0, 8);
+      localGuideService.prefetchQuiz(titles, 5, locationLabel);
+    }, 5000);
+    return () => clearTimeout(t);
+  }, [visiblePois, gps?.placeName, manualLocation]);
 
   const autoGuide = useAutoGuide((text, autoGps) => {
     messages.addGuideMessage(text, autoGps);
