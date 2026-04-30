@@ -43,6 +43,12 @@ export function useNearbyPois(
 
   const llmCacheRef = useRef<Map<string, LlmCacheEntry>>(new Map());
   const llmFallbackTaskRef = useRef<ListPlacesTask | null>(null);
+  // Position of the last *fetch* (not last GPS update). Used to skip refires
+  // when the user hasn't really moved — protects the boundary case where
+  // GPS jitter straddles a cell line (37.4249 ↔ 37.4250 with toFixed(2))
+  // and would otherwise still cancel an in-flight LLM call.
+  const lastFetchPosRef = useRef<{ lat: number; lon: number } | null>(null);
+  const HYSTERESIS_METERS = 200;
 
   useEffect(() => {
     if (!gps) {
@@ -57,9 +63,38 @@ export function useNearbyPois(
       }
       return;
     }
+    // Hysteresis: if an LLM fallback is already in flight for a position
+    // within HYSTERESIS_METERS of the new GPS fix, let it finish instead of
+    // restarting. This guards the cell-boundary case where GPS jitter
+    // straddles 0.01° (e.g. 37.4249 ↔ 37.4250) and would otherwise still
+    // cancel-and-restart the slow on-device LLM call for no real movement.
+    const lastFetch = lastFetchPosRef.current;
+    if (lastFetch && llmFallbackTaskRef.current) {
+      const moved = distanceMeters(lastFetch.lat, lastFetch.lon, gps.latitude, gps.longitude);
+      if (moved < HYSTERESIS_METERS) {
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.log(
+            `[NearbyPois] skip refire — moved ${moved.toFixed(0)}m < ${HYSTERESIS_METERS}m hysteresis, llm in flight`
+          );
+        }
+        return;
+      }
+    }
+    lastFetchPosRef.current = { lat: gps.latitude, lon: gps.longitude };
+
     let cancelled = false;
 
-    const cellKey = `${gps.latitude.toFixed(3)}_${gps.longitude.toFixed(3)}_${radiusMeters}`;
+    // Cell granularity dropped from toFixed(3) (~110m) to toFixed(2) (~1.1km).
+    // toFixed(3) thrashed live: GPS jitter of 0.0001° around a cell boundary
+    // (e.g. 37.4232 → 37.4235 → 37.4233) flipped the rounded key 37.423 ↔
+    // 37.424 every few seconds, re-firing the effect, cancelling the
+    // in-flight on-device LLM fallback, and immediately restarting it. That
+    // turned a single ~2.5 min LLM call into an infinite cancel-and-retry
+    // loop that also blocked every other inference (quiz, guide facts) from
+    // ever completing. 1.1 km cells line up with the "Around you" radius
+    // (typically 1 km) and can absorb normal GPS noise without changing.
+    const cellKey = `${gps.latitude.toFixed(2)}_${gps.longitude.toFixed(2)}_${radiusMeters}`;
     // Don't blank the list on grid-cell change; keep what's on screen until the
     // new fetch lands so the user doesn't see an empty flicker. The streaming
     // fetch below will paint a partial result (cache or GeoNames) within tens
@@ -198,7 +233,7 @@ export function useNearbyPois(
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gps && gps.latitude.toFixed(3), gps && gps.longitude.toFixed(3), radiusMeters, hiddenGems, offline]);
+  }, [gps && gps.latitude.toFixed(2), gps && gps.longitude.toFixed(2), radiusMeters, hiddenGems, offline]);
 
   return { pois, loading };
 }
