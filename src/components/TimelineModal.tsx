@@ -15,6 +15,7 @@ import { t } from '../i18n';
 import {
   localGuideService,
   type TimelineEvent,
+  type TimelineSource,
   type TimelineTask,
 } from '../services/LocalGuideService';
 import type { GPSContext } from '../services/InferenceService';
@@ -30,6 +31,7 @@ interface Props {
 export function TimelineModal({ visible, onClose, poiTitle, location }: Props) {
   const insets = useSafeAreaInsets();
   const [events, setEvents] = useState<TimelineEvent[]>([]);
+  const [source, setSource] = useState<TimelineSource | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTask, setActiveTask] = useState<TimelineTask | null>(null);
@@ -37,14 +39,16 @@ export function TimelineModal({ visible, onClose, poiTitle, location }: Props) {
   useEffect(() => {
     if (!visible || !poiTitle) return;
     setEvents([]);
+    setSource(null);
     setError(null);
     setLoading(true);
     const task = localGuideService.buildTimeline(poiTitle, location);
     setActiveTask(task);
     task.promise
       .then((res) => {
-        setEvents(res);
-        if (res.length === 0) setError(t('timeline.empty'));
+        setEvents(res.events);
+        setSource(res.source);
+        if (res.events.length === 0) setError(t('timeline.empty'));
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : String(err));
@@ -80,6 +84,20 @@ export function TimelineModal({ visible, onClose, poiTitle, location }: Props) {
           <View style={styles.handle} />
           <Text style={styles.heading}>{t('timeline.title')}</Text>
           {poiTitle ? <Text style={styles.subheading}>{poiTitle}</Text> : null}
+
+          {source === 'ai-offline' && (
+            <View style={styles.offlineStrip} testID="offline-strip">
+              <Text style={styles.offlineStripText}>
+                ⚠ Generated offline — verify before relying on it
+              </Text>
+            </View>
+          )}
+
+          {source === 'wikipedia' && (
+            <View style={styles.wikiStrip} testID="wikipedia-strip">
+              <Text style={styles.wikiStripText}>From Wikipedia</Text>
+            </View>
+          )}
 
           {loading && (
             <View style={styles.loadingRow}>
@@ -212,5 +230,27 @@ const styles = StyleSheet.create({
     ...Type.bodySm,
     color: Colors.text,
     marginTop: 4,
+  },
+  offlineStrip: {
+    backgroundColor: Colors.warningLight,
+    borderRadius: 6,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 6,
+    marginBottom: Spacing.sm,
+  },
+  offlineStripText: {
+    ...Type.bodySm,
+    color: Colors.warning,
+  },
+  wikiStrip: {
+    backgroundColor: Colors.secondaryLight,
+    borderRadius: 6,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 6,
+    marginBottom: Spacing.sm,
+  },
+  wikiStripText: {
+    ...Type.bodySm,
+    color: Colors.secondary,
   },
 });

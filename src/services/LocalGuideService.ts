@@ -10,7 +10,8 @@ import { buildNarratorPrompt, formatCoordinates } from './promptBuilder';
 import { localePromptDirective } from '../i18n';
 import { narrationPrefs, narrationLengthDirective, type NarrationLength } from './NarrationPrefs';
 import { guidePrefs, HIDDEN_GEMS_DIRECTIVE } from './GuidePrefs';
-// W4 — online itinerary path (no LLM)
+// Online-mode dependencies (W3 timeline + W4 itinerary): appMode picks the
+// path, Wikipedia grounds it, Poi types the itinerary input.
 import { appMode } from './AppMode';
 import { type Poi } from './PoiService';
 import { wikipediaService } from './WikipediaService';
@@ -258,7 +259,14 @@ export interface TimelineEvent {
   event: string;
 }
 
-export type TimelineTask = AbortableTask<TimelineEvent[]>;
+export type TimelineSource = 'wikipedia' | 'ai-online' | 'ai-offline';
+
+export interface TimelineResult {
+  events: TimelineEvent[];
+  source: TimelineSource;
+}
+
+export type TimelineTask = AbortableTask<TimelineResult>;
 
 export interface QuizQuestion {
   question: string;
@@ -1006,10 +1014,86 @@ export const localGuideService = {
   /**
    * Streams a historical timeline for a POI. Resolves with parsed
    * year/event pairs. Abortable.
+   *
+   * Online: tries WikipediaService.historySection first. If it returns
+   * >= 3 events with non-null year AND no event text > 200 chars,
+   * returns directly with source='wikipedia'. Otherwise falls back to
+   * LLM with the wikitext injected as reference (1500 chars),
+   * source='ai-online'.
+   *
+   * Offline: existing LLM behavior, source='ai-offline'.
    */
   buildTimeline(poiTitle: string, location: GPSContext | string | null): TimelineTask {
-    const prompt = buildTimelinePrompt(poiTitle, location);
-    return runParsedStream(prompt, parseTimeline, { maxTokens: 350 });
+    const controller = new AbortController();
+
+    const promise = (async (): Promise<TimelineResult> => {
+      if (appMode.get() === 'online') {
+        // --- Online path: try Wikipedia first ---
+        const wikiEvents = await wikipediaService.historySection(poiTitle, {
+          signal: controller.signal,
+        });
+
+        // Quality check: >= 3 events, all have non-null/non-empty year,
+        // no event text longer than 200 chars.
+        if (
+          wikiEvents !== null &&
+          wikiEvents.length >= 3 &&
+          wikiEvents.every((e) => e.year != null && e.year.trim() !== '') &&
+          wikiEvents.every((e) => e.event.length <= 200)
+        ) {
+          return { events: wikiEvents, source: 'wikipedia' };
+        }
+
+        // --- Online fallback: LLM with wikitext reference ---
+        // Build a reference string from whatever Wikipedia returned (if anything).
+        let reference: string | undefined;
+        if (wikiEvents && wikiEvents.length > 0) {
+          reference = wikiEvents.map((e) => `${e.year} — ${e.event}`).join('\n');
+        }
+
+        const prompt = buildNarratorPrompt({
+          system:
+            'You are a history-focused local guide. Produce a concise vertical timeline of notable events for this place, from earliest to most recent.',
+          directives: [localePromptDirective()],
+          place: poiTitle,
+          extraContext:
+            (location && typeof location !== 'string' && location.placeName
+              ? `Context: in ${location.placeName}.\n\n`
+              : typeof location === 'string'
+              ? `Context: in ${location}.\n\n`
+              : '') +
+            `Output 4–8 entries, strictly in this format:\n` +
+            `YEAR — event description (one sentence)\n\n` +
+            `Rules:\n` +
+            `- Use a real year, century, or well-known period as YEAR (e.g. "1793", "1880s", "12th century").\n` +
+            `- If you are not confident about a specific year, write the period instead.\n` +
+            `- Never invent events. If you have fewer than 4 reliable entries, output only the ones you are confident in.\n` +
+            `- No bullets, no numbering, no intro, no closing remarks.`,
+          reference,
+          referenceMaxChars: 1500,
+        });
+
+        const innerTask = runParsedStream(prompt, parseTimeline, { maxTokens: 350 });
+        // Wire abort so cancelling the outer task cancels the inner stream.
+        controller.signal.addEventListener('abort', () => { innerTask.abort(); });
+        const events = await innerTask.promise;
+        return { events, source: 'ai-online' };
+      }
+
+      // --- Offline path ---
+      const prompt = buildTimelinePrompt(poiTitle, location);
+      const innerTask = runParsedStream(prompt, parseTimeline, { maxTokens: 350 });
+      controller.signal.addEventListener('abort', () => { innerTask.abort(); });
+      const events = await innerTask.promise;
+      return { events, source: 'ai-offline' };
+    })();
+
+    return {
+      promise,
+      abort: async () => {
+        controller.abort();
+      },
+    };
   },
 
   /**
