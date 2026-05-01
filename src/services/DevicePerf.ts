@@ -22,13 +22,18 @@ import { totalMemory as expoTotalMemory } from 'expo-device';
 /**
  * Slow-device threshold in deltas/sec.
  *
- * To calibrate: run 5 baseline chat prompts on a Pixel 3 (the reference slow
- * device) and observe the mean deltas/sec printed to logcat.  Set THRESHOLD
- * so the Pixel 3 mean sits clearly below it and a modern device (Pixel 6+,
- * 8 GB+) sits clearly above it.  The default of 12 is a conservative starting
- * point — replace after the W1a Pixel 3 measurement session.
+ * Calibrated 2026-05-01 on Pixel 3 (4 GB RAM, API 30, Gemma 4 E2B via
+ * LiteRT-LM CPU, 4 threads). Two history-style chat prompts measured:
+ *   - Sample 1: 1.57 deltas/sec (94.5 s response)
+ *   - Sample 2: ~4.20 deltas/sec  (EWMA after both: 2.36)
+ * Pixel 3 sits at ~1.5–4 deltas/sec. Modern Hermes devices stream LLM
+ * deltas at ~20–50/s. THRESHOLD=8 leaves a clear gap above Pixel 3's
+ * worst case while still flagging borderline mid-range Android as slow.
+ *
+ * Re-tune if the model or runtime changes (e.g. swapping LiteRT for
+ * MediaPipe Tasks, or moving from Gemma 4 E2B to a larger variant).
  */
-const THRESHOLD = 12;
+const THRESHOLD = 8;
 
 /** EWMA smoothing factor. Higher alpha = more weight on recent samples. */
 const ALPHA = 0.3;

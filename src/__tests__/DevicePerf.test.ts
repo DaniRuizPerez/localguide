@@ -194,8 +194,8 @@ describe('perfClass threshold', () => {
     const { devicePerf } = freshDevicePerf();
     devicePerf.__resetForTest();
 
-    // 8 dps (well below threshold of 12).
-    await recordN(devicePerf, 5, 40, 5_000);
+    // 4 dps (well below threshold of 8 — Pixel 3 lives around here).
+    await recordN(devicePerf, 5, 20, 5_000);
 
     expect(devicePerf.perfClass()).toBe('slow');
   });
@@ -204,7 +204,7 @@ describe('perfClass threshold', () => {
     const { devicePerf } = freshDevicePerf();
     devicePerf.__resetForTest();
 
-    // 25 dps (well above threshold of 12).
+    // 25 dps (well above threshold of 8 — modern Hermes device).
     await recordN(devicePerf, 5, 125, 5_000);
 
     expect(devicePerf.perfClass()).toBe('fast');
@@ -275,7 +275,7 @@ describe('persistence round-trip', () => {
     const dps = sharedDevicePerf.deltasPerSecond();
     expect(dps).not.toBeNull();
     expect(dps!).toBeCloseTo(24.5, 1);
-    expect(sharedDevicePerf.perfClass()).toBe('fast'); // 24.5 > THRESHOLD(12)
+    expect(sharedDevicePerf.perfClass()).toBe('fast'); // 24.5 > THRESHOLD(8)
   });
 
   it('writes EWMA state to AsyncStorage after debounce fires', async () => {
