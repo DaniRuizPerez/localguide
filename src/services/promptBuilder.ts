@@ -61,7 +61,7 @@ export interface NarratorPromptParts {
   cue?: string;
 }
 
-/** Max reference length before truncation (chars). */
+/** Default max reference length (offline; online RAG passes 1500). */
 const REFERENCE_MAX_CHARS = 600;
 
 /**

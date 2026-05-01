@@ -10,8 +10,8 @@ import { buildNarratorPrompt, formatCoordinates } from './promptBuilder';
 import { localePromptDirective } from '../i18n';
 import { narrationPrefs, narrationLengthDirective, type NarrationLength } from './NarrationPrefs';
 import { guidePrefs, HIDDEN_GEMS_DIRECTIVE } from './GuidePrefs';
-// Online-mode dependencies (W3 timeline + W4 itinerary): appMode picks the
-// path, Wikipedia grounds it, Poi types the itinerary input.
+// Online-mode dependencies (W2 chat / W3 timeline / W4 itinerary / W5 quiz):
+// appMode picks the path, Wikipedia grounds it, Poi types the itinerary input.
 import { appMode } from './AppMode';
 import { type Poi } from './PoiService';
 import { wikipediaService } from './WikipediaService';
@@ -276,6 +276,8 @@ export interface QuizQuestion {
   question: string;
   options: string[];
   correctIndex: number;
+  /** Set by Wave 5: 'wikipedia' (online+grounded), 'ai-online' (online+no-ref), 'ai-offline' (offline). */
+  source?: 'wikipedia' | 'ai-online' | 'ai-offline';
 }
 
 export type QuizTask = AbortableTask<QuizQuestion[]>;
@@ -367,7 +369,8 @@ const QUIZ_GROUNDING_RULES =
 function buildQuizPrompt(
   nearbyTitles: string[],
   count: number,
-  locationLabel?: string
+  locationLabel?: string,
+  reference?: string
 ): string {
   const grounding = quizGroundingBlock(nearbyTitles, locationLabel);
   return buildNarratorPrompt({
@@ -387,6 +390,8 @@ function buildQuizPrompt(
       `D: <option>\n` +
       `Correct: A\n` +
       `(no intro, no explanations, no closing remarks)`,
+    reference,
+    referenceMaxChars: 1500,
   });
 }
 
@@ -425,7 +430,8 @@ function buildSingleQuizPrompt(
   previousQuestions: string[],
   questionIndex: number,
   total: number,
-  attempt: number = 0
+  attempt: number = 0,
+  reference?: string
 ): string {
   const grounding = quizGroundingBlock(nearbyTitles, locationLabel);
   // Pick the angle by (slot + attempt) so each retry of the same slot uses
@@ -489,6 +495,8 @@ function buildSingleQuizPrompt(
       `C: 1920\n` +
       `D: 1952\n\n` +
       `Now write your one short question on the TOPIC above, in the same six-line format. The first line MUST be "Correct: <letter>" naming which of A/B/C/D is right; the next five lines are Q, A, B, C, D in order. No intro, no explanations, no question number, no closing remarks.`,
+    reference,
+    referenceMaxChars: 1500,
   });
 }
 
@@ -1125,6 +1133,14 @@ export const localGuideService = {
    * and any duplicate that slips through is rejected and re-generated on
    * the JS side (capped at MAX_DEDUPE_RETRIES per slot to avoid loops).
    *
+   * Online mode: fetches a Wikipedia summary for each question's chosen POI
+   * title (round-robin from nearbyTitles), injects the extract as a 1500-char
+   * reference, and tags the question source='wikipedia'. Falls back to
+   * source='ai-online' when Wikipedia returns null. Concurrent Wikipedia calls
+   * are capped at 3 via a simple semaphore.
+   *
+   * Offline mode: existing LLM-only path, tagged source='ai-offline'.
+   *
    * Why per-question rather than one batch prompt: on the small on-device
    * model, a single prompt asking for 5 questions tends to (a) pad to a
    * famous landmark when the POI list is thin and (b) repeat the first
@@ -1147,12 +1163,49 @@ export const localGuideService = {
     // 6-line block well under 200 tokens, and capping decode time keeps
     // each slot under ~10 s on Pixel 3 instead of 25–40 s.
     const TOKENS_PER_QUESTION = 200;
+    // Concurrency cap for Wikipedia summary fetches (Decision F).
+    const WIKI_CONCURRENCY = 3;
 
     const emitted: QuizQuestion[] = [];
     const fingerprints = new Set<string>();
     let aborted = false;
     let activeHandle: StreamHandle | null = null;
     let activeAbortPromise: Promise<void> | null = null;
+
+    // Simple counting semaphore for Wikipedia fetch concurrency.
+    let wikiInFlight = 0;
+    const wikiQueue: Array<() => void> = [];
+    function wikiAcquire(): Promise<void> {
+      if (wikiInFlight < WIKI_CONCURRENCY) {
+        wikiInFlight++;
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) => {
+        wikiQueue.push(resolve);
+      });
+    }
+    function wikiRelease(): void {
+      const next = wikiQueue.shift();
+      if (next) {
+        next();
+      } else {
+        wikiInFlight--;
+      }
+    }
+
+    // Fetch a Wikipedia reference for a given title, respecting the concurrency cap.
+    async function fetchWikiReference(title: string): Promise<string | null> {
+      await wikiAcquire();
+      try {
+        const result = await wikipediaService.summary(title);
+        return result?.extract ?? null;
+      } finally {
+        wikiRelease();
+      }
+    }
+
+    const isOnline = appMode.get() === 'online';
+    const questionSource: 'wikipedia' | 'ai-online' | 'ai-offline' = isOnline ? 'ai-online' : 'ai-offline';
 
     const runOne = async (
       questionIndex: number,
@@ -1166,6 +1219,26 @@ export const localGuideService = {
       // seconds.
       await inferenceService.waitForIdleSlot();
       if (aborted) return null;
+
+      // Fetch Wikipedia reference if online and we have titles to pick from.
+      let reference: string | null = null;
+      let resolvedSource: 'wikipedia' | 'ai-online' | 'ai-offline' = questionSource;
+      if (isOnline && nearbyTitles.length > 0) {
+        // Round-robin: pick a title by index so each question covers a different POI.
+        const title = nearbyTitles[questionIndex % nearbyTitles.length];
+        try {
+          reference = await fetchWikiReference(title);
+          if (reference) {
+            resolvedSource = 'wikipedia';
+          }
+        } catch {
+          // Network failure: fall back to LLM-only for this question.
+          reference = null;
+        }
+      }
+
+      if (aborted) return null;
+
       return new Promise((resolve, reject) => {
         const previousTexts = emitted.map((e) => e.question);
         const prompt = buildSingleQuizPrompt(
@@ -1174,7 +1247,8 @@ export const localGuideService = {
           previousTexts,
           questionIndex,
           count,
-          attempt
+          attempt,
+          reference ?? undefined
         );
         if (__DEV__) {
           // Dump prompt tail so we can verify on device that the topic
@@ -1184,7 +1258,7 @@ export const localGuideService = {
           const tail = prompt.length > 500 ? prompt.slice(-700) : prompt;
           // eslint-disable-next-line no-console
           console.log(
-            `[Quiz] slot ${questionIndex} attempt ${attempt} prompt-tail (last ${tail.length} of ${prompt.length}):\n${tail}`
+            `[Quiz] slot ${questionIndex} attempt ${attempt} source=${resolvedSource} prompt-tail (last ${tail.length} of ${prompt.length}):\n${tail}`
           );
         }
         let fullText = '';
@@ -1223,6 +1297,9 @@ export const localGuideService = {
                       fullText.slice(0, 600)
                   );
                 }
+                if (parsed) {
+                  parsed.source = resolvedSource;
+                }
                 resolve(parsed);
               },
               onError: (msg) => {
@@ -1246,9 +1323,6 @@ export const localGuideService = {
             settled = true;
             reject(err instanceof Error ? err : new Error(String(err)));
           });
-        // attempt is only used for logging hooks in the future; kept on
-        // the closure so callers see the retry count if we ever expose it.
-        void attempt;
       });
     };
 

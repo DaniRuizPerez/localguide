@@ -52,12 +52,38 @@ jest.mock('../services/InferenceService', () => {
   };
 });
 
+// --- AppMode mock (controlled per test) ---
+let mockAppModeValue: 'online' | 'offline' = 'offline';
+jest.mock('../services/AppMode', () => ({
+  appMode: {
+    get: () => mockAppModeValue,
+    subscribe: jest.fn(() => () => {}),
+    __resetForTest: jest.fn(),
+  },
+}));
+
+// --- WikipediaService mock (controlled per test) ---
+let mockWikiSummary: jest.Mock;
+jest.mock('../services/WikipediaService', () => {
+  mockWikiSummary = jest.fn();
+  return {
+    wikipediaService: {
+      summary: (...args: any[]) => mockWikiSummary(...args),
+      historySection: jest.fn().mockResolvedValue(null),
+      summarize: jest.fn().mockResolvedValue(null),
+      clearCache: jest.fn(),
+    },
+  };
+});
+
 import { localGuideService } from '../services/LocalGuideService';
 
 beforeEach(() => {
   mockRunStream.mockClear();
   callQueue.length = 0;
   sharedCallbacks.current = null;
+  mockAppModeValue = 'offline';
+  if (mockWikiSummary) mockWikiSummary.mockReset();
 });
 
 describe('generateQuiz', () => {
@@ -567,5 +593,157 @@ describe('generateQuizStream', () => {
 
     expect(onError).toHaveBeenCalledWith('inference oom');
     expect(onDone).not.toHaveBeenCalled();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// Wave 5: Wikipedia RAG + source tagging
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('generateQuizStream — W5 Wikipedia RAG', () => {
+  afterAll(async () => {
+    await localGuideService.dispose();
+  });
+
+  const oneQuestion = (n: number, correct = 'A') =>
+    `Q: Q${n}?\nA: a${n}\nB: b${n}\nC: c${n}\nD: d${n}\nCorrect: ${correct}\n`;
+
+  it('offline → LLM-only, source="ai-offline"', async () => {
+    mockAppModeValue = 'offline';
+    if (mockWikiSummary) mockWikiSummary.mockResolvedValue(null);
+
+    const onQuestion = jest.fn();
+    const onDone = jest.fn();
+    const onError = jest.fn();
+
+    localGuideService.generateQuizStream(
+      ['Stanford University'],
+      1,
+      { onQuestion, onDone, onError },
+      'Palo Alto, California'
+    );
+
+    await completeNextCallWith(oneQuestion(1));
+
+    expect(onQuestion).toHaveBeenCalledTimes(1);
+    expect(onQuestion.mock.calls[0][0]).toMatchObject({ source: 'ai-offline' });
+    // Wikipedia should NOT be called in offline mode.
+    if (mockWikiSummary) expect(mockWikiSummary).not.toHaveBeenCalled();
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('online + Wikipedia hit → reference passed to LLM, source="wikipedia"', async () => {
+    mockAppModeValue = 'online';
+    const extract = 'Stanford University is a private research university in Stanford, California.';
+    if (mockWikiSummary) mockWikiSummary.mockResolvedValue({ extract, title: 'Stanford University', pageUrl: '' });
+
+    const onQuestion = jest.fn();
+    const onDone = jest.fn();
+    const onError = jest.fn();
+
+    localGuideService.generateQuizStream(
+      ['Stanford University'],
+      1,
+      { onQuestion, onDone, onError },
+      'Palo Alto, California'
+    );
+
+    await completeNextCallWith(oneQuestion(1));
+
+    expect(onQuestion).toHaveBeenCalledTimes(1);
+    expect(onQuestion.mock.calls[0][0]).toMatchObject({ source: 'wikipedia' });
+    // The Wikipedia extract must appear in the prompt sent to the LLM.
+    const prompt: string = mockRunStream.mock.calls[0][0];
+    expect(prompt).toContain('Stanford University is a private research university');
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('online + Wikipedia null for a title → that question tagged "ai-online"', async () => {
+    mockAppModeValue = 'online';
+    // Wikipedia returns null (e.g. 404 or network error).
+    if (mockWikiSummary) mockWikiSummary.mockResolvedValue(null);
+
+    const onQuestion = jest.fn();
+    const onDone = jest.fn();
+    const onError = jest.fn();
+
+    localGuideService.generateQuizStream(
+      ['Unknown POI'],
+      1,
+      { onQuestion, onDone, onError }
+    );
+
+    await completeNextCallWith(oneQuestion(1));
+
+    expect(onQuestion).toHaveBeenCalledTimes(1);
+    expect(onQuestion.mock.calls[0][0]).toMatchObject({ source: 'ai-online' });
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('online with prefetch: prefetchQuiz also threads Wikipedia reference', async () => {
+    mockAppModeValue = 'online';
+    const extract = 'The Louvre is the world famous art museum in Paris.';
+    if (mockWikiSummary) mockWikiSummary.mockResolvedValue({ extract, title: 'Louvre', pageUrl: '' });
+
+    // Trigger the prefetch path which internally calls generateQuizStream.
+    localGuideService.prefetchQuiz(['Louvre'], 1, 'Paris, France');
+
+    // Drive the single question to completion.
+    await completeNextCallWith(oneQuestion(1));
+    await flushMicrotasks();
+
+    // The prompt must contain the Wikipedia extract.
+    const prompt: string = mockRunStream.mock.calls[mockRunStream.mock.calls.length - 1][0];
+    expect(prompt).toContain('The Louvre is the world famous art museum in Paris.');
+  });
+
+  it('online concurrency cap: semaphore never allows more than 3 in-flight Wikipedia calls', async () => {
+    // This test exercises the semaphore in isolation by calling generateQuizStream
+    // with count=5 but checking that Wikipedia is called at most once per sequential
+    // question slot. Since the driver is sequential (one slot at a time), the
+    // semaphore primarily serves as a guard against future parallelism. We verify:
+    // (a) Wikipedia is called for each online question (with a title), and
+    // (b) the semaphore allows at least 1 call through (i.e., it resolves properly).
+    mockAppModeValue = 'online';
+
+    let maxInFlight = 0;
+    let currentInFlight = 0;
+
+    if (mockWikiSummary) {
+      mockWikiSummary.mockImplementation(() => {
+        currentInFlight++;
+        if (currentInFlight > maxInFlight) maxInFlight = currentInFlight;
+        return Promise.resolve({ extract: 'Some Wikipedia content.', title: 'POI', pageUrl: '' }).then((r) => {
+          currentInFlight--;
+          return r;
+        });
+      });
+    }
+
+    const onQuestion = jest.fn();
+    const onDone = jest.fn();
+    const onError = jest.fn();
+
+    localGuideService.generateQuizStream(
+      ['POI1', 'POI2', 'POI3', 'POI4', 'POI5'],
+      5,
+      { onQuestion, onDone, onError }
+    );
+
+    // Drive all 5 questions to completion.
+    for (let i = 0; i < 5; i++) {
+      await completeNextCallWith(oneQuestion(i + 1));
+    }
+
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onQuestion).toHaveBeenCalledTimes(5);
+    // Each question should have been tagged 'wikipedia' since all got a summary.
+    for (const call of onQuestion.mock.calls) {
+      expect(call[0]).toMatchObject({ source: 'wikipedia' });
+    }
+    // The semaphore cap of 3 must never be violated.
+    expect(maxInFlight).toBeLessThanOrEqual(3);
+    // Wikipedia must have been called exactly once per question.
+    if (mockWikiSummary) expect(mockWikiSummary).toHaveBeenCalledTimes(5);
   });
 });
