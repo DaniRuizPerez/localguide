@@ -7,6 +7,7 @@ import type { Message } from '../types/chat';
 import type { ChatMessagesApi } from './useChatMessages';
 import { appMode } from '../services/AppMode';
 import type { Source } from '../components/SourceBadge';
+import { devicePerf } from '../services/DevicePerf';
 
 export interface GuideStreamDeps {
   /** Message state surface — stream writes into it. */
@@ -95,6 +96,7 @@ export function useGuideStream({ messages, speakResponsesRef, topicRef, onScroll
         if (speakResponsesRef.current) speechService.enqueue(segment);
       });
       const start = Date.now();
+      let deltaCount = 0;
 
       return new Promise<void>((resolve) => {
         (async () => {
@@ -103,11 +105,14 @@ export function useGuideStream({ messages, speakResponsesRef, topicRef, onScroll
               onToken: (delta: string) => {
                 messages.appendGuideToken(guideId, delta);
                 chunker.push(delta);
+                deltaCount += 1;
                 onScroll?.();
               },
               onDone: () => {
                 chunker.flush();
-                messages.finalizeGuideMessage(guideId, Date.now() - start);
+                const durationMs = Date.now() - start;
+                messages.finalizeGuideMessage(guideId, durationMs);
+                devicePerf.recordStream(deltaCount, durationMs);
                 streamRef.current = null;
                 setInferring(false);
                 onScroll?.();
