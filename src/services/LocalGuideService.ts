@@ -93,13 +93,17 @@ function buildPrompt(
   userQuery: string,
   topics?: readonly GuideTopic[],
   length?: NarrationLength,
-  history?: readonly ChatTurn[]
+  history?: readonly ChatTurn[],
+  reference?: string
 ): string {
   return buildNarratorPrompt({
     system: SYSTEM_PROMPT,
     directives: [topicFocusDirective(topics), localePromptDirective(), lengthDirective(length)],
     place: location,
     extraContext: renderHistoryBlock(history),
+    reference,
+    // Online RAG uses a wider clamp (1500 chars) to preserve more Wikipedia content.
+    referenceMaxChars: reference ? 1500 : undefined,
     cue: userQuery.trim() || 'Narrate what is interesting about this place.',
   });
 }
@@ -1260,9 +1264,10 @@ export const localGuideService = {
     location: GPSContext | string,
     callbacks: StreamCallbacks,
     topics?: readonly GuideTopic[],
-    history?: readonly ChatTurn[]
+    history?: readonly ChatTurn[],
+    reference?: string
   ): Promise<StreamHandle> {
-    const prompt = buildPrompt(location, userQuery, topics, undefined, history);
+    const prompt = buildPrompt(location, userQuery, topics, undefined, history, reference);
     return inferenceService.runInferenceStream(prompt, callbacks);
   },
 
@@ -1272,8 +1277,10 @@ export const localGuideService = {
     imagePath: string,
     callbacks: StreamCallbacks,
     topics?: readonly GuideTopic[],
-    history?: readonly ChatTurn[]
+    history?: readonly ChatTurn[],
+    reference?: string
   ): Promise<StreamHandle> {
+    // reference is accepted for API symmetry but not used (Decision D: image chat is LLM-only).
     const prompt = buildImagePrompt(location, userQuery, topics, undefined, history);
     return inferenceService.runInferenceStream(prompt, callbacks, { imagePath });
   },
