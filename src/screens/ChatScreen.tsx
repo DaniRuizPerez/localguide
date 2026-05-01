@@ -37,6 +37,7 @@ import { PlaybackControls } from '../components/PlaybackControls';
 import { ItineraryModal } from '../components/ItineraryModal';
 import { QuizModal } from '../components/QuizModal';
 import { ChatHeader } from '../components/ChatHeader';
+import { OfflineNotice } from '../components/OfflineNotice';
 import { MessageList } from '../components/MessageList';
 import { ManualLocationRow } from '../components/ManualLocationRow';
 import { ChatInputBar } from '../components/ChatInputBar';
@@ -282,6 +283,8 @@ export default function ChatScreen(props: Props) {
         onSettingsPress={() => setSettingsOpen(true)}
         onBack={hasMessages ? backToHome : undefined}
       />
+
+      <OfflineNotice />
 
       {(status === 'denied' || status === 'error') && !gps && (
         <ManualLocationRow

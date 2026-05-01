@@ -4,7 +4,7 @@ import { Colors } from '../theme/colors';
 import { Radii, Type } from '../theme/tokens';
 import { t } from '../i18n';
 
-export type Source = 'wikipedia' | 'maps' | 'ai-online' | 'ai-offline';
+export type Source = 'wikipedia' | 'maps' | 'geonames' | 'ai-online' | 'ai-offline';
 
 interface Props {
   source: Source;
@@ -13,14 +13,16 @@ interface Props {
 const GLYPH: Record<Source, string> = {
   wikipedia: '📖',
   maps: '🗺',
+  geonames: '📍',
   'ai-online': '🧠',
   'ai-offline': '⚠',
 };
 
 // i18n key suffix per source variant.
-const I18N_KEY: Record<Source, 'source.wikipedia' | 'source.maps' | 'source.aiOnline' | 'source.aiOffline'> = {
+const I18N_KEY: Record<Source, 'source.wikipedia' | 'source.maps' | 'source.geonames' | 'source.aiOnline' | 'source.aiOffline'> = {
   wikipedia:  'source.wikipedia',
   maps:       'source.maps',
+  geonames:   'source.geonames',
   'ai-online':  'source.aiOnline',
   'ai-offline': 'source.aiOffline',
 };
@@ -29,6 +31,7 @@ const I18N_KEY: Record<Source, 'source.wikipedia' | 'source.maps' | 'source.aiOn
 const BG: Record<Source, string> = {
   wikipedia:  Colors.surface,        // neutral cream
   maps:       '#D9EAF5',             // soft blue tint
+  geonames:   Colors.surface,        // neutral cream — like Wikipedia, GeoNames is real-world data
   'ai-online':  Colors.primaryLight, // soft peach / primary tint
   'ai-offline': Colors.warningLight, // soft amber (#FBEBD0)
 };
@@ -36,6 +39,7 @@ const BG: Record<Source, string> = {
 const FG: Record<Source, string> = {
   wikipedia:  Colors.textSecondary,
   maps:       '#1A4D6E',
+  geonames:   Colors.textSecondary,
   'ai-online':  Colors.primaryDark,
   'ai-offline': '#8A4B00',
 };
@@ -43,6 +47,7 @@ const FG: Record<Source, string> = {
 const BORDER: Record<Source, string> = {
   wikipedia:  Colors.borderLight,
   maps:       '#A9CCE0',
+  geonames:   Colors.borderLight,
   'ai-online':  Colors.primaryDark,
   'ai-offline': Colors.warning,
 };

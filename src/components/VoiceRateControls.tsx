@@ -26,6 +26,7 @@ import { speechService } from '../services/SpeechService';
 import { humanizeVoices, pickDiverseVoices } from '../services/voiceLabels';
 import { currentSpeechTag, getLocale, t } from '../i18n';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
+import { useAppMode } from '../hooks/useAppMode';
 import type * as SpeechModule from 'expo-speech';
 
 type Voice = SpeechModule.Voice;
@@ -137,6 +138,7 @@ export function VoiceRateControls({
   const [packPickerOpen, setPackPickerOpen] = useState(false);
   const availableVoices = useVoicesForLocale(visible);
   const networkState = useNetworkStatus();
+  const { effective } = useAppMode();
 
   useEffect(() => {
     return narrationPrefs.subscribe((p) => {
@@ -225,6 +227,9 @@ export function VoiceRateControls({
           >
             {/* CONNECTION — mode choice, live network status, geocoding. */}
             <SettingsGroup label={t('settings.groupConnection')}>
+              {effective === 'offline' && (
+                <Text style={styles.offlineSubtitle}>{t('offlineNotice.pillSubtitle')}</Text>
+              )}
               <SegmentedRow
                 label={t('settings.modeLabel')}
                 sub={t('settings.modeSub')}
@@ -563,6 +568,17 @@ const styles = StyleSheet.create({
     ...Type.hint,
     color: Colors.textTertiary,
     marginTop: 1,
+  },
+  offlineSubtitle: {
+    ...Type.bodySm,
+    color: '#8A4B00',
+    backgroundColor: Colors.warningLight,
+    borderColor: Colors.warning,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 8,
   },
   disclosure: {
     ...Type.h1,

@@ -12,6 +12,7 @@ import { poiService, type Poi } from '../services/PoiService';
 import { SoftButton } from '../components/SoftButton';
 import { CompassArrow } from '../components/CompassArrow';
 import { TimelineModal } from '../components/TimelineModal';
+import { OfflineNotice } from '../components/OfflineNotice';
 import { useEdgeSwipeBack } from '../components/EdgeSwipeBack';
 import { breadcrumbTrail } from '../services/BreadcrumbTrail';
 import { useBreadcrumbTrail } from '../hooks/useBreadcrumbTrail';
@@ -171,6 +172,7 @@ export default function MapScreen({ navigation }: Props) {
       </MapView>
 
       <View style={styles.overlayTop} pointerEvents="box-none">
+        <OfflineNotice />
         {gps && (
           <View style={styles.coordPill}>
             <View style={[styles.statusDot, { backgroundColor: Colors.success }]} />
