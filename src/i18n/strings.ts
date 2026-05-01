@@ -11,6 +11,16 @@ export const EN = {
     hallucinationWarning:
       '⚠  Heads up: this runs on a tiny on-device model. Like any LLM it can hallucinate — double-check anything you rely on.',
   },
+  mode: {
+    online: 'Online',
+    offline: 'Offline',
+    auto: 'Auto',
+    unknownProbing: 'Checking…',
+    toastSwitchedOffline: 'Switched to offline. Some answers may be inaccurate.',
+    toastBackOnline: 'Back online. Pulling fresh sources.',
+    offlineCaveat: '⚠  Offline mode: answers come from a tiny on-device model and may be inaccurate.',
+    onlineCaveat: '🌐  Online: grounded with real sources where possible.',
+  },
   nav: {
     chat: 'Chat',
     map: 'Map',
@@ -38,6 +48,8 @@ export const EN = {
     onDevice: 'ON DEVICE',
     identifyThis: 'What is this?',
     hiddenGems: 'HIDDEN GEMS',
+    wikipediaCard: 'More about {title} on Wikipedia',
+    tapToOpen: 'Tap to open',
   },
   compass: {
     accessibilityLabel: 'Compass pointing toward {label}',
@@ -143,6 +155,7 @@ export const EN = {
     starterHistory: 'Tell me the history here',
     starterWalk: 'Walk me somewhere pretty',
     changeRadius: '{km} · change',
+    offlineDisclaimer: 'You\'re offline — these places come from on-device data.',
   },
   settings: {
     title: 'Settings',
@@ -162,6 +175,22 @@ export const EN = {
     topicSub: 'What should your guide focus on?',
     radiusLabel: 'Radius',
     lengthLabel: 'Length',
+    groupConnection: 'CONNECTION',
+    modeLabel: 'Mode',
+    modeSub: 'Auto switches to offline when there is no internet.',
+    modeAuto: 'Auto',
+    modeOnline: 'Online',
+    modeOffline: 'Offline',
+    networkStateLabel: 'Network',
+    networkStateOnline: 'Reachable',
+    networkStateOffline: 'No connection',
+    networkStateProbing: 'Checking…',
+  },
+  source: {
+    wikipedia: 'Wikipedia',
+    maps: 'Maps',
+    aiOnline: 'AI',
+    aiOffline: 'Offline AI · may be inaccurate',
   },
   topics: {
     everything: 'Everything',
