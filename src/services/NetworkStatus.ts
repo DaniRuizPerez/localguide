@@ -59,7 +59,12 @@ async function runProbe(): Promise<void> {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
   try {
-    const res = await fetch(PROBE_URL, { signal: controller.signal, cache: 'no-store' });
+    // Wikipedia rejects unidentified UAs with HTTP 403 (User-Agent policy).
+    const res = await fetch(PROBE_URL, {
+      signal: controller.signal,
+      cache: 'no-store',
+      headers: { 'User-Agent': 'LocalGuide/1.0 (https://github.com/DaniRuizPerez/localguide)' },
+    });
     if (res.ok) {
       consecutiveFailures = 0;
       transition('online');
