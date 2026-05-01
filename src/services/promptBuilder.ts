@@ -13,6 +13,8 @@ import type { GPSContext } from './InferenceService';
  *   Place: <place>
  *   Coordinates: <coords>
  *   <extraContext>
+ *   Reference (use as ground truth — rephrase but never contradict):
+ *   <reference, clamped to 600 chars>
  *   Cue: <cue>
  */
 export interface NarratorPromptParts {
@@ -39,6 +41,12 @@ export interface NarratorPromptParts {
   /** Extra freeform context inserted between the location block and the cue. */
   extraContext?: string;
   /**
+   * Optional grounded reference text (e.g. from a RAG retrieval).
+   * Hard-capped at 600 chars (Pixel 3 prefill cost is linear in chars).
+   * Rendered after extraContext and before the cue as a "Reference:" block.
+   */
+  reference?: string;
+  /**
    * The user-facing cue / question, e.g. "Narrate what's interesting here".
    * Optional — some prompts (nearby-places listing) don't need a separate
    * cue because the task is fully specified in extraContext.
@@ -46,8 +54,25 @@ export interface NarratorPromptParts {
   cue?: string;
 }
 
+/** Max reference length before truncation (chars). */
+const REFERENCE_MAX_CHARS = 600;
+
+/**
+ * Clamps `text` to at most `maxChars` characters.
+ * Prefers trimming at the last sentence boundary (.  !  ?) before the limit;
+ * falls back to a hard cut + ellipsis when no boundary exists.
+ */
+export function clampToSentence(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const slice = text.slice(0, maxChars);
+  // Find the last sentence-ending punctuation within the slice.
+  const boundary = Math.max(slice.lastIndexOf('.'), slice.lastIndexOf('!'), slice.lastIndexOf('?'));
+  if (boundary > 0) return text.slice(0, boundary + 1);
+  return `${slice}…`;
+}
+
 export function buildNarratorPrompt(parts: NarratorPromptParts): string {
-  const { system, directives = [], place = null, omitCoordsWithPlace = true, extraContext, cue } = parts;
+  const { system, directives = [], place = null, omitCoordsWithPlace = true, extraContext, reference, cue } = parts;
 
   const header = [system];
   for (const d of directives) {
@@ -61,6 +86,10 @@ export function buildNarratorPrompt(parts: NarratorPromptParts): string {
   if (placeLine) bodyParts.push(placeLine);
   if (coordsLine) bodyParts.push(coordsLine);
   if (extraContext) bodyParts.push(extraContext);
+  if (reference) {
+    const clamped = clampToSentence(reference, REFERENCE_MAX_CHARS);
+    bodyParts.push(`Reference (use as ground truth — rephrase but never contradict):\n${clamped}`);
+  }
   if (cue) bodyParts.push(`Cue: ${cue}`);
 
   return `${header.join('\n')}\n${bodyParts.join('\n')}`;
