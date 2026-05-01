@@ -11,6 +11,11 @@ interface Options {
    * Honors the user's offline-mode toggle.
    */
   offline?: boolean;
+  /**
+   * When true, never run the LLM fallback even if geo results < TARGET_COUNT.
+   * Online users get real POIs only — no AI-generated picks, no divider.
+   */
+  skipLlmFill?: boolean;
 }
 
 interface Result {
@@ -58,7 +63,7 @@ export function useNearbyPois(
   radiusMeters: number,
   options: Options = {}
 ): Result {
-  const { hiddenGems = false, offline = false } = options;
+  const { hiddenGems = false, offline = false, skipLlmFill = false } = options;
   const [pois, setPois] = useState<Poi[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -180,6 +185,13 @@ export function useNearbyPois(
         if (sorted.length > 0) setPois(sorted);
         const llmFillCount = TARGET_COUNT - sorted.length;
         if (llmFillCount <= 0) return;
+        if (skipLlmFill) {
+          if (__DEV__) {
+            // eslint-disable-next-line no-console
+            console.log(`[NearbyPois] online mode — skipping LLM fill (have ${sorted.length} real POIs)`);
+          }
+          return;
+        }
 
         // Gate the LLM fallback on having a usable place name. Without it,
         // both the listNearbyPlaces prompt AND the verify prompt drop the
@@ -331,7 +343,7 @@ export function useNearbyPois(
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gps && gps.latitude.toFixed(2), gps && gps.longitude.toFixed(2), gps?.placeName, radiusMeters, hiddenGems, offline]);
+  }, [gps && gps.latitude.toFixed(2), gps && gps.longitude.toFixed(2), gps?.placeName, radiusMeters, hiddenGems, offline, skipLlmFill]);
 
   return { pois, loading };
 }

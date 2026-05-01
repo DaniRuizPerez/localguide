@@ -18,6 +18,7 @@ import { useVoiceInput } from '../hooks/useVoiceInput';
 import { useChatMessages } from '../hooks/useChatMessages';
 import { useGuideStream } from '../hooks/useGuideStream';
 import { useNearbyPois } from '../hooks/useNearbyPois';
+import { useAppMode } from '../hooks/useAppMode';
 import { useProximityNarration } from '../hooks/useProximityNarration';
 import { useDwellDetection } from '../hooks/useDwellDetection';
 import { useFeatureTier } from '../hooks/useFeatureTier';
@@ -69,14 +70,12 @@ export default function ChatScreen(props: Props) {
   const [noticeDismissed, setNoticeDismissed] = useState(false);
   const { features } = useFeatureTier();
   const [hiddenGems, setHiddenGems] = useState<boolean>(guidePrefs.get().hiddenGems);
-  const [offlineMode, setOfflineMode] = useState<boolean>(guidePrefs.get().offlineMode);
   const [dismissedDwellIds, setDismissedDwellIds] = useState<Set<number>>(new Set());
 
   useEffect(
     () =>
       guidePrefs.subscribe((p) => {
         setHiddenGems(p.hiddenGems);
-        setOfflineMode(p.offlineMode);
       }),
     []
   );
@@ -105,9 +104,11 @@ export default function ChatScreen(props: Props) {
     onScroll: scrollToEnd,
   });
 
+  const { effective } = useAppMode();
   const { pois, loading: poisLoading } = useNearbyPois(gps, poiRadiusMeters, {
     hiddenGems,
-    offline: offlineMode,
+    offline: effective === 'offline',
+    skipLlmFill: effective === 'online',
   });
 
   // Topic filter is applied in-memory rather than re-issuing the fetch — the
@@ -364,8 +365,6 @@ export default function ChatScreen(props: Props) {
         }}
         hiddenGems={hiddenGems}
         onHiddenGemsChange={(next) => guidePrefs.setHiddenGems(next)}
-        offlineMode={offlineMode}
-        onOfflineModeChange={(next) => guidePrefs.setOfflineMode(next)}
         topics={topics}
         onTopicsChange={setTopics}
         radiusMeters={poiRadiusMeters}
