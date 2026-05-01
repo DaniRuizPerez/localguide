@@ -16,7 +16,7 @@ import { TopicChips, type GuideTopic } from './TopicChips';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../theme/colors';
 import { Radii, Shadows, Sizing, Spacing, Type } from '../theme/tokens';
-import { guidePrefs } from '../services/GuidePrefs';
+import { guidePrefs, type ModeChoice } from '../services/GuidePrefs';
 import {
   narrationPrefs,
   NARRATION_LENGTH_VALUES,
@@ -25,6 +25,7 @@ import {
 import { speechService } from '../services/SpeechService';
 import { humanizeVoices, pickDiverseVoices } from '../services/voiceLabels';
 import { currentSpeechTag, getLocale, t } from '../i18n';
+import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import type * as SpeechModule from 'expo-speech';
 
 type Voice = SpeechModule.Voice;
@@ -42,8 +43,6 @@ interface Props {
   onSpeakChange: (next: boolean) => void;
   hiddenGems: boolean;
   onHiddenGemsChange: (next: boolean) => void;
-  offlineMode: boolean;
-  onOfflineModeChange: (next: boolean) => void;
   topics: readonly GuideTopic[];
   onTopicsChange: (next: GuideTopic[]) => void;
 
@@ -105,9 +104,10 @@ function useVoicesForLocale(active: boolean): Voice[] {
  * control that used to clutter the Chat chrome. Implements Option A of the
  * design handoff (Local Guide Chat Redesign.html):
  *
+ *   CONNECTION     Mode · Network state · Offline geocoder · Country packs
  *   THE GUIDE      Auto-Guide · Hidden gems · Speak
  *   SEARCH AREA    Radius · Length
- *   VOICE          Rate · Voice picker
+ *   NARRATION      Rate · Voice picker
  *
  * The component keeps its original `VoiceRateControls` name for backward
  * compatibility with tests that import it, but the surface is broader now.
@@ -121,8 +121,6 @@ export function VoiceRateControls({
   onSpeakChange,
   hiddenGems,
   onHiddenGemsChange,
-  offlineMode,
-  onOfflineModeChange,
   topics,
   onTopicsChange,
   radiusMeters,
@@ -132,11 +130,13 @@ export function VoiceRateControls({
   const [rate, setRate] = useState<number>(narrationPrefs.get().rate);
   const [voice, setVoice] = useState<string | undefined>(narrationPrefs.get().voice);
   const [length, setLength] = useState<NarrationLength>(narrationPrefs.get().length);
+  const [modeChoice, setModeChoice] = useState<ModeChoice>(guidePrefs.get().modeChoice);
   const [useOfflineGeocoder, setUseOfflineGeocoder] = useState<boolean>(
     guidePrefs.get().useOfflineGeocoder
   );
   const [packPickerOpen, setPackPickerOpen] = useState(false);
   const availableVoices = useVoicesForLocale(visible);
+  const networkState = useNetworkStatus();
 
   useEffect(() => {
     return narrationPrefs.subscribe((p) => {
@@ -148,6 +148,7 @@ export function VoiceRateControls({
 
   useEffect(() => {
     return guidePrefs.subscribe((p) => {
+      setModeChoice(p.modeChoice);
       setUseOfflineGeocoder(p.useOfflineGeocoder);
     });
   }, []);
@@ -222,15 +223,50 @@ export function VoiceRateControls({
             nestedScrollEnabled
             removeClippedSubviews={false}
           >
-            {/* THE GUIDE — behaviour toggles */}
-            <SettingsGroup label={t('settings.groupGuide')}>
+            {/* CONNECTION — mode choice, live network status, geocoding. */}
+            <SettingsGroup label={t('settings.groupConnection')}>
+              <SegmentedRow
+                label={t('settings.modeLabel')}
+                sub={t('settings.modeSub')}
+                options={[
+                  t('settings.modeAuto'),
+                  t('settings.modeOnline'),
+                  t('settings.modeOffline'),
+                ]}
+                activeIdx={
+                  modeChoice === 'force-online' ? 1 : modeChoice === 'force-offline' ? 2 : 0
+                }
+                onSelect={(i) => {
+                  const choices: ModeChoice[] = ['auto', 'force-online', 'force-offline'];
+                  guidePrefs.setModeChoice(choices[i]);
+                }}
+              />
+              <NetworkStatusRow networkState={networkState} />
               <ToggleRow
-                label={t('settings.offlineModeLabel')}
-                sub={t('settings.offlineModeSub')}
-                value={offlineMode}
-                onChange={onOfflineModeChange}
+                label="Offline geocoder"
+                sub="Use bundled place data instead of the system geocoder."
+                value={useOfflineGeocoder}
+                onChange={(next) => guidePrefs.setUseOfflineGeocoder(next)}
                 tint={Colors.primary}
               />
+              <TouchableOpacity
+                style={styles.toggleRow}
+                onPress={() => setPackPickerOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Country detail packs"
+              >
+                <View style={styles.toggleText}>
+                  <Text style={styles.toggleLabel}>Country detail packs</Text>
+                  <Text style={styles.toggleSub}>
+                    Add per-country place data for richer offline names.
+                  </Text>
+                </View>
+                <Text style={styles.disclosure}>›</Text>
+              </TouchableOpacity>
+            </SettingsGroup>
+
+            {/* THE GUIDE — behaviour toggles */}
+            <SettingsGroup label={t('settings.groupGuide')}>
               <ToggleRow
                 label={t('settings.autoGuideLabel')}
                 sub={t('settings.autoGuideSub')}
@@ -322,33 +358,6 @@ export function VoiceRateControls({
                 )}
               </View>
             </SettingsGroup>
-
-            {/* LOCATION — offline reverse-geocoding toggle + country pack manager.
-                Labels are literal English: the i18n strings module isn't in this
-                feature's scope; the integration phase can route them through t(). */}
-            <SettingsGroup label="LOCATION">
-              <ToggleRow
-                label="Offline geocoder"
-                sub="Use bundled place data instead of the system geocoder."
-                value={useOfflineGeocoder}
-                onChange={(next) => guidePrefs.setUseOfflineGeocoder(next)}
-                tint={Colors.primary}
-              />
-              <TouchableOpacity
-                style={styles.toggleRow}
-                onPress={() => setPackPickerOpen(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Country detail packs"
-              >
-                <View style={styles.toggleText}>
-                  <Text style={styles.toggleLabel}>Country detail packs</Text>
-                  <Text style={styles.toggleSub}>
-                    Add per-country place data for richer offline names.
-                  </Text>
-                </View>
-                <Text style={styles.disclosure}>›</Text>
-              </TouchableOpacity>
-            </SettingsGroup>
           </ScrollView>
 
           <TouchableOpacity style={styles.doneBtn} onPress={onClose}>
@@ -399,13 +408,48 @@ function ToggleRow({
   );
 }
 
+// Read-only row that shows the live network reachability state.
+function NetworkStatusRow({
+  networkState,
+}: {
+  networkState: 'online' | 'offline' | 'unknown';
+}) {
+  let dotColor: string;
+  let statusLabel: string;
+
+  if (networkState === 'online') {
+    dotColor = Colors.success;
+    statusLabel = t('settings.networkStateOnline');
+  } else if (networkState === 'offline') {
+    dotColor = Colors.error;
+    statusLabel = t('settings.networkStateOffline');
+  } else {
+    dotColor = Colors.textTertiary;
+    statusLabel = t('settings.networkStateProbing');
+  }
+
+  return (
+    <View style={styles.toggleRow} testID="network-status-row">
+      <View style={styles.toggleText}>
+        <Text style={styles.toggleLabel}>{t('settings.networkStateLabel')}</Text>
+      </View>
+      <View style={styles.networkStatusValue}>
+        <View style={[styles.networkDot, { backgroundColor: dotColor }]} />
+        <Text style={styles.networkStatusLabel}>{statusLabel}</Text>
+      </View>
+    </View>
+  );
+}
+
 function SegmentedRow({
   label,
+  sub,
   options,
   activeIdx,
   onSelect,
 }: {
   label: string;
+  sub?: string;
   options: string[];
   activeIdx: number;
   onSelect: (i: number) => void;
@@ -413,6 +457,7 @@ function SegmentedRow({
   return (
     <View style={styles.segmentRow}>
       <Text style={styles.toggleLabel}>{label}</Text>
+      {sub ? <Text style={styles.toggleSub}>{sub}</Text> : null}
       <View style={styles.segmentTrack}>
         {options.map((opt, i) => {
           const active = i === activeIdx;
@@ -523,6 +568,20 @@ const styles = StyleSheet.create({
     ...Type.h1,
     color: Colors.textTertiary,
     paddingHorizontal: 4,
+  },
+  networkStatusValue: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  networkDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  networkStatusLabel: {
+    ...Type.chip,
+    color: Colors.textSecondary,
   },
   segmentRow: {
     paddingVertical: 8,

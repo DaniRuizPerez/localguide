@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../theme/colors';
 import { Radii, Shadows, Sizing, Type } from '../theme/tokens';
 import { Wordmark } from './Wordmark';
+import { ConnectionPill } from './ConnectionPill';
 import { t } from '../i18n';
 import type { GPSContext } from '../services/InferenceService';
 
@@ -16,6 +17,7 @@ interface Props {
   onBack?: () => void;
 }
 
+// Dot color reflects only GPS state — online/offline is shown by ConnectionPill.
 function LocationPill({
   status,
   gps,
@@ -26,7 +28,7 @@ function LocationPill({
   manualLocation: string | null;
 }) {
   let name = t('chat.locating');
-  let dotColor: string = Colors.warning;
+  let dotColor: string = Colors.textTertiary;
   if (status === 'ready' && gps) {
     name = gps.placeName ?? t('chat.hereGeneric');
     dotColor = Colors.success;
@@ -52,10 +54,10 @@ function LocationPill({
 
 /**
  * Chat-screen header: wordmark (or a back arrow in active chat) on the left,
- * location pill + settings gear on the right. Replaces what used to be the
- * React Navigation header row (wordmark only) plus a second row rendered
- * inside the screen (location + settings) — merging them saves ~40 px of
- * vertical space so Home CTAs sit higher on the viewport.
+ * connection pill + location pill + settings gear on the right. Replaces what
+ * used to be the React Navigation header row (wordmark only) plus a second row
+ * rendered inside the screen (location + settings) — merging them saves ~40 px
+ * of vertical space so Home CTAs sit higher on the viewport.
  *
  * The Chat tab turns off the nav header (see AppNavigator), so this
  * component is responsible for its own top safe-area inset.
@@ -80,6 +82,7 @@ export function ChatHeader({ status, gps, manualLocation, onSettingsPress, onBac
         )}
       </View>
       <View style={styles.right}>
+        <ConnectionPill onPress={onSettingsPress} />
         <LocationPill status={status} gps={gps} manualLocation={manualLocation} />
         <TouchableOpacity
           style={styles.settingsBtn}
@@ -126,9 +129,8 @@ const styles = StyleSheet.create({
     borderColor: Colors.borderLight,
     gap: 6,
     flexShrink: 1,
-    // Cap the location pill to ~46% of viewport so on tall narrow phones
-    // (e.g. small Pixels) it still leaves room for the wordmark + settings.
-    maxWidth: Sizing.vw(46),
+    // Cap to ~40% — ConnectionPill now sits left of this, so we need more room.
+    maxWidth: Sizing.vw(40),
     ...Shadows.softOutset,
   },
   dot: {

@@ -1,7 +1,8 @@
 /**
- * VoiceRateControls (C2) — the narration settings bottom sheet.
+ * VoiceRateControls (C2) — the narration + connection settings bottom sheet.
  * Verifies it mirrors narrationPrefs, populates a locale-filtered voice list,
- * and writes the chosen voice back to narrationPrefs.
+ * writes the chosen voice back to narrationPrefs, and the new CONNECTION
+ * segmented control writes modeChoice via guidePrefs.
  */
 
 import React from 'react';
@@ -27,12 +28,17 @@ jest.mock('@react-native-community/slider', () => {
   };
 });
 
+// Mock useNetworkStatus so NetworkStatusRow renders deterministically.
+jest.mock('../hooks/useNetworkStatus', () => ({
+  useNetworkStatus: jest.fn(() => 'online' as const),
+}));
+
 import { VoiceRateControls } from '../components/VoiceRateControls';
 import { narrationPrefs } from '../services/NarrationPrefs';
+import { guidePrefs } from '../services/GuidePrefs';
 
-// The sheet now carries every Chat-screen setting, not just voice/rate, so
-// tests need to pass the full prop bag. Shared defaults so each render stays
-// readable — override individual keys in a test with {...defaults, ...}.
+// The sheet no longer receives offlineMode/onOfflineModeChange — it reads from
+// the store directly. Shared defaults so each render stays readable.
 const defaultProps = {
   visible: true as boolean,
   onClose: () => {},
@@ -42,8 +48,6 @@ const defaultProps = {
   onSpeakChange: () => {},
   hiddenGems: false,
   onHiddenGemsChange: () => {},
-  offlineMode: true,
-  onOfflineModeChange: () => {},
   topics: ['everything' as const],
   onTopicsChange: () => {},
   radiusMeters: 1000,
@@ -54,6 +58,7 @@ describe('VoiceRateControls', () => {
   beforeEach(() => {
     mockGetAvailableVoices.mockReset();
     narrationPrefs.__resetForTest();
+    guidePrefs.__resetForTest();
   });
 
   it('renders rate slider reflecting current prefs', async () => {
@@ -147,5 +152,60 @@ describe('VoiceRateControls', () => {
     await waitFor(() => getByText('Done'));
     fireEvent.press(getByText('Done'));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  // CONNECTION group tests
+  it('shows the CONNECTION group with mode segmented control', async () => {
+    mockGetAvailableVoices.mockResolvedValue([]);
+    const { getByText } = render(<VoiceRateControls {...defaultProps} />);
+    await waitFor(() => {
+      expect(getByText('CONNECTION')).toBeTruthy();
+      expect(getByText('Mode')).toBeTruthy();
+      // Three mode options
+      expect(getByText('Auto')).toBeTruthy();
+      expect(getByText('Online')).toBeTruthy();
+      expect(getByText('Offline')).toBeTruthy();
+    });
+  });
+
+  it('selecting Online in segmented control writes force-online to guidePrefs', async () => {
+    mockGetAvailableVoices.mockResolvedValue([]);
+    const { getByText } = render(<VoiceRateControls {...defaultProps} />);
+    await waitFor(() => getByText('Online'));
+    await act(async () => {
+      fireEvent.press(getByText('Online'));
+    });
+    expect(guidePrefs.get().modeChoice).toBe('force-online');
+  });
+
+  it('selecting Offline in segmented control writes force-offline to guidePrefs', async () => {
+    mockGetAvailableVoices.mockResolvedValue([]);
+    const { getByText } = render(<VoiceRateControls {...defaultProps} />);
+    await waitFor(() => getByText('Offline'));
+    await act(async () => {
+      fireEvent.press(getByText('Offline'));
+    });
+    expect(guidePrefs.get().modeChoice).toBe('force-offline');
+  });
+
+  it('selecting Auto in segmented control writes auto to guidePrefs', async () => {
+    mockGetAvailableVoices.mockResolvedValue([]);
+    // Start from force-offline so we can test switching back to auto.
+    guidePrefs.setModeChoice('force-offline');
+    const { getByText } = render(<VoiceRateControls {...defaultProps} />);
+    await waitFor(() => getByText('Auto'));
+    await act(async () => {
+      fireEvent.press(getByText('Auto'));
+    });
+    expect(guidePrefs.get().modeChoice).toBe('auto');
+  });
+
+  it('shows the Network status row with online label when network is online', async () => {
+    mockGetAvailableVoices.mockResolvedValue([]);
+    const { getByText } = render(<VoiceRateControls {...defaultProps} />);
+    await waitFor(() => {
+      expect(getByText('Network')).toBeTruthy();
+      expect(getByText('Reachable')).toBeTruthy();
+    });
   });
 });
