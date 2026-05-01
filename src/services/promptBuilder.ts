@@ -42,14 +42,15 @@ export interface NarratorPromptParts {
   extraContext?: string;
   /**
    * Optional grounded reference text (e.g. from a RAG retrieval).
-   * Hard-capped at `referenceMaxChars` (default 600) chars.
-   * Pixel 3 prefill cost is linear in chars; online RAG may pass 1500.
+   * Hard-capped at `referenceMaxChars` chars (default 600 — Pixel 3 prefill
+   * cost is linear in chars). Online RAG callers may pass 1500.
    * Rendered after extraContext and before the cue as a "Reference:" block.
    */
   reference?: string;
   /**
-   * Override the hard cap on the reference field. Defaults to 600 (offline-safe).
-   * Online RAG paths pass 1500 to give the model more grounding context.
+   * Per-call clamp for the reference field. Defaults to REFERENCE_MAX_CHARS
+   * (600) when omitted. Online RAG callers should pass 1500 to allow longer
+   * Wikipedia extracts.
    */
   referenceMaxChars?: number;
   /**
