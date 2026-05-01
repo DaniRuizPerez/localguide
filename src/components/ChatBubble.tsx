@@ -5,6 +5,7 @@ import { Radii, Shadows, Sizing, Type } from '../theme/tokens';
 import { GuideAvatar } from './GuideAvatar';
 import { t } from '../i18n';
 import type { Message } from '../types/chat';
+import { SourceBadge } from './SourceBadge';
 
 export function AnimatedChatBubble({ message }: { message: Message }) {
   const isUser = message.role === 'user';
@@ -36,7 +37,17 @@ export function AnimatedChatBubble({ message }: { message: Message }) {
           <Image source={{ uri: message.imageUri }} style={styles.bubbleImage} resizeMode="cover" />
         )}
         <Text style={[isUser ? styles.bubbleTextUser : styles.bubbleTextGuide]}>{message.text}</Text>
-        {message.durationMs != null && (
+        {!isUser && (message.durationMs != null || message.source != null) && (
+          <View style={styles.bubbleFooter}>
+            {message.durationMs != null && (
+              <Text style={styles.bubbleMeta}>
+                {message.durationMs}MS · {t('chat.onDevice')}
+              </Text>
+            )}
+            {message.source != null && <SourceBadge source={message.source} />}
+          </View>
+        )}
+        {isUser && message.durationMs != null && (
           <Text style={styles.bubbleMeta}>
             {message.durationMs}MS · {t('chat.onDevice')}
           </Text>
@@ -138,10 +149,16 @@ const styles = StyleSheet.create({
     ...Type.body,
     color: Colors.text,
   },
+  bubbleFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginTop: 6,
+    gap: 6,
+  },
   bubbleMeta: {
     ...Type.metaUpper,
     color: Colors.textTertiary,
-    marginTop: 6,
     opacity: 0.9,
   },
   typingRow: {
