@@ -247,6 +247,20 @@ export function QuizModal({ visible, onClose, nearbyPois, locationLabel }: Props
             <View style={styles.handle} />
             <Text style={styles.heading}>{t('quiz.title')}</Text>
             <Text style={styles.disclaimer}>{t('quiz.aiDisclaimer')}</Text>
+            {questions.length > 0 && questions.some((q) => q.source === 'ai-offline') && (
+              <View style={styles.sourceStrip} testID="offline-strip">
+                <Text style={styles.sourceStripText}>
+                  ⚠ Generated offline — answers may be wrong
+                </Text>
+              </View>
+            )}
+            {questions.length > 0 && questions.every((q) => q.source === 'wikipedia') && (
+              <View style={[styles.sourceStrip, styles.sourceStripWikipedia]} testID="wikipedia-strip">
+                <Text style={[styles.sourceStripText, styles.sourceStripWikipediaText]}>
+                  📖 From Wikipedia
+                </Text>
+              </View>
+            )}
           </View>
 
           <ScrollView
@@ -525,5 +539,29 @@ const styles = StyleSheet.create({
   scoreHeading: {
     ...Type.h1,
     color: Colors.text,
+  },
+  // Source attribution strip — shown below the title when all questions are
+  // Wikipedia-grounded or any question is offline-generated.
+  sourceStrip: {
+    backgroundColor: Colors.warningLight,
+    borderRadius: Radii.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignSelf: 'flex-start',
+    marginBottom: Spacing.xs,
+  },
+  sourceStripText: {
+    ...Type.bodySm,
+    color: '#8A4B00',
+    fontStyle: 'italic',
+  },
+  sourceStripWikipedia: {
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+  },
+  sourceStripWikipediaText: {
+    color: Colors.textSecondary,
+    fontStyle: 'normal',
   },
 });

@@ -42,10 +42,15 @@ export interface NarratorPromptParts {
   extraContext?: string;
   /**
    * Optional grounded reference text (e.g. from a RAG retrieval).
-   * Hard-capped at 600 chars (Pixel 3 prefill cost is linear in chars).
+   * Hard-capped at referenceMaxChars (default 600; online RAG passes 1500).
    * Rendered after extraContext and before the cue as a "Reference:" block.
    */
   reference?: string;
+  /**
+   * Override the reference clamp. Default 600 (Pixel 3 offline prefill budget).
+   * Online RAG callers should pass 1500 to keep enough Wikipedia context.
+   */
+  referenceMaxChars?: number;
   /**
    * The user-facing cue / question, e.g. "Narrate what's interesting here".
    * Optional — some prompts (nearby-places listing) don't need a separate
@@ -54,8 +59,8 @@ export interface NarratorPromptParts {
   cue?: string;
 }
 
-/** Max reference length before truncation (chars). */
-const REFERENCE_MAX_CHARS = 600;
+/** Default max reference length (offline; online RAG passes 1500). */
+const REFERENCE_MAX_CHARS_DEFAULT = 600;
 
 /**
  * Clamps `text` to at most `maxChars` characters.
@@ -72,7 +77,7 @@ export function clampToSentence(text: string, maxChars: number): string {
 }
 
 export function buildNarratorPrompt(parts: NarratorPromptParts): string {
-  const { system, directives = [], place = null, omitCoordsWithPlace = true, extraContext, reference, cue } = parts;
+  const { system, directives = [], place = null, omitCoordsWithPlace = true, extraContext, reference, referenceMaxChars = REFERENCE_MAX_CHARS_DEFAULT, cue } = parts;
 
   const header = [system];
   for (const d of directives) {
@@ -87,7 +92,7 @@ export function buildNarratorPrompt(parts: NarratorPromptParts): string {
   if (coordsLine) bodyParts.push(coordsLine);
   if (extraContext) bodyParts.push(extraContext);
   if (reference) {
-    const clamped = clampToSentence(reference, REFERENCE_MAX_CHARS);
+    const clamped = clampToSentence(reference, referenceMaxChars);
     bodyParts.push(`Reference (use as ground truth — rephrase but never contradict):\n${clamped}`);
   }
   if (cue) bodyParts.push(`Cue: ${cue}`);
