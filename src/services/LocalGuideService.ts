@@ -10,6 +10,10 @@ import { buildNarratorPrompt, formatCoordinates } from './promptBuilder';
 import { localePromptDirective } from '../i18n';
 import { narrationPrefs, narrationLengthDirective, type NarrationLength } from './NarrationPrefs';
 import { guidePrefs, HIDDEN_GEMS_DIRECTIVE } from './GuidePrefs';
+// W4 — online itinerary path (no LLM)
+import { appMode } from './AppMode';
+import { type Poi } from './PoiService';
+import { wikipediaService } from './WikipediaService';
 
 // Kept terse on purpose: prefill cost is O(prompt tokens), and on low-end CPU devices
 // (Pixel 3-class) every 100 tokens of system prompt adds ~0.5–1 s before the first
@@ -240,7 +244,14 @@ export interface ItineraryStop {
   note: string;
 }
 
-export type ItineraryTask = AbortableTask<ItineraryStop[]>;
+export type ItinerarySource = 'wikipedia' | 'ai-online' | 'ai-offline';
+
+export interface ItineraryResult {
+  stops: ItineraryStop[];
+  source: ItinerarySource;
+}
+
+export type ItineraryTask = AbortableTask<ItineraryResult>;
 
 export interface TimelineEvent {
   year: string;
@@ -887,29 +898,109 @@ export const localGuideService = {
   },
 
   /**
-   * Offline-capable itinerary planner. Streams the raw model output; the
-   * promise resolves with the parsed ordered list of stops. Callers can
-   * abort mid-flight (generation takes ~10–20 s on a Pixel 3 for 5 stops).
+   * Itinerary planner. Online + POIs supplied → deterministic top-N path,
+   * no LLM. Offline or no POIs → LLM stream (abortable).
    */
   planItinerary(
     location: GPSContext | string,
     durationHours: number,
-    nearbyTitles: string[] = []
+    nearbyTitles: string[] = [],
+    nearbyPois?: Poi[]
   ): ItineraryTask {
-    // Derive the same stop count used in the prompt so JS enforces the cap
-    // even when the model ignores the instruction and emits more lines.
     // 1 h ≤ 1.5 h → 3 stops, half-day (≤ 5 h) → 5 stops, full-day → 8.
     const maxStops = durationHours <= 1.5 ? 3 : durationHours <= 5 ? 5 : 8;
+    const mode = appMode.get();
+
+    if (mode === 'online' && nearbyPois && nearbyPois.length > 0) {
+      // ── Online path: deterministic top-N, zero LLM calls ──────────────
+      let aborted = false;
+      const abortController = new AbortController();
+
+      const promise = (async (): Promise<ItineraryResult> => {
+        // Pick top-N by articleLength (desc); treat null/undefined as 0.
+        const sorted = [...nearbyPois].sort(
+          (a, b) => (b.articleLength ?? 0) - (a.articleLength ?? 0)
+        );
+        const picked = sorted.slice(0, maxStops);
+
+        // Concurrency cap: at most 3 in-flight Wikipedia summary calls.
+        const CONCURRENCY = 3;
+        const stops: ItineraryStop[] = [];
+
+        // Partition into those with a description and those that need one.
+        const needsWiki = picked.filter((p) => !p.description);
+        const hasDesc = picked.filter((p) => !!p.description);
+
+        // Build a map of title → note for all POIs.
+        const noteMap = new Map<string, string>();
+        for (const p of hasDesc) {
+          noteMap.set(p.title, p.description!);
+        }
+
+        // Fetch Wikipedia first-sentence for POIs without description,
+        // capped at CONCURRENCY in-flight at once.
+        for (let i = 0; i < needsWiki.length; i += CONCURRENCY) {
+          if (aborted) break;
+          const chunk = needsWiki.slice(i, i + CONCURRENCY);
+          const results = await Promise.all(
+            chunk.map(async (p) => {
+              if (aborted) return { title: p.title, note: '' };
+              try {
+                const wikiResult = await Promise.race([
+                  wikipediaService.summary(p.title),
+                  new Promise<null>((res) => setTimeout(() => res(null), 5000)),
+                ]);
+                if (!wikiResult) return { title: p.title, note: '' };
+                // First sentence: split on . ! ? then cap at 120 chars.
+                const firstSentence = wikiResult.extract
+                  .split(/(?<=[.!?])\s+/)[0]
+                  ?.slice(0, 120) ?? '';
+                return { title: p.title, note: firstSentence };
+              } catch {
+                return { title: p.title, note: '' };
+              }
+            })
+          );
+          for (const r of results) {
+            noteMap.set(r.title, r.note);
+          }
+        }
+
+        // Preserve the sorted order of picked POIs.
+        for (const p of picked) {
+          stops.push({ title: p.title, note: noteMap.get(p.title) ?? '' });
+        }
+
+        return { stops, source: 'wikipedia' };
+      })();
+
+      return {
+        promise,
+        abort: () => {
+          aborted = true;
+          abortController.abort();
+          return Promise.resolve();
+        },
+      };
+    }
+
+    // ── Offline / no-POI path: LLM stream ─────────────────────────────
+    const source: ItinerarySource = mode === 'offline' ? 'ai-offline' : 'ai-online';
     const prompt = buildItineraryPrompt(location, durationHours, nearbyTitles);
     // Low priority so the auto-fired plan-my-day generation yields to the
-    // around-you list and any user-initiated guide query — the user opening
-    // the sheet is a hint, not a commitment, and they should never wait
-    // because background work hogged the model.
+    // around-you list and any user-initiated guide query.
     // maxTokens scales with stop count: 8 stops × ~50 tokens for "Name —
     // reason" lines ≈ 400, plus any preamble the model leaks before the
     // first numbered line. 700 is safely past the worst-case length while
     // still capping run time at ~30 s on Pixel 3.
-    return runParsedStream(prompt, (text) => parseItinerary(text, maxStops), { maxTokens: 700, priority: 'low' });
+    const inner = runParsedStream(prompt, (text) => parseItinerary(text, maxStops), {
+      maxTokens: 700,
+      priority: 'low',
+    });
+    return {
+      promise: inner.promise.then((stops) => ({ stops, source })),
+      abort: inner.abort,
+    };
   },
 
   /**
