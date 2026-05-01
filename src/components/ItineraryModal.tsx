@@ -19,6 +19,7 @@ import { t } from '../i18n';
 import { PillowChip } from './PillowChip';
 import {
   localGuideService,
+  type ItinerarySource,
   type ItineraryStop,
   type ItineraryTask,
 } from '../services/LocalGuideService';
@@ -134,6 +135,7 @@ export function ItineraryModal({
   // full and back without losing what was already planned. Cleared only
   // by an explicit re-plan tap on the CTA.
   const [plans, setPlans] = useState<Map<number, ItineraryStop[]>>(() => new Map());
+  const [planSource, setPlanSource] = useState<ItinerarySource | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   // Tracked in a ref so the visibility/cleanup effects always see the live
@@ -217,16 +219,17 @@ export function ItineraryModal({
     });
     setError(null);
     setLoading(true);
-    const task = localGuideService.planItinerary(location, hours, nearbyTitles);
+    const task = localGuideService.planItinerary(location, hours, nearbyTitles, nearbyPois);
     taskRef.current = task;
     task.promise
-      .then((result) => {
+      .then(({ stops: result, source }) => {
         // Drop late results from a superseded request.
         if (taskRef.current !== task) return;
         if (result.length === 0) {
           setError(t('itinerary.empty'));
           return;
         }
+        setPlanSource(source);
         setPlans((prev) => {
           const next = new Map(prev);
           next.set(hours, result);
@@ -377,6 +380,19 @@ export function ItineraryModal({
             <Text style={styles.heading}>{t(`itinerary.${durationLabel}`)}</Text>
             <Text style={styles.sub}>{t('itinerary.pickDuration')}</Text>
           </View>
+
+          {planSource === 'ai-offline' && (
+            <View style={styles.sourceStripOffline}>
+              <Text style={styles.sourceStripText}>
+                ⚠ Generated offline — verify before relying on it
+              </Text>
+            </View>
+          )}
+          {planSource === 'wikipedia' && (
+            <View style={styles.sourceStripWikipedia}>
+              <Text style={styles.sourceStripText}>From Wikipedia</Text>
+            </View>
+          )}
 
           <View style={styles.chipsRow}>
             {DURATIONS.map((d) => (
@@ -657,5 +673,23 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     lineHeight: 20,
+  },
+  sourceStripOffline: {
+    backgroundColor: '#FFF3CD',
+    borderRadius: Radii.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    marginBottom: Spacing.sm,
+  },
+  sourceStripWikipedia: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radii.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    marginBottom: Spacing.sm,
+  },
+  sourceStripText: {
+    ...Type.bodySm,
+    color: Colors.textSecondary,
   },
 });

@@ -22,7 +22,8 @@
     ],
     "testPathIgnorePatterns": [
       "/node_modules/",
-      "/__fixtures__/"
+      "/__fixtures__/",
+      "/.claude/"
     ],
     "collectCoverageFrom": [
       "src/**/*.{ts,tsx}",
@@ -39,6 +40,7 @@
     "@react-navigation/native-stack": "^6.9.26",
     "expo": "~55.0.0",
     "expo-constants": "~55.0.15",
+    "expo-device": "~55.0.15",
     "expo-file-system": "~55.0.16",
     "expo-image-picker": "~55.0.18",
     "expo-localization": "^55.0.13",

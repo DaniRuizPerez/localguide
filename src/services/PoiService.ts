@@ -270,7 +270,11 @@ export const poiService = {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     try {
-      const response = await fetch(url, { signal: controller.signal });
+      // Wikipedia rejects unidentified UAs with HTTP 403 (User-Agent policy).
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'LocalGuide/1.0 (https://github.com/DaniRuizPerez/localguide)' },
+      });
       if (!response.ok) {
         return rankPois(cached?.pois ?? [], options.hiddenGems === true).slice(0, limit);
       }

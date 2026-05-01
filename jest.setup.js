@@ -70,6 +70,12 @@ jest.mock('@react-native-community/slider', () => {
   };
 });
 
+// expo-device — stub the native bridge so tests don't hit real device APIs.
+// DevicePerf.test.ts overrides this with its own controllable mock.
+jest.mock('expo-device', () => ({
+  totalMemory: 8 * 1024 * 1024 * 1024, // 8 GB — fast default
+}));
+
 // react-native-maps calls TurboModuleRegistry.getEnforcing at import time.
 // Stub MapView/Marker/Polyline so tests can render them as plain Views.
 jest.mock('react-native-maps', () => {

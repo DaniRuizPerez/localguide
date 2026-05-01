@@ -22,6 +22,17 @@ const NEGATIVE_TTL_MS = 60_000;
 const LRU_MAX = 64;
 const MAX_TIMELINE_EVENTS = 12;
 
+// Wikipedia's User-Agent policy (https://meta.wikimedia.org/wiki/User-Agent_policy)
+// rejects requests without an identifying UA — the REST API in particular
+// returns HTTP 403 for the default React Native fetch UA. Send a contact-able
+// identifier per the policy so requests are accepted.
+const USER_AGENT = 'LocalGuide/1.0 (https://github.com/DaniRuizPerez/localguide)';
+
+const REQUEST_HEADERS: HeadersInit = {
+  'User-Agent': USER_AGENT,
+  'Accept': 'application/json',
+};
+
 // ─── Minimal LRU cache ───────────────────────────────────────────────────────
 // We only need two operations (get + set with eviction), so a Map suffices:
 // Map iteration order is insertion order, so we delete+reinsert on access to
@@ -110,7 +121,7 @@ async function summary(
   const { signal, cleanup } = makeSignal(opts?.signal);
 
   try {
-    const response = await fetch(url, { signal });
+    const response = await fetch(url, { signal, headers: REQUEST_HEADERS });
     if (response.status === 404) {
       lruSet(summaryCache, cacheKey, { ok: false, cachedAt: Date.now() });
       return null;
@@ -155,7 +166,7 @@ const HISTORY_SECTION_NAMES = ['history', 'background', 'timeline', 'founding'];
 
 async function fetchJson(url: string, signal: AbortSignal): Promise<unknown | null> {
   try {
-    const response = await fetch(url, { signal });
+    const response = await fetch(url, { signal, headers: REQUEST_HEADERS });
     if (!response.ok) return null;
     return await response.json();
   } catch {

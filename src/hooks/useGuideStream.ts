@@ -7,6 +7,10 @@ import type { Message } from '../types/chat';
 import type { ChatMessagesApi } from './useChatMessages';
 import { appMode } from '../services/AppMode';
 import type { Source } from '../components/SourceBadge';
+import { devicePerf } from '../services/DevicePerf';
+
+// W2 imports — OnlineGuideService routing
+import { onlineGuideService } from '../services/OnlineGuideService';
 
 export interface GuideStreamDeps {
   /** Message state surface — stream writes into it. */
@@ -95,19 +99,93 @@ export function useGuideStream({ messages, speakResponsesRef, topicRef, onScroll
         if (speakResponsesRef.current) speechService.enqueue(segment);
       });
       const start = Date.now();
+      let deltaCount = 0;
 
       return new Promise<void>((resolve) => {
         (async () => {
           try {
+            // ── Online routing (text intent only — Decision D: image stays LLM-only) ──
+            if (appMode.get() === 'online' && intent !== 'image') {
+              // poiTitle: we don't reliably distinguish POI-tap queries from user
+              // queries at this layer (location is always GPS/manual, not POI title).
+              // Pass null and let resolveTitle fall back to entity-extraction + placeName.
+              const decision = await onlineGuideService.decide({
+                query,
+                context: { poiTitle: null },
+                gps: location,
+                perfClass: devicePerf.perfClass(),
+                budgetMs: 1500,
+              });
+
+              if (decision.mode === 'source-first') {
+                // Render Wikipedia extract directly — no LLM call.
+                const body = `From Wikipedia: ${decision.sourceFirstText ?? ''}`;
+                messages.appendGuideToken(guideId, body);
+                messages.finalizeGuideMessage(guideId, Date.now() - start);
+                messages.setGuideSource(guideId, 'wikipedia');
+                setInferring(false);
+                onScroll?.();
+                resolve();
+                return;
+              }
+
+              if (decision.mode === 'rag') {
+                // Inject Wikipedia extract as reference, run LLM.
+                const callbacks = {
+                  onToken: (delta: string) => {
+                    messages.appendGuideToken(guideId, delta);
+                    chunker.push(delta);
+                    deltaCount += 1;
+                    onScroll?.();
+                  },
+                  onDone: () => {
+                    chunker.flush();
+                    const durationMs = Date.now() - start;
+                    messages.finalizeGuideMessage(guideId, durationMs);
+                    devicePerf.recordStream(deltaCount, durationMs);
+                    messages.setGuideSource(guideId, 'wikipedia');
+                    streamRef.current = null;
+                    setInferring(false);
+                    onScroll?.();
+                    resolve();
+                  },
+                  onError: (message: string) => {
+                    messages.setGuideError(guideId, message);
+                    streamRef.current = null;
+                    setInferring(false);
+                    onScroll?.();
+                    resolve();
+                  },
+                };
+                const handle = await localGuideService.askStream(
+                  query,
+                  location,
+                  callbacks,
+                  topicRef.current,
+                  history,
+                  decision.reference ?? undefined
+                );
+                streamRef.current = handle;
+                return;
+              }
+
+              // decision.mode === 'llm-only': fall through to normal LLM path with ai-online source.
+              // source is already set to 'ai-online' via resolvedSource above.
+            }
+
+            // ── Offline or image intent: existing behavior ────────────────────────────
             const callbacks = {
               onToken: (delta: string) => {
                 messages.appendGuideToken(guideId, delta);
                 chunker.push(delta);
+                deltaCount += 1;
                 onScroll?.();
               },
               onDone: () => {
                 chunker.flush();
-                messages.finalizeGuideMessage(guideId, Date.now() - start);
+                const durationMs = Date.now() - start;
+                messages.finalizeGuideMessage(guideId, durationMs);
+                devicePerf.recordStream(deltaCount, durationMs);
                 streamRef.current = null;
                 setInferring(false);
                 onScroll?.();

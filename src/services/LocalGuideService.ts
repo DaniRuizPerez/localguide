@@ -10,6 +10,11 @@ import { buildNarratorPrompt, formatCoordinates } from './promptBuilder';
 import { localePromptDirective } from '../i18n';
 import { narrationPrefs, narrationLengthDirective, type NarrationLength } from './NarrationPrefs';
 import { guidePrefs, HIDDEN_GEMS_DIRECTIVE } from './GuidePrefs';
+// Online-mode dependencies (W2 chat / W3 timeline / W4 itinerary / W5 quiz):
+// appMode picks the path, Wikipedia grounds it, Poi types the itinerary input.
+import { appMode } from './AppMode';
+import { type Poi } from './PoiService';
+import { wikipediaService } from './WikipediaService';
 
 // Kept terse on purpose: prefill cost is O(prompt tokens), and on low-end CPU devices
 // (Pixel 3-class) every 100 tokens of system prompt adds ~0.5–1 s before the first
@@ -93,13 +98,17 @@ function buildPrompt(
   userQuery: string,
   topics?: readonly GuideTopic[],
   length?: NarrationLength,
-  history?: readonly ChatTurn[]
+  history?: readonly ChatTurn[],
+  reference?: string
 ): string {
   return buildNarratorPrompt({
     system: SYSTEM_PROMPT,
     directives: [topicFocusDirective(topics), localePromptDirective(), lengthDirective(length)],
     place: location,
     extraContext: renderHistoryBlock(history),
+    reference,
+    // Online RAG uses a wider clamp (1500 chars) to preserve more Wikipedia content.
+    referenceMaxChars: reference ? 1500 : undefined,
     cue: userQuery.trim() || 'Narrate what is interesting about this place.',
   });
 }
@@ -240,19 +249,35 @@ export interface ItineraryStop {
   note: string;
 }
 
-export type ItineraryTask = AbortableTask<ItineraryStop[]>;
+export type ItinerarySource = 'wikipedia' | 'ai-online' | 'ai-offline';
+
+export interface ItineraryResult {
+  stops: ItineraryStop[];
+  source: ItinerarySource;
+}
+
+export type ItineraryTask = AbortableTask<ItineraryResult>;
 
 export interface TimelineEvent {
   year: string;
   event: string;
 }
 
-export type TimelineTask = AbortableTask<TimelineEvent[]>;
+export type TimelineSource = 'wikipedia' | 'ai-online' | 'ai-offline';
+
+export interface TimelineResult {
+  events: TimelineEvent[];
+  source: TimelineSource;
+}
+
+export type TimelineTask = AbortableTask<TimelineResult>;
 
 export interface QuizQuestion {
   question: string;
   options: string[];
   correctIndex: number;
+  /** Set by Wave 5: 'wikipedia' (online+grounded), 'ai-online' (online+no-ref), 'ai-offline' (offline). */
+  source?: 'wikipedia' | 'ai-online' | 'ai-offline';
 }
 
 export type QuizTask = AbortableTask<QuizQuestion[]>;
@@ -344,7 +369,8 @@ const QUIZ_GROUNDING_RULES =
 function buildQuizPrompt(
   nearbyTitles: string[],
   count: number,
-  locationLabel?: string
+  locationLabel?: string,
+  reference?: string
 ): string {
   const grounding = quizGroundingBlock(nearbyTitles, locationLabel);
   return buildNarratorPrompt({
@@ -364,6 +390,8 @@ function buildQuizPrompt(
       `D: <option>\n` +
       `Correct: A\n` +
       `(no intro, no explanations, no closing remarks)`,
+    reference,
+    referenceMaxChars: 1500,
   });
 }
 
@@ -402,7 +430,8 @@ function buildSingleQuizPrompt(
   previousQuestions: string[],
   questionIndex: number,
   total: number,
-  attempt: number = 0
+  attempt: number = 0,
+  reference?: string
 ): string {
   const grounding = quizGroundingBlock(nearbyTitles, locationLabel);
   // Pick the angle by (slot + attempt) so each retry of the same slot uses
@@ -466,6 +495,8 @@ function buildSingleQuizPrompt(
       `C: 1920\n` +
       `D: 1952\n\n` +
       `Now write your one short question on the TOPIC above, in the same six-line format. The first line MUST be "Correct: <letter>" naming which of A/B/C/D is right; the next five lines are Q, A, B, C, D in order. No intro, no explanations, no question number, no closing remarks.`,
+    reference,
+    referenceMaxChars: 1500,
   });
 }
 
@@ -887,38 +918,194 @@ export const localGuideService = {
   },
 
   /**
-   * Offline-capable itinerary planner. Streams the raw model output; the
-   * promise resolves with the parsed ordered list of stops. Callers can
-   * abort mid-flight (generation takes ~10–20 s on a Pixel 3 for 5 stops).
+   * Itinerary planner. Online + POIs supplied → deterministic top-N path,
+   * no LLM. Offline or no POIs → LLM stream (abortable).
    */
   planItinerary(
     location: GPSContext | string,
     durationHours: number,
-    nearbyTitles: string[] = []
+    nearbyTitles: string[] = [],
+    nearbyPois?: Poi[]
   ): ItineraryTask {
-    // Derive the same stop count used in the prompt so JS enforces the cap
-    // even when the model ignores the instruction and emits more lines.
     // 1 h ≤ 1.5 h → 3 stops, half-day (≤ 5 h) → 5 stops, full-day → 8.
     const maxStops = durationHours <= 1.5 ? 3 : durationHours <= 5 ? 5 : 8;
+    const mode = appMode.get();
+
+    if (mode === 'online' && nearbyPois && nearbyPois.length > 0) {
+      // ── Online path: deterministic top-N, zero LLM calls ──────────────
+      let aborted = false;
+      const abortController = new AbortController();
+
+      const promise = (async (): Promise<ItineraryResult> => {
+        // Pick top-N by articleLength (desc); treat null/undefined as 0.
+        const sorted = [...nearbyPois].sort(
+          (a, b) => (b.articleLength ?? 0) - (a.articleLength ?? 0)
+        );
+        const picked = sorted.slice(0, maxStops);
+
+        // Concurrency cap: at most 3 in-flight Wikipedia summary calls.
+        const CONCURRENCY = 3;
+        const stops: ItineraryStop[] = [];
+
+        // Partition into those with a description and those that need one.
+        const needsWiki = picked.filter((p) => !p.description);
+        const hasDesc = picked.filter((p) => !!p.description);
+
+        // Build a map of title → note for all POIs.
+        const noteMap = new Map<string, string>();
+        for (const p of hasDesc) {
+          noteMap.set(p.title, p.description!);
+        }
+
+        // Fetch Wikipedia first-sentence for POIs without description,
+        // capped at CONCURRENCY in-flight at once.
+        for (let i = 0; i < needsWiki.length; i += CONCURRENCY) {
+          if (aborted) break;
+          const chunk = needsWiki.slice(i, i + CONCURRENCY);
+          const results = await Promise.all(
+            chunk.map(async (p) => {
+              if (aborted) return { title: p.title, note: '' };
+              try {
+                const wikiResult = await Promise.race([
+                  wikipediaService.summary(p.title),
+                  new Promise<null>((res) => setTimeout(() => res(null), 5000)),
+                ]);
+                if (!wikiResult) return { title: p.title, note: '' };
+                // First sentence: split on . ! ? then cap at 120 chars.
+                const firstSentence = wikiResult.extract
+                  .split(/(?<=[.!?])\s+/)[0]
+                  ?.slice(0, 120) ?? '';
+                return { title: p.title, note: firstSentence };
+              } catch {
+                return { title: p.title, note: '' };
+              }
+            })
+          );
+          for (const r of results) {
+            noteMap.set(r.title, r.note);
+          }
+        }
+
+        // Preserve the sorted order of picked POIs.
+        for (const p of picked) {
+          stops.push({ title: p.title, note: noteMap.get(p.title) ?? '' });
+        }
+
+        return { stops, source: 'wikipedia' };
+      })();
+
+      return {
+        promise,
+        abort: () => {
+          aborted = true;
+          abortController.abort();
+          return Promise.resolve();
+        },
+      };
+    }
+
+    // ── Offline / no-POI path: LLM stream ─────────────────────────────
+    const source: ItinerarySource = mode === 'offline' ? 'ai-offline' : 'ai-online';
     const prompt = buildItineraryPrompt(location, durationHours, nearbyTitles);
     // Low priority so the auto-fired plan-my-day generation yields to the
-    // around-you list and any user-initiated guide query — the user opening
-    // the sheet is a hint, not a commitment, and they should never wait
-    // because background work hogged the model.
+    // around-you list and any user-initiated guide query.
     // maxTokens scales with stop count: 8 stops × ~50 tokens for "Name —
     // reason" lines ≈ 400, plus any preamble the model leaks before the
     // first numbered line. 700 is safely past the worst-case length while
     // still capping run time at ~30 s on Pixel 3.
-    return runParsedStream(prompt, (text) => parseItinerary(text, maxStops), { maxTokens: 700, priority: 'low' });
+    const inner = runParsedStream(prompt, (text) => parseItinerary(text, maxStops), {
+      maxTokens: 700,
+      priority: 'low',
+    });
+    return {
+      promise: inner.promise.then((stops) => ({ stops, source })),
+      abort: inner.abort,
+    };
   },
 
   /**
    * Streams a historical timeline for a POI. Resolves with parsed
    * year/event pairs. Abortable.
+   *
+   * Online: tries WikipediaService.historySection first. If it returns
+   * >= 3 events with non-null year AND no event text > 200 chars,
+   * returns directly with source='wikipedia'. Otherwise falls back to
+   * LLM with the wikitext injected as reference (1500 chars),
+   * source='ai-online'.
+   *
+   * Offline: existing LLM behavior, source='ai-offline'.
    */
   buildTimeline(poiTitle: string, location: GPSContext | string | null): TimelineTask {
-    const prompt = buildTimelinePrompt(poiTitle, location);
-    return runParsedStream(prompt, parseTimeline, { maxTokens: 350 });
+    const controller = new AbortController();
+
+    const promise = (async (): Promise<TimelineResult> => {
+      if (appMode.get() === 'online') {
+        // --- Online path: try Wikipedia first ---
+        const wikiEvents = await wikipediaService.historySection(poiTitle, {
+          signal: controller.signal,
+        });
+
+        // Quality check: >= 3 events, all have non-null/non-empty year,
+        // no event text longer than 200 chars.
+        if (
+          wikiEvents !== null &&
+          wikiEvents.length >= 3 &&
+          wikiEvents.every((e) => e.year != null && e.year.trim() !== '') &&
+          wikiEvents.every((e) => e.event.length <= 200)
+        ) {
+          return { events: wikiEvents, source: 'wikipedia' };
+        }
+
+        // --- Online fallback: LLM with wikitext reference ---
+        // Build a reference string from whatever Wikipedia returned (if anything).
+        let reference: string | undefined;
+        if (wikiEvents && wikiEvents.length > 0) {
+          reference = wikiEvents.map((e) => `${e.year} — ${e.event}`).join('\n');
+        }
+
+        const prompt = buildNarratorPrompt({
+          system:
+            'You are a history-focused local guide. Produce a concise vertical timeline of notable events for this place, from earliest to most recent.',
+          directives: [localePromptDirective()],
+          place: poiTitle,
+          extraContext:
+            (location && typeof location !== 'string' && location.placeName
+              ? `Context: in ${location.placeName}.\n\n`
+              : typeof location === 'string'
+              ? `Context: in ${location}.\n\n`
+              : '') +
+            `Output 4–8 entries, strictly in this format:\n` +
+            `YEAR — event description (one sentence)\n\n` +
+            `Rules:\n` +
+            `- Use a real year, century, or well-known period as YEAR (e.g. "1793", "1880s", "12th century").\n` +
+            `- If you are not confident about a specific year, write the period instead.\n` +
+            `- Never invent events. If you have fewer than 4 reliable entries, output only the ones you are confident in.\n` +
+            `- No bullets, no numbering, no intro, no closing remarks.`,
+          reference,
+          referenceMaxChars: 1500,
+        });
+
+        const innerTask = runParsedStream(prompt, parseTimeline, { maxTokens: 350 });
+        // Wire abort so cancelling the outer task cancels the inner stream.
+        controller.signal.addEventListener('abort', () => { innerTask.abort(); });
+        const events = await innerTask.promise;
+        return { events, source: 'ai-online' };
+      }
+
+      // --- Offline path ---
+      const prompt = buildTimelinePrompt(poiTitle, location);
+      const innerTask = runParsedStream(prompt, parseTimeline, { maxTokens: 350 });
+      controller.signal.addEventListener('abort', () => { innerTask.abort(); });
+      const events = await innerTask.promise;
+      return { events, source: 'ai-offline' };
+    })();
+
+    return {
+      promise,
+      abort: async () => {
+        controller.abort();
+      },
+    };
   },
 
   /**
@@ -946,6 +1133,14 @@ export const localGuideService = {
    * and any duplicate that slips through is rejected and re-generated on
    * the JS side (capped at MAX_DEDUPE_RETRIES per slot to avoid loops).
    *
+   * Online mode: fetches a Wikipedia summary for each question's chosen POI
+   * title (round-robin from nearbyTitles), injects the extract as a 1500-char
+   * reference, and tags the question source='wikipedia'. Falls back to
+   * source='ai-online' when Wikipedia returns null. Concurrent Wikipedia calls
+   * are capped at 3 via a simple semaphore.
+   *
+   * Offline mode: existing LLM-only path, tagged source='ai-offline'.
+   *
    * Why per-question rather than one batch prompt: on the small on-device
    * model, a single prompt asking for 5 questions tends to (a) pad to a
    * famous landmark when the POI list is thin and (b) repeat the first
@@ -968,12 +1163,49 @@ export const localGuideService = {
     // 6-line block well under 200 tokens, and capping decode time keeps
     // each slot under ~10 s on Pixel 3 instead of 25–40 s.
     const TOKENS_PER_QUESTION = 200;
+    // Concurrency cap for Wikipedia summary fetches (Decision F).
+    const WIKI_CONCURRENCY = 3;
 
     const emitted: QuizQuestion[] = [];
     const fingerprints = new Set<string>();
     let aborted = false;
     let activeHandle: StreamHandle | null = null;
     let activeAbortPromise: Promise<void> | null = null;
+
+    // Simple counting semaphore for Wikipedia fetch concurrency.
+    let wikiInFlight = 0;
+    const wikiQueue: Array<() => void> = [];
+    function wikiAcquire(): Promise<void> {
+      if (wikiInFlight < WIKI_CONCURRENCY) {
+        wikiInFlight++;
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) => {
+        wikiQueue.push(resolve);
+      });
+    }
+    function wikiRelease(): void {
+      const next = wikiQueue.shift();
+      if (next) {
+        next();
+      } else {
+        wikiInFlight--;
+      }
+    }
+
+    // Fetch a Wikipedia reference for a given title, respecting the concurrency cap.
+    async function fetchWikiReference(title: string): Promise<string | null> {
+      await wikiAcquire();
+      try {
+        const result = await wikipediaService.summary(title);
+        return result?.extract ?? null;
+      } finally {
+        wikiRelease();
+      }
+    }
+
+    const isOnline = appMode.get() === 'online';
+    const questionSource: 'wikipedia' | 'ai-online' | 'ai-offline' = isOnline ? 'ai-online' : 'ai-offline';
 
     const runOne = async (
       questionIndex: number,
@@ -987,6 +1219,26 @@ export const localGuideService = {
       // seconds.
       await inferenceService.waitForIdleSlot();
       if (aborted) return null;
+
+      // Fetch Wikipedia reference if online and we have titles to pick from.
+      let reference: string | null = null;
+      let resolvedSource: 'wikipedia' | 'ai-online' | 'ai-offline' = questionSource;
+      if (isOnline && nearbyTitles.length > 0) {
+        // Round-robin: pick a title by index so each question covers a different POI.
+        const title = nearbyTitles[questionIndex % nearbyTitles.length];
+        try {
+          reference = await fetchWikiReference(title);
+          if (reference) {
+            resolvedSource = 'wikipedia';
+          }
+        } catch {
+          // Network failure: fall back to LLM-only for this question.
+          reference = null;
+        }
+      }
+
+      if (aborted) return null;
+
       return new Promise((resolve, reject) => {
         const previousTexts = emitted.map((e) => e.question);
         const prompt = buildSingleQuizPrompt(
@@ -995,7 +1247,8 @@ export const localGuideService = {
           previousTexts,
           questionIndex,
           count,
-          attempt
+          attempt,
+          reference ?? undefined
         );
         if (__DEV__) {
           // Dump prompt tail so we can verify on device that the topic
@@ -1005,7 +1258,7 @@ export const localGuideService = {
           const tail = prompt.length > 500 ? prompt.slice(-700) : prompt;
           // eslint-disable-next-line no-console
           console.log(
-            `[Quiz] slot ${questionIndex} attempt ${attempt} prompt-tail (last ${tail.length} of ${prompt.length}):\n${tail}`
+            `[Quiz] slot ${questionIndex} attempt ${attempt} source=${resolvedSource} prompt-tail (last ${tail.length} of ${prompt.length}):\n${tail}`
           );
         }
         let fullText = '';
@@ -1044,6 +1297,9 @@ export const localGuideService = {
                       fullText.slice(0, 600)
                   );
                 }
+                if (parsed) {
+                  parsed.source = resolvedSource;
+                }
                 resolve(parsed);
               },
               onError: (msg) => {
@@ -1067,9 +1323,6 @@ export const localGuideService = {
             settled = true;
             reject(err instanceof Error ? err : new Error(String(err)));
           });
-        // attempt is only used for logging hooks in the future; kept on
-        // the closure so callers see the retry count if we ever expose it.
-        void attempt;
       });
     };
 
@@ -1260,9 +1513,10 @@ export const localGuideService = {
     location: GPSContext | string,
     callbacks: StreamCallbacks,
     topics?: readonly GuideTopic[],
-    history?: readonly ChatTurn[]
+    history?: readonly ChatTurn[],
+    reference?: string
   ): Promise<StreamHandle> {
-    const prompt = buildPrompt(location, userQuery, topics, undefined, history);
+    const prompt = buildPrompt(location, userQuery, topics, undefined, history, reference);
     return inferenceService.runInferenceStream(prompt, callbacks);
   },
 
@@ -1272,8 +1526,10 @@ export const localGuideService = {
     imagePath: string,
     callbacks: StreamCallbacks,
     topics?: readonly GuideTopic[],
-    history?: readonly ChatTurn[]
+    history?: readonly ChatTurn[],
+    reference?: string
   ): Promise<StreamHandle> {
+    // reference is accepted for API symmetry but not used (Decision D: image chat is LLM-only).
     const prompt = buildImagePrompt(location, userQuery, topics, undefined, history);
     return inferenceService.runInferenceStream(prompt, callbacks, { imagePath });
   },

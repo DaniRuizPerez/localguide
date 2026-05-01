@@ -143,6 +143,7 @@ describe('Characterization: LocalGuideService — response shaping', () => {
 import { renderHook, act } from '@testing-library/react-native';
 import { useChatMessages } from '../hooks/useChatMessages';
 import { useGuideStream } from '../hooks/useGuideStream';
+import { devicePerf } from '../services/DevicePerf';
 
 let mockEffectiveMode: 'online' | 'offline' = 'online';
 
@@ -158,6 +159,42 @@ jest.mock('../services/AppMode', () => ({
 jest.mock('../services/SpeechService', () => ({
   speechService: { enqueue: jest.fn(), stop: jest.fn() },
 }));
+
+// ── OnlineGuideService mock ────────────────────────────────────────────────
+// Default: llm-only (so existing source-badge tests continue to expect 'ai-online').
+// Individual tests override mockDecide to simulate source-first / rag paths.
+const mockDecide = jest.fn().mockResolvedValue({
+  mode: 'llm-only',
+  title: null,
+  reference: null,
+  sourceFirstText: null,
+  thumbnail: null,
+  source: 'ai-online',
+});
+jest.mock('../services/OnlineGuideService', () => ({
+  onlineGuideService: {
+    decide: (...args: unknown[]) => mockDecide(...args),
+  },
+}));
+
+// ── DevicePerf — spy on perfClass rather than jest.mock the whole module ──
+// We cannot use jest.mock('../services/DevicePerf') here: DevicePerf.test.ts
+// calls jest.resetModules() + freshDevicePerf() which would pick up our mock
+// factory instead of the real module and break those tests.
+// Using jest.spyOn on the singleton avoids the registry pollution problem.
+let mockPerfClass: 'fast' | 'slow' | 'unknown' = 'fast';
+let perfClassSpy: jest.SpyInstance | null = null;
+let recordStreamSpy: jest.SpyInstance | null = null;
+
+beforeAll(() => {
+  perfClassSpy = jest.spyOn(devicePerf, 'perfClass').mockImplementation(() => mockPerfClass);
+  recordStreamSpy = jest.spyOn(devicePerf, 'recordStream').mockImplementation(() => {});
+});
+
+afterAll(() => {
+  perfClassSpy?.mockRestore();
+  recordStreamSpy?.mockRestore();
+});
 
 const _speakRef = { current: false };
 const _topicRef = { current: [] as readonly never[] };
@@ -227,5 +264,195 @@ describe('Characterization: source badge — setGuideSource', () => {
 
     const updated = result.current.msgs.messages.find((m) => m.id === guideMsg!.id);
     expect(updated?.source).toBe('wikipedia');
+  });
+});
+
+// ── W2: Online routing paths ─────────────────────────────────────────────────
+
+describe('W2: online + perfClass=fast + factual query → source-first short-circuit (no LLM call)', () => {
+  beforeEach(() => {
+    mockEffectiveMode = 'online';
+    mockPerfClass = 'fast';
+    mockRunInferenceStreamSpy.mockClear();
+    mockDecide.mockResolvedValue({
+      mode: 'source-first',
+      title: 'Eiffel Tower',
+      reference: null,
+      sourceFirstText: 'The Eiffel Tower is a wrought-iron lattice tower on the Champ de Mars.',
+      thumbnail: null,
+      source: 'wikipedia',
+    });
+  });
+
+  afterEach(() => {
+    // Restore default decide mock so other suites are unaffected.
+    mockDecide.mockResolvedValue({
+      mode: 'llm-only', title: null, reference: null, sourceFirstText: null, thumbnail: null, source: 'ai-online',
+    });
+  });
+
+  it('guide message source is wikipedia and LLM is not called', async () => {
+    const result = setupPipeline();
+    await act(async () => {
+      await result.current.guide.stream({ intent: 'text', query: 'Eiffel Tower', location: LOCATION });
+    });
+
+    // LLM stream must NOT have been called.
+    expect(mockRunInferenceStreamSpy).not.toHaveBeenCalled();
+
+    const guideMsg = result.current.msgs.messages.find((m) => m.role === 'guide');
+    expect(guideMsg?.source).toBe('wikipedia');
+    expect(guideMsg?.text).toContain('From Wikipedia:');
+    expect(guideMsg?.text).toContain('The Eiffel Tower is a wrought-iron lattice tower');
+  });
+});
+
+describe('W2: online + perfClass=fast + conversational query + Wikipedia hit → RAG path (LLM called with reference)', () => {
+  const WIKI_EXTRACT = 'The Eiffel Tower was built in 1889 for the World Fair. It stands 330 metres tall.';
+
+  beforeEach(() => {
+    mockEffectiveMode = 'online';
+    mockPerfClass = 'fast';
+    mockRunInferenceStreamSpy.mockClear();
+    mockDecide.mockResolvedValue({
+      mode: 'rag',
+      title: 'Eiffel Tower',
+      reference: WIKI_EXTRACT,
+      sourceFirstText: null,
+      thumbnail: null,
+      source: 'wikipedia',
+    });
+  });
+
+  afterEach(() => {
+    mockDecide.mockResolvedValue({
+      mode: 'llm-only', title: null, reference: null, sourceFirstText: null, thumbnail: null, source: 'ai-online',
+    });
+  });
+
+  it('LLM is called and guide message source is wikipedia', async () => {
+    const result = setupPipeline();
+    await act(async () => {
+      await result.current.guide.stream({
+        intent: 'text',
+        query: 'Why is it so famous?',
+        location: LOCATION,
+      });
+    });
+
+    // LLM must have been called (RAG path runs Gemma).
+    expect(mockRunInferenceStreamSpy).toHaveBeenCalledTimes(1);
+
+    // The reference should appear in the prompt passed to the LLM.
+    const promptArg = mockRunInferenceStreamSpy.mock.calls[0][0] as string;
+    expect(promptArg).toContain(WIKI_EXTRACT);
+
+    const guideMsg = result.current.msgs.messages.find((m) => m.role === 'guide');
+    expect(guideMsg?.source).toBe('wikipedia');
+  });
+});
+
+describe('W2: online + no Wikipedia hit → LLM-only with source=ai-online', () => {
+  beforeEach(() => {
+    mockEffectiveMode = 'online';
+    mockPerfClass = 'fast';
+    mockRunInferenceStreamSpy.mockClear();
+    mockDecide.mockResolvedValue({
+      mode: 'llm-only',
+      title: null,
+      reference: null,
+      sourceFirstText: null,
+      thumbnail: null,
+      source: 'ai-online',
+    });
+  });
+
+  it('guide message source is ai-online and LLM is called', async () => {
+    const result = setupPipeline();
+    await act(async () => {
+      await result.current.guide.stream({ intent: 'text', query: 'What is cool here?', location: LOCATION });
+    });
+
+    expect(mockRunInferenceStreamSpy).toHaveBeenCalledTimes(1);
+
+    const guideMsg = result.current.msgs.messages.find((m) => m.role === 'guide');
+    expect(guideMsg?.source).toBe('ai-online');
+  });
+});
+
+describe('W2: offline → LLM with source=ai-offline', () => {
+  beforeEach(() => {
+    mockEffectiveMode = 'offline';
+    mockPerfClass = 'fast';
+    mockDecide.mockClear();
+    mockRunInferenceStreamSpy.mockClear();
+  });
+
+  it('guide message source is ai-offline and OnlineGuideService.decide is not called', async () => {
+    const result = setupPipeline();
+    await act(async () => {
+      await result.current.guide.stream({ intent: 'text', query: 'What is cool here?', location: LOCATION });
+    });
+
+    // Offline mode must not consult OnlineGuideService.
+    expect(mockDecide).not.toHaveBeenCalled();
+
+    // LLM is still called (offline path).
+    expect(mockRunInferenceStreamSpy).toHaveBeenCalledTimes(1);
+
+    const guideMsg = result.current.msgs.messages.find((m) => m.role === 'guide');
+    expect(guideMsg?.source).toBe('ai-offline');
+  });
+});
+
+describe('W2: image intent → LLM-only regardless of mode (Decision D)', () => {
+  beforeEach(() => {
+    mockDecide.mockClear();
+    mockRunInferenceStreamSpy.mockClear();
+  });
+
+  afterEach(() => {
+    mockDecide.mockResolvedValue({
+      mode: 'llm-only', title: null, reference: null, sourceFirstText: null, thumbnail: null, source: 'ai-online',
+    });
+  });
+
+  it('online + image intent: OnlineGuideService.decide is NOT called, LLM is called', async () => {
+    mockEffectiveMode = 'online';
+    const result = setupPipeline();
+    await act(async () => {
+      await result.current.guide.stream({
+        intent: 'image',
+        query: 'What is this?',
+        location: LOCATION,
+        imageUri: 'file:///photo.jpg',
+      });
+    });
+
+    expect(mockDecide).not.toHaveBeenCalled();
+    expect(mockRunInferenceStreamSpy).toHaveBeenCalledTimes(1);
+
+    const guideMsg = result.current.msgs.messages.find((m) => m.role === 'guide');
+    // Image in online mode → ai-online source.
+    expect(guideMsg?.source).toBe('ai-online');
+  });
+
+  it('offline + image intent: OnlineGuideService.decide is NOT called, source is ai-offline', async () => {
+    mockEffectiveMode = 'offline';
+    const result = setupPipeline();
+    await act(async () => {
+      await result.current.guide.stream({
+        intent: 'image',
+        query: 'What is this?',
+        location: LOCATION,
+        imageUri: 'file:///photo.jpg',
+      });
+    });
+
+    expect(mockDecide).not.toHaveBeenCalled();
+    expect(mockRunInferenceStreamSpy).toHaveBeenCalledTimes(1);
+
+    const guideMsg = result.current.msgs.messages.find((m) => m.role === 'guide');
+    expect(guideMsg?.source).toBe('ai-offline');
   });
 });
