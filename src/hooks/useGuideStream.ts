@@ -5,6 +5,8 @@ import { SpeechChunker } from '../services/SpeechChunker';
 import type { GPSContext, StreamHandle } from '../services/InferenceService';
 import type { Message } from '../types/chat';
 import type { ChatMessagesApi } from './useChatMessages';
+import { appMode } from '../services/AppMode';
+import type { Source } from '../components/SourceBadge';
 
 export interface GuideStreamDeps {
   /** Message state surface — stream writes into it. */
@@ -22,12 +24,17 @@ export interface GuideStream {
   /**
    * Start a streaming response. Handles placeholder → onToken → onDone/onError
    * lifecycle, TTS chunking, and error fallbacks.
+   *
+   * `source` seeds the placeholder badge. Defaults to `'ai-online'` or
+   * `'ai-offline'` based on appMode. Wave-2 callers (RAG, Wikipedia race)
+   * can override at call-time or later via messages.setGuideSource(id, …).
    */
   stream(params: {
     intent: 'text' | 'image';
     query: string;
     location: GPSContext | string;
     imageUri?: string;
+    source?: Source;
   }): Promise<void>;
   /** Abort an in-flight stream and silence TTS. No-op if nothing is running. */
   stop(): void;
@@ -64,11 +71,13 @@ export function useGuideStream({ messages, speakResponsesRef, topicRef, onScroll
       query,
       location,
       imageUri,
+      source,
     }: {
       intent: 'text' | 'image';
       query: string;
       location: GPSContext | string;
       imageUri?: string;
+      source?: Source;
     }): Promise<void> => {
       // Snapshot prior turns for the model so a follow-up POI tap (or typed
       // question) lands in the same conversation thread instead of starting
@@ -77,7 +86,9 @@ export function useGuideStream({ messages, speakResponsesRef, topicRef, onScroll
       // new user cue was appended — which is exactly the history we want.
       const history = priorTurnsFor(messages.messages);
       setInferring(true);
-      const guideId = messages.addGuidePlaceholder(location);
+      // Default source from appMode so every guide bubble is tagged from day one.
+      const resolvedSource: Source = source ?? (appMode.get() === 'online' ? 'ai-online' : 'ai-offline');
+      const guideId = messages.addGuidePlaceholder(location, resolvedSource);
       onScroll?.();
 
       const chunker = new SpeechChunker((segment) => {

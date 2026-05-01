@@ -27,6 +27,21 @@ const GPS_NO_ACCURACY: GPSContext = { latitude: 51.5074, longitude: -0.1278, acc
 // Variable must be prefixed "mock" to be accessible inside jest.mock() factory
 const mockRunInferenceSpy = jest.fn().mockResolvedValue('Some tourist info.');
 
+// mockStreamCallbacks holds the last set of callbacks passed to runInferenceStream
+// so that individual tests can drive onToken/onDone manually.
+let mockStreamCallbacks: { onToken: (d: string) => void; onDone: () => void; onError: (m: string) => void } | null = null;
+const mockRunInferenceStreamSpy = jest.fn(
+  (_prompt: unknown, cbs: typeof mockStreamCallbacks) => {
+    mockStreamCallbacks = cbs;
+    // Emit a token + done on the next microtask so renderHook `act` can drain it.
+    queueMicrotask(() => {
+      cbs?.onToken('mock token');
+      cbs?.onDone();
+    });
+    return Promise.resolve({ abort: jest.fn() });
+  }
+);
+
 jest.mock('../services/InferenceService', () => {
   const actual = jest.requireActual('../services/InferenceService');
   return {
@@ -34,6 +49,7 @@ jest.mock('../services/InferenceService', () => {
     inferenceService: {
       initialize: jest.fn().mockResolvedValue(undefined),
       runInference: (...args: unknown[]) => mockRunInferenceSpy(...args),
+      runInferenceStream: (...args: unknown[]) => mockRunInferenceStreamSpy(...args as Parameters<typeof mockRunInferenceStreamSpy>),
       dispose: jest.fn().mockResolvedValue(undefined),
       isLoaded: true,
     },
@@ -116,5 +132,100 @@ describe('Characterization: LocalGuideService — response shaping', () => {
   it('propagates inference errors to the caller', async () => {
     mockRunInferenceSpy.mockRejectedValue(new Error('inference failure'));
     await expect(service.ask('test', GPS_PARIS)).rejects.toThrow('inference failure');
+  });
+});
+
+// ── Source badge plumbing ─────────────────────────────────────────────────────
+// These tests exercise the useChatMessages / useGuideStream integration —
+// checking that every guide message carries the correct source field and that
+// setGuideSource can override it after the fact.
+
+import { renderHook, act } from '@testing-library/react-native';
+import { useChatMessages } from '../hooks/useChatMessages';
+import { useGuideStream } from '../hooks/useGuideStream';
+
+let mockEffectiveMode: 'online' | 'offline' = 'online';
+
+jest.mock('../services/AppMode', () => ({
+  appMode: {
+    get: () => mockEffectiveMode,
+    subscribe: () => () => {},
+    __resetForTest: () => {},
+  },
+}));
+
+// SpeechService stub (useGuideStream uses it for TTS).
+jest.mock('../services/SpeechService', () => ({
+  speechService: { enqueue: jest.fn(), stop: jest.fn() },
+}));
+
+const _speakRef = { current: false };
+const _topicRef = { current: [] as readonly never[] };
+const LOCATION = 'Paris';
+
+function setupPipeline() {
+  const { result } = renderHook(() => {
+    const msgs = useChatMessages();
+    const guide = useGuideStream({ messages: msgs, speakResponsesRef: _speakRef, topicRef: _topicRef });
+    return { msgs, guide };
+  });
+  return result;
+}
+
+describe('Characterization: source badge — useGuideStream online', () => {
+  beforeEach(() => {
+    mockEffectiveMode = 'online';
+    mockRunInferenceStreamSpy.mockClear();
+  });
+
+  it('guide message source is ai-online when appMode is online', async () => {
+    const result = setupPipeline();
+    await act(async () => {
+      await result.current.guide.stream({ intent: 'text', query: 'test', location: LOCATION });
+    });
+
+    const guideMsg = result.current.msgs.messages.find((m) => m.role === 'guide');
+    expect(guideMsg?.source).toBe('ai-online');
+  });
+});
+
+describe('Characterization: source badge — useGuideStream offline', () => {
+  beforeEach(() => {
+    mockEffectiveMode = 'offline';
+    mockRunInferenceStreamSpy.mockClear();
+  });
+
+  it('guide message source is ai-offline when appMode is offline', async () => {
+    const result = setupPipeline();
+    await act(async () => {
+      await result.current.guide.stream({ intent: 'text', query: 'test', location: LOCATION });
+    });
+
+    const guideMsg = result.current.msgs.messages.find((m) => m.role === 'guide');
+    expect(guideMsg?.source).toBe('ai-offline');
+  });
+});
+
+describe('Characterization: source badge — setGuideSource', () => {
+  beforeEach(() => {
+    mockEffectiveMode = 'online';
+    mockRunInferenceStreamSpy.mockClear();
+  });
+
+  it('setGuideSource flips source to wikipedia after stream completes', async () => {
+    const result = setupPipeline();
+    await act(async () => {
+      await result.current.guide.stream({ intent: 'text', query: 'test', location: LOCATION });
+    });
+
+    const guideMsg = result.current.msgs.messages.find((m) => m.role === 'guide');
+    expect(guideMsg?.source).toBe('ai-online');
+
+    act(() => {
+      result.current.msgs.setGuideSource(guideMsg!.id, 'wikipedia');
+    });
+
+    const updated = result.current.msgs.messages.find((m) => m.id === guideMsg!.id);
+    expect(updated?.source).toBe('wikipedia');
   });
 });

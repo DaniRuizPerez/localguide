@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import type { GPSContext } from '../services/InferenceService';
 import type { Message } from '../types/chat';
+import type { Source } from '../components/SourceBadge';
 
 let idSeq = 0;
 function nextId(prefix: string): string {
@@ -16,13 +17,14 @@ export interface ChatMessagesApi {
   addGuideMessage(
     text: string,
     locationUsed: GPSContext | string,
-    durationMs?: number
+    durationMs?: number,
+    source?: Source
   ): string;
   /**
    * Add an empty guide bubble that will fill via appendGuideToken as the
    * stream runs. Returns its id — caller passes that id to finalize/replace.
    */
-  addGuidePlaceholder(locationUsed: GPSContext | string): string;
+  addGuidePlaceholder(locationUsed: GPSContext | string, source?: Source): string;
   /** Append a delta to a specific guide message (streaming tokens). */
   appendGuideToken(id: string, delta: string): void;
   /** Mark a streaming message complete — trims text, records duration. */
@@ -32,6 +34,12 @@ export interface ChatMessagesApi {
    * produced no tokens before failing, otherwise keep what's already there.
    */
   setGuideError(id: string, message: string): void;
+  /**
+   * Overwrite the source badge on an existing guide message.
+   * Used mid-stream when a grounded path (RAG, Wikipedia race) resolves.
+   * No-op if id is not found.
+   */
+  setGuideSource(id: string, source: Source): void;
   /** Drop all messages. */
   clear(): void;
 }
@@ -46,17 +54,17 @@ export function useChatMessages(): ChatMessagesApi {
   }, []);
 
   const addGuideMessage = useCallback(
-    (text: string, locationUsed: GPSContext | string, durationMs?: number): string => {
+    (text: string, locationUsed: GPSContext | string, durationMs?: number, source?: Source): string => {
       const id = nextId('g');
-      setMessages((prev) => [...prev, { id, role: 'guide', text, locationUsed, durationMs }]);
+      setMessages((prev) => [...prev, { id, role: 'guide', text, locationUsed, durationMs, source }]);
       return id;
     },
     []
   );
 
-  const addGuidePlaceholder = useCallback((locationUsed: GPSContext | string): string => {
+  const addGuidePlaceholder = useCallback((locationUsed: GPSContext | string, source?: Source): string => {
     const id = nextId('gp');
-    setMessages((prev) => [...prev, { id, role: 'guide', text: '', locationUsed }]);
+    setMessages((prev) => [...prev, { id, role: 'guide', text: '', locationUsed, source }]);
     return id;
   }, []);
 
@@ -78,6 +86,12 @@ export function useChatMessages(): ChatMessagesApi {
     );
   }, []);
 
+  const setGuideSource = useCallback((id: string, source: Source): void => {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, source } : m))
+    );
+  }, []);
+
   const clear = useCallback(() => setMessages([]), []);
 
   return {
@@ -88,6 +102,7 @@ export function useChatMessages(): ChatMessagesApi {
     appendGuideToken,
     finalizeGuideMessage,
     setGuideError,
+    setGuideSource,
     clear,
   };
 }
