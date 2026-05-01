@@ -4,6 +4,10 @@ import { createPersistedStore } from './persistedStore';
 // concerns and makes room for additional UX toggles (hidden gems, exploration
 // mode, etc.) without bloating that store.
 
+export type ModeChoice = 'auto' | 'force-online' | 'force-offline';
+
+const VALID_MODE_CHOICES: readonly ModeChoice[] = ['auto', 'force-online', 'force-offline'];
+
 export interface GuidePrefsShape {
   /**
    * When on, nearby-place lookups rank less-famous spots above the blockbuster
@@ -11,12 +15,11 @@ export interface GuidePrefsShape {
    */
   hiddenGems: boolean;
   /**
-   * When on, the app makes no network calls — Wikipedia geosearch, reverse
-   * geocoding, etc. are all skipped and the on-device model is the only
-   * source of tourist info. Default on so the app works anywhere (airplane,
-   * foreign-data-roaming) without surprises.
+   * Connectivity policy. 'auto' = follow NetworkStatus; 'force-online' /
+   * 'force-offline' = override regardless of actual network state.
+   * Replaces the legacy boolean offlineMode field.
    */
-  offlineMode: boolean;
+  modeChoice: ModeChoice;
   /**
    * When on, useLocation prefers the bundled cities15000 + per-country
    * GeoNames packs (via GeoModule) for reverse-geocoding before falling back
@@ -27,11 +30,24 @@ export interface GuidePrefsShape {
   useOfflineGeocoder: boolean;
 }
 
+// View type returned from get() and passed to subscribers. Carries the shim
+// offlineMode getter so existing callers compile without modification.
+// Shimmed for the duration of the rollout; Wave 2 packages migrate to AppMode.
+export type GuidePrefsView = GuidePrefsShape & {
+  /** @deprecated Use appMode.get() or GuidePrefsShape.modeChoice instead. */
+  readonly offlineMode: boolean;
+};
+
 const DEFAULTS: GuidePrefsShape = {
   hiddenGems: false,
-  offlineMode: true,
+  // Fresh install is 'auto' — network decides, optimistically online.
+  modeChoice: 'auto',
   useOfflineGeocoder: true,
 };
+
+function isModeChoice(v: unknown): v is ModeChoice {
+  return VALID_MODE_CHOICES.includes(v as ModeChoice);
+}
 
 const store = createPersistedStore<GuidePrefsShape>({
   storageKey: '@localguide/guide-prefs-v1',
@@ -39,9 +55,22 @@ const store = createPersistedStore<GuidePrefsShape>({
   validate: (raw, defaults) => {
     if (!raw || typeof raw !== 'object') return defaults;
     const obj = raw as Record<string, unknown>;
+
+    // Migrate legacy boolean offlineMode → modeChoice.
+    let modeChoice: ModeChoice;
+    if (isModeChoice(obj.modeChoice)) {
+      modeChoice = obj.modeChoice;
+    } else if (obj.offlineMode === true) {
+      modeChoice = 'force-offline';
+    } else if (obj.offlineMode === false) {
+      modeChoice = 'auto';
+    } else {
+      modeChoice = defaults.modeChoice;
+    }
+
     return {
       hiddenGems: typeof obj.hiddenGems === 'boolean' ? obj.hiddenGems : defaults.hiddenGems,
-      offlineMode: typeof obj.offlineMode === 'boolean' ? obj.offlineMode : defaults.offlineMode,
+      modeChoice,
       useOfflineGeocoder:
         typeof obj.useOfflineGeocoder === 'boolean'
           ? obj.useOfflineGeocoder
@@ -50,21 +79,43 @@ const store = createPersistedStore<GuidePrefsShape>({
   },
 });
 
+function toView(shape: GuidePrefsShape): GuidePrefsView {
+  return Object.defineProperty(
+    { ...shape } as GuidePrefsShape & { offlineMode: boolean },
+    'offlineMode',
+    { get() { return shape.modeChoice === 'force-offline'; }, enumerable: true, configurable: true }
+  ) as GuidePrefsView;
+}
+
 export const guidePrefs = {
   hydrate: () => store.hydrate(),
-  get: () => store.get(),
-  subscribe: (listener: (p: GuidePrefsShape) => void) => store.subscribe(listener),
+
+  get(): GuidePrefsView {
+    return toView(store.get());
+  },
+
+  subscribe(listener: (p: GuidePrefsView) => void): () => void {
+    return store.subscribe((shape) => listener(toView(shape)));
+  },
 
   setHiddenGems(value: boolean): void {
     store.set({ hiddenGems: value });
   },
 
-  setOfflineMode(value: boolean): void {
-    store.set({ offlineMode: value });
+  setModeChoice(value: ModeChoice): void {
+    store.set({ modeChoice: value });
   },
 
   setUseOfflineGeocoder(value: boolean): void {
     store.set({ useOfflineGeocoder: value });
+  },
+
+  // Shimmed for the duration of the rollout. Callers being migrated to AppMode.
+  get offlineMode(): boolean {
+    return store.get().modeChoice === 'force-offline';
+  },
+  setOfflineMode(value: boolean): void {
+    this.setModeChoice(value ? 'force-offline' : 'auto');
   },
 
   __resetForTest(): void {

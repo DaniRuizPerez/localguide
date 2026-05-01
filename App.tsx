@@ -21,6 +21,7 @@ import { Type } from './src/theme/tokens';
 import { t } from './src/i18n';
 import { narrationPrefs } from './src/services/NarrationPrefs';
 import { guidePrefs } from './src/services/GuidePrefs';
+import { networkStatus } from './src/services/NetworkStatus';
 import { breadcrumbTrail } from './src/services/BreadcrumbTrail';
 import { visitedStore } from './src/services/VisitedStore';
 import { speechBackgroundKeeper } from './src/services/SpeechBackgroundKeeper';
@@ -50,6 +51,7 @@ export default function App() {
     // that blocks the app.
     narrationPrefs.hydrate();
     guidePrefs.hydrate();
+    networkStatus.init();
     breadcrumbTrail.hydrate();
     visitedStore.hydrate();
     // Holds a wake-lock while narration is active so backgrounding the phone

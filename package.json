@@ -43,6 +43,7 @@
     "expo-image-picker": "~55.0.18",
     "expo-localization": "^55.0.13",
     "expo-location": "^55.1.8",
+    "expo-network": "^55.0.13",
     "expo-sensors": "~55.0.13",
     "expo-speech": "~55.0.13",
     "expo-speech-recognition": "^3.1.2",
