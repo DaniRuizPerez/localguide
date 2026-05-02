@@ -1,6 +1,8 @@
-# LocalGuide6 — Pixel 3 B10 verification (2026-05-02 ~09:00–10:00)
+# LocalGuide6 — Pixel 3 B10 verification (2026-05-02 ~09:00–10:30)
 
 **Build:** main HEAD `08aa3d7` (post hydration fix)
+
+**Update (10:18):** Re-ran after the Gemma 3 model finished re-downloading. Captured the full pack-install + offline-mode flow on the same APK. New screencaps `Z3_picker.png`, `Z5_inst_21.png`, `Z6_offline_pack.png`. The offline ranker IS firing and producing a sensible tier order — but using the **length-based fallback path**, not the GeoNames featureCode tier path. See "Native pack discovery gap" section below.
 
 **Scope:** verify B10 (offline POI ranking against featureCode tier with a real GeoNames country pack).
 
@@ -18,6 +20,30 @@
 ## Bug fixed during verification
 
 **`guidePrefs` never hydrated at boot** — the persisted store only loaded from AsyncStorage when something explicitly called `.hydrate()`, and nothing in production code did. So every app launch reset `modeChoice` to `auto` even after the user had picked `force-offline`. Fixed in commit `08aa3d7` by mirroring the `narrationPrefs.hydrate()` pattern used by SpeechService.
+
+## Native pack discovery gap (newly found 10:18)
+
+After installing the US country pack and switching to offline mode, the displayed Around-You list was:
+
+1. Palo Alto, California (1.2 km)
+2. Printers Inc. Bookstore (643 m)
+3. Hoover Institution (1.6 km)
+4. Stanford Graduate School of Business (1.2 km)
+5. Mayfield Brewery (681 m)
+
+Those are all **Wikipedia-cached** titles, not GeoNames country-pack entries (none of them appear in `US.db` per direct sqlite query). Logcat shows `[NearbyPois] geo+wikipedia raw=19` — the offline path returned 19 items, but they came from the in-memory Wikipedia cache (the fall-through branch in `PoiService.fetchNearby` line 246-248), not from `GeoModule.nearbyPlaces`.
+
+I confirmed:
+- `US.db` is on disk: `adb shell run-as com.localguideapp ls files/geo/` shows `US.db`, `US.snapshot`, `cities15000.db`, `cities15000.assethash`.
+- The pack has 30+ Tier-A landmarks in the same geohash5 cell as the user's GPS — direct sqlite query of `9q9hu` returned Cecil H Green Library, Angell Field, Berkeley Park, Ananda Church, Elizabeth Gamble Garden Center, etc.
+- The native module IS responsive — the install flow worked end-to-end.
+
+So `GeoModule.nearbyPlaces` is silently returning [] for these coords despite the data being present. Likely culprits to investigate next:
+1. `geoDb.openCountryPack("US")` may not be picking up the freshly-installed pack on the same process (caching / mutex), even though `listInstalledPacks()` should enumerate it.
+2. The Kotlin `queryWithin` SQL may have a different geohash5 prefix length than the Python build script writes.
+3. Native warning suppressed but pack-open exception swallowed silently.
+
+**Important:** the offline ranker itself (`rankByInterestOffline` in `poiRanking.ts`) is working correctly — the visible order on Z6 is the length-fallback tier × distance-decay producing exactly the expected Tier-D city > Tier-C buildings sort. The blocker is one layer below, in the native query path.
 
 ## Steps to fully close B10 next session
 
