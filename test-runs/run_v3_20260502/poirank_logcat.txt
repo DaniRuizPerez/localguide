@@ -1,0 +1,20 @@
+# poiRank score breakdown — captured during V4 verification (online mode, Palo Alto).
+# Format: [poiRank] <title> {len, pv, dist, catBoost, descBoost, langBoost, pvScore, corpPenalty, noSignalPenalty, decay, raw, final}
+# Top of the visible Around-You list, sorted by `final` descending.
+
+[poiRank] Hanna-Honeycomb House            len=10130  pv=1262    dist=1478  catBoost=50 descBoost=20 langBoost=0.5 pvScore=31.0 corpPenalty=0  decay=0.554 raw=101.5 final=56.20
+[poiRank] Palo Alto, California            len=110682 pv=100115  dist=1207  catBoost=0  descBoost=0  langBoost=30   pvScore=50.0 corpPenalty=0  decay=0.617 raw=80.0  final=49.37
+[poiRank] Stanford, California             len=20018  pv=20840   dist=1394  catBoost=0  descBoost=0  langBoost=27   pvScore=43.2 corpPenalty=0  decay=0.573 raw=70.2  final=40.19
+[poiRank] Klein Field at Sunken Diamond    len=6001   pv=770     dist=1282  catBoost=0  descBoost=20 langBoost=0    pvScore=28.9 corpPenalty=0  decay=0.599 raw=48.9  final=29.26
+[poiRank] Stanford Graduate School of Bus  len=18577  pv=7190    dist=1158  catBoost=0  descBoost=0  langBoost=7.5  pvScore=38.6 corpPenalty=0  decay=0.629 raw=46.1  final=28.99
+[poiRank] Stanford Field                   len=3993   pv=103     dist=1404  catBoost=0  descBoost=20 langBoost=0    pvScore=20.2 corpPenalty=0  decay=0.570 raw=40.2  final=22.91
+[poiRank] Maples Pavilion                  len=6292   pv=1178    dist=1198  catBoost=0  descBoost=0  langBoost=0    pvScore=30.7 corpPenalty=0  decay=0.619 raw=30.7  final=19.02
+[poiRank] California Avenue station        len=6735   pv=293     dist=952   catBoost=0  descBoost=0  langBoost=0.5  pvScore=24.7 corpPenalty=0  decay=0.683 raw=25.2  final=17.20
+
+# Penalised (corp blocklist) and dropped out of the top 10:
+[poiRank] Mayfield Brewery                 len=6531   pv=99      dist=683   catBoost=0  descBoost=0  langBoost=0    pvScore=20.0 corpPenalty=40 decay=0.761 raw=-20.0 final=-15.22
+[poiRank] Printers Inc. Bookstore          len=13476  pv=180     dist=645   catBoost=0  descBoost=0  langBoost=0    pvScore=22.6 corpPenalty=40 decay=0.773 raw=-17.4 final=-13.46
+
+# Notably ABSENT - Layer-0 isTouristic blocked them BEFORE the ranker:
+#   Hewlett-Packard  (description: "American multinational information technology company")
+#   HP Inc.          (description: "American multinational information technology corporation")
