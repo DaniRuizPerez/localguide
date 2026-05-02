@@ -73,7 +73,7 @@ describe('Characterization: LocalGuideService — prompt format', () => {
     const prompt: string = mockRunInferenceSpy.mock.calls[0][0];
 
     // System prompt present
-    expect(prompt).toContain('local tourist guide');
+    expect(prompt).toContain('local guide');
     // Coordinates line present (no placeName in this GPSContext, so the
     // builder keeps the raw numeric position as the only location signal).
     expect(prompt).toContain('Coordinates:');
@@ -84,6 +84,14 @@ describe('Characterization: LocalGuideService — prompt format', () => {
     expect(prompt).toContain('±10m');
     // User query surfaces as a Cue line (no delimiter wrapping anymore).
     expect(prompt).toContain('Cue: What is near me?');
+  });
+
+  it('instructs the model to NOT assume the user is physically at the place', async () => {
+    await service.ask('What is near me?', GPS_PARIS);
+    const prompt: string = mockRunInferenceSpy.mock.calls[0][0];
+    expect(prompt).toMatch(/never assume the user is physically there/i);
+    expect(prompt).toContain('you are standing next to');
+    expect(prompt).toContain('right in front of you');
   });
 
   it('omits accuracy note when accuracy is undefined', async () => {

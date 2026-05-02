@@ -66,10 +66,10 @@ describe('LocalGuideService — prompt format', () => {
     expect(prompt).toContain(query);
   });
 
-  it('includes tourist guide system prompt', async () => {
+  it('includes the local-guide system prompt', async () => {
     await localGuideService.ask('test', paris);
     const [prompt] = mockRunInference.mock.calls[mockRunInference.mock.calls.length - 1];
-    expect(prompt).toContain('tourist guide');
+    expect(prompt).toContain('local guide');
     expect(prompt).toContain('offline');
   });
 

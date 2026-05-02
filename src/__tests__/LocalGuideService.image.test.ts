@@ -90,7 +90,7 @@ describe('LocalGuideService.askWithImage', () => {
     // Conflict resolution rule — trust the image
     expect(prompt).toMatch(/trust the image/i);
     // System prompt still applied
-    expect(prompt).toContain('local tourist guide');
+    expect(prompt).toContain('local guide');
     // User query appears as a Cue line — no placeName means no Place line.
     expect(prompt).toContain('Cue: What is this?');
     // GPS coordinates appear as supporting context via the Coordinates line.
