@@ -205,6 +205,15 @@ export default function ChatScreen(props: Props) {
 
   const effectiveLocation = (gps ?? autoGuide.latestGps) ?? manualLocation ?? null;
 
+  const onSendChip = useCallback(
+    (cue: string) => {
+      if (inferring) return;
+      messages.addUserMessage(cue);
+      stream({ intent: 'text', query: cue, location: effectiveLocation ?? '' });
+    },
+    [inferring, messages, stream, effectiveLocation]
+  );
+
   const narratePoi = useCallback(
     async (poi: Poi) => {
       if (!effectiveLocation) return;
@@ -349,6 +358,7 @@ export default function ChatScreen(props: Props) {
             ref={listRef}
             messages={messages.messages}
             autoGuideEnabled={autoGuide.enabled}
+            onSendChip={onSendChip}
           />
 
           {showTyping && <TypingIndicator />}
