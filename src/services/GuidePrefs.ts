@@ -123,6 +123,14 @@ export const guidePrefs = {
   },
 };
 
+// Kick off hydration at module load so the persisted modeChoice (and hidden-
+// gems toggle, geocoder pref) are in effect as early as the React tree's
+// first render. Subscribers — AppMode → useAppMode → ConnectionPill /
+// ChatScreen ranker — get notified when load completes. Without this, every
+// app boot starts at modeChoice='auto' regardless of what the user picked
+// last session, and the persisted force-offline state silently regresses.
+guidePrefs.hydrate().catch(() => {});
+
 // Prompt directive asking the model to surface off-the-beaten-path picks.
 // Used by offline LLM fallbacks when hidden-gems mode is on and we can't
 // reach Wikipedia to re-rank real places.
