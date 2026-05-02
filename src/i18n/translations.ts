@@ -13,6 +13,17 @@ type Partials = {
 };
 
 const ES: Partials = {
+  mode: {
+    // Ticket 3 — "How should I answer?" sheet. English fallbacks until translated.
+    howShouldIAnswerTitle: 'How should I answer?',
+    threePlainEnglishChoices: 'Three plain-English choices',
+    optAuto: 'Automatic',
+    optAutoSub: 'Pick the best source per question',
+    optOnline: 'Online — grounded',
+    optOnlineSub: 'Answers grounded in Wikipedia',
+    optOffline: 'Offline — on-device',
+    optOfflineSub: 'Stays on this phone',
+  },
   app: {
     ready: 'Cuando quieras',
     warmupTitle: 'Preparando tu guía…',
@@ -202,6 +213,17 @@ const FR: Partials = {
 };
 
 const DE: Partials = {
+  mode: {
+    // Ticket 3 — "How should I answer?" sheet. English fallbacks until translated.
+    howShouldIAnswerTitle: 'How should I answer?',
+    threePlainEnglishChoices: 'Three plain-English choices',
+    optAuto: 'Automatic',
+    optAutoSub: 'Pick the best source per question',
+    optOnline: 'Online — grounded',
+    optOnlineSub: 'Answers grounded in Wikipedia',
+    optOffline: 'Offline — on-device',
+    optOfflineSub: 'Stays on this phone',
+  },
   nav: { chat: 'Chat', map: 'Karte' },
   chat: {
     placeholder: 'Frag mich, was in der Nähe ist…',

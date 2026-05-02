@@ -36,6 +36,7 @@ import { VoiceRateControls } from '../components/VoiceRateControls';
 import { PlaybackControls } from '../components/PlaybackControls';
 import { ItineraryModal } from '../components/ItineraryModal';
 import { QuizModal } from '../components/QuizModal';
+import { HowShouldIAnswerSheet } from '../components/HowShouldIAnswerSheet';
 import { ChatHeader } from '../components/ChatHeader';
 import { OfflineNotice } from '../components/OfflineNotice';
 import { MessageList } from '../components/MessageList';
@@ -68,6 +69,7 @@ export default function ChatScreen(props: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [itineraryOpen, setItineraryOpen] = useState(false);
   const [quizOpen, setQuizOpen] = useState(false);
+  const [howShouldIOpen, setHowShouldIOpen] = useState(false);
   const [noticeDismissed, setNoticeDismissed] = useState(false);
   const { features } = useFeatureTier();
   const [hiddenGems, setHiddenGems] = useState<boolean>(guidePrefs.get().hiddenGems);
@@ -327,6 +329,7 @@ export default function ChatScreen(props: Props) {
         gps={gps}
         manualLocation={manualLocation}
         onSettingsPress={() => setSettingsOpen(true)}
+        onConnectionPillPress={() => setHowShouldIOpen(true)}
         onBack={hasMessages ? backToHome : undefined}
       />
 
@@ -431,6 +434,10 @@ export default function ChatScreen(props: Props) {
         onClose={() => setQuizOpen(false)}
         nearbyPois={visiblePois}
         locationLabel={gps?.placeName ?? manualLocation}
+      />
+      <HowShouldIAnswerSheet
+        visible={howShouldIOpen}
+        onClose={() => setHowShouldIOpen(false)}
       />
     </KeyboardAvoidingView>
   );
