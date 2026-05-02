@@ -191,6 +191,53 @@ describe('PoiService.fetchNearby', () => {
     expect(url).toContain('inprop=length');
   });
 
+  it('does a follow-up coords fetch for pages the geosearch generator dropped, then merges (no GPS placeholder)', async () => {
+    // First call (generator+geosearch): two pages, only one with coords.
+    // Second call (pageids=...&prop=coordinates): supplies the missing coord.
+    mockFetch
+      .mockResolvedValueOnce(
+        wikiResponse([
+          { pageid: 100, title: 'Has Coord', description: 'Park', coordinates: [{ lat: 37.45, lon: -122.14 }], length: 5000 },
+          { pageid: 200, title: 'Missing Coord', description: 'Restaurant', length: 4000 },
+        ])
+      )
+      .mockResolvedValueOnce(
+        wikiResponse([
+          { pageid: 200, title: 'Missing Coord', coordinates: [{ lat: 37.46, lon: -122.15 }] },
+        ])
+      );
+
+    const results = await poiService.fetchNearby(37.4419, -122.143, 5000, 10);
+
+    // Both pages survived (the missing one was rescued by the follow-up).
+    const titles = results.map((r) => r.title).sort();
+    expect(titles).toEqual(['Has Coord', 'Missing Coord']);
+
+    // Neither lat is the GPS placeholder.
+    const missing = results.find((r) => r.title === 'Missing Coord')!;
+    expect(missing.latitude).toBeCloseTo(37.46);
+    expect(missing.longitude).toBeCloseTo(-122.15);
+    expect(missing.distanceMeters).toBeGreaterThan(500);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch.mock.calls[1][0]).toContain('pageids=200');
+    expect(mockFetch.mock.calls[1][0]).toContain('prop=coordinates');
+  });
+
+  it('drops pages still missing coords after the enrichment call (no fake 0 m distances)', async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        wikiResponse([
+          { pageid: 300, title: 'No Coord', description: 'Park', length: 1000 },
+        ])
+      )
+      // Follow-up returns nothing useful.
+      .mockResolvedValueOnce(wikiResponse([]));
+
+    const results = await poiService.fetchNearby(37.4419, -122.143, 5000, 10);
+    expect(results.map((r) => r.title)).toEqual([]);
+  });
+
   it('attaches articleLength when Wikipedia supplies it', async () => {
     mockFetch.mockResolvedValue(
       wikiResponse([

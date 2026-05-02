@@ -281,19 +281,59 @@ export const poiService = {
       const data = (await response.json()) as {
         query?: { pages?: Record<string, WikiPage> };
       };
-      const pages = data.query?.pages ? Object.values(data.query.pages) : [];
+      let pages = data.query?.pages ? Object.values(data.query.pages) : [];
+
+      // MediaWiki quirk: when `prop=coordinates` is paired with
+      // `generator=geosearch`, only ~1/3 of pages actually return their
+      // coordinates — the rest come back without the prop even though the
+      // page itself has primary coords. Without coords we'd have to fall
+      // back to the user's GPS as a placeholder, which makes every distance
+      // read "0 m". Patch the gap with a follow-up `prop=coordinates` call
+      // keyed on pageids; one extra round-trip is cheaper than showing the
+      // wrong distance to every famous nearby landmark.
+      const missingCoords = pages.filter((p) => !p.coordinates?.[0]);
+      if (missingCoords.length > 0) {
+        const ids = missingCoords.map((p) => p.pageid).join('|');
+        const coordsUrl =
+          `https://en.wikipedia.org/w/api.php?action=query` +
+          `&pageids=${encodeURIComponent(ids)}` +
+          `&prop=coordinates&format=json&origin=*`;
+        try {
+          const coordsRes = await fetch(coordsUrl, {
+            signal: controller.signal,
+            headers: { 'User-Agent': 'LocalGuide/1.0 (https://github.com/DaniRuizPerez/localguide)' },
+          });
+          if (coordsRes.ok) {
+            const coordsData = (await coordsRes.json()) as {
+              query?: { pages?: Record<string, WikiPage> };
+            };
+            const coordsByPageId = new Map<number, Array<{ lat: number; lon: number }>>();
+            for (const p of Object.values(coordsData.query?.pages ?? {})) {
+              if (p.coordinates) coordsByPageId.set(p.pageid, p.coordinates);
+            }
+            pages = pages.map((p) =>
+              p.coordinates?.[0] ? p : { ...p, coordinates: coordsByPageId.get(p.pageid) }
+            );
+          }
+        } catch {
+          // Best-effort enrichment; if it fails, drop the coordless pages
+          // below rather than fall through to the GPS placeholder.
+        }
+      }
+
       const pois: Poi[] = pages
         .filter((p) => isTouristic(p.title, p.description))
+        // Drop pages we still couldn't get coords for — better to show a
+        // shorter list than to lie about the distance.
+        .filter((p) => Boolean(p.coordinates?.[0]))
         .map((p) => {
-          const coord = p.coordinates?.[0];
-          const lat = coord?.lat ?? latitude;
-          const lon = coord?.lon ?? longitude;
+          const coord = p.coordinates![0];
           return {
             pageId: p.pageid,
             title: p.title,
-            latitude: lat,
-            longitude: lon,
-            distanceMeters: distanceMeters(latitude, longitude, lat, lon),
+            latitude: coord.lat,
+            longitude: coord.lon,
+            distanceMeters: distanceMeters(latitude, longitude, coord.lat, coord.lon),
             source: 'wikipedia' as const,
             articleLength: typeof p.length === 'number' ? p.length : undefined,
             description: p.description,
