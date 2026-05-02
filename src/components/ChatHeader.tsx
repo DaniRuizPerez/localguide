@@ -16,9 +16,9 @@ interface Props {
   /** When provided, renders a back arrow on the left (shown in chat mode). */
   onBack?: () => void;
   /**
-   * When provided, passed to ConnectionPill so tapping the pill can open the
-   * "How should I answer?" sheet (Ticket 3 wires the actual handler from
-   * ChatScreen; ChatHeader just plumbs it through here).
+   * Passed to ConnectionPill so tapping the pill can open the
+   * "How should I answer?" sheet. ChatScreen owns the handler;
+   * ChatHeader just plumbs it through.
    */
   onConnectionPillPress?: () => void;
 }
