@@ -214,7 +214,12 @@ async function decide(params: {
   const thumbnailUrl = thumbnail?.source ?? null;
 
   // Step 4: pick between source-first and RAG.
-  const useSourceFirst = perfClass === 'slow' || isFactualQuery(query);
+  // Skip source-first when the user is asking for elaboration ("Tell me
+  // more …"). The user has already seen the source-first reply for this
+  // POI; what they want now is a longer, non-repetitive expansion that
+  // only the LLM (with the prior turn as context via RAG) can produce.
+  const isFollowUp = /^\s*tell me more\b/i.test(query);
+  const useSourceFirst = !isFollowUp && (perfClass === 'slow' || isFactualQuery(query));
 
   if (useSourceFirst) {
     return {
