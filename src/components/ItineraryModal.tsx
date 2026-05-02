@@ -26,6 +26,7 @@ import {
 import type { GPSContext } from '../services/InferenceService';
 import { distanceMeters, type Poi } from '../services/PoiService';
 import { visitedStore } from '../services/VisitedStore';
+import { appMode } from '../services/AppMode';
 
 interface Props {
   visible: boolean;
@@ -286,6 +287,23 @@ export function ItineraryModal({
     },
     []
   );
+
+  // Invalidate cached plans when the effective online/offline mode flips so
+  // a sheet opened in one mode and reopened in the other doesn't show the
+  // wrong source-badge / "Generated offline" disclaimer combination.
+  useEffect(() => {
+    let last = appMode.get();
+    return appMode.subscribe((next) => {
+      if (next === last) return;
+      last = next;
+      taskRef.current?.abort();
+      taskRef.current = null;
+      setPlans(() => new Map());
+      setPlanSource(null);
+      setError(null);
+      setLoading(false);
+    });
+  }, []);
 
   const durationLabel = DURATIONS.find((d) => d.hours === duration)?.labelKey ?? 'halfDay';
 

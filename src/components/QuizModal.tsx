@@ -22,6 +22,7 @@ import {
   type QuizStreamHandle,
 } from '../services/LocalGuideService';
 import type { Poi } from '../services/PoiService';
+import { appMode } from '../services/AppMode';
 
 interface Props {
   visible: boolean;
@@ -119,6 +120,24 @@ export function QuizModal({ visible, onClose, nearbyPois, locationLabel }: Props
     },
     []
   );
+
+  // Invalidate cached questions when online/offline mode flips so the
+  // disclaimer + source badges match the mode that produced them.
+  useEffect(() => {
+    let last = appMode.get();
+    return appMode.subscribe((next) => {
+      if (next === last) return;
+      last = next;
+      handleRef.current?.abort();
+      handleRef.current = null;
+      setQuestions([]);
+      setCurrentIdx(0);
+      setSelectedIdx(null);
+      setScore(0);
+      setError(null);
+      setGenerating(false);
+    });
+  }, []);
 
   // Auto-start generation as soon as the modal opens with a fresh state, so
   // the user doesn't sit through 25 s of Q1 generation after tapping a
