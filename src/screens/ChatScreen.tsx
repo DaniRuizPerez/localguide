@@ -45,7 +45,9 @@ import { ChatInputBar } from '../components/ChatInputBar';
 import { TypingIndicator } from '../components/ChatBubble';
 import { HomeState } from '../components/HomeState';
 import { useEdgeSwipeBack } from '../components/EdgeSwipeBack';
+import { ModeChangeToast } from '../components/ModeChangeToast';
 import { t } from '../i18n';
+import type { EffectiveMode } from '../services/AppMode';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Chat'>;
 
@@ -107,6 +109,29 @@ export default function ChatScreen(props: Props) {
   });
 
   const { effective } = useAppMode();
+
+  // ── Mode-change toast ────────────────────────────────────────────────────
+  // prevModeRef starts as `undefined` so the initial mount (before `effective`
+  // is known) doesn't fire a toast. On the first render we record the value and
+  // return early; every subsequent change triggers a fresh toast.
+  const prevModeRef = useRef<EffectiveMode | undefined>(undefined);
+  const [toast, setToast] = useState<{ id: string; text: string } | null>(null);
+
+  useEffect(() => {
+    if (prevModeRef.current === undefined) {
+      prevModeRef.current = effective;
+      return;
+    }
+    if (prevModeRef.current === effective) return;
+    const toastText =
+      effective === 'offline'
+        ? t('mode.toastSwitchedOffline')
+        : t('mode.toastBackOnline');
+    setToast({ id: String(Date.now()), text: toastText });
+    prevModeRef.current = effective;
+  }, [effective]);
+  // ── End mode-change toast ─────────────────────────────────────────────────
+
   const { pois, loading: poisLoading } = useNearbyPois(gps, poiRadiusMeters, {
     hiddenGems,
     offline: effective === 'offline',
@@ -390,6 +415,14 @@ export default function ChatScreen(props: Props) {
           loading={poisLoading}
           awaitingLocation={!gps && !manualLocation && (status === 'idle' || status === 'requesting')}
           locationDenied={!gps && !manualLocation && (status === 'denied' || status === 'error')}
+        />
+      )}
+
+      {toast && (
+        <ModeChangeToast
+          key={toast.id}
+          text={toast.text}
+          onDismiss={() => setToast(null)}
         />
       )}
 
