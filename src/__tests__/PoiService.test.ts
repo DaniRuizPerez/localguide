@@ -140,6 +140,47 @@ describe('PoiService.fetchNearby', () => {
     expect(titles).toContain('Cantor Arts Center');
   });
 
+  it('drops corporate-HQ pages (HP, HP Inc., conglomerates) so the ranker never sees them', async () => {
+    mockFetch.mockResolvedValue(
+      wikiResponse([
+        {
+          pageid: 30,
+          title: 'Hewlett-Packard',
+          description: 'American multinational information technology company',
+          coordinates: [{ lat: 37.4136, lon: -122.1451 }],
+          length: 129490,
+        },
+        {
+          pageid: 31,
+          title: 'HP Inc.',
+          description: 'American multinational information technology corporation',
+          coordinates: [{ lat: 37.4111, lon: -122.1476 }],
+          length: 49295,
+        },
+        {
+          pageid: 32,
+          title: 'Tesla, Inc.',
+          description: 'American multinational automotive manufacturer',
+          coordinates: [{ lat: 37.3946, lon: -122.1500 }],
+          length: 200000,
+        },
+        {
+          pageid: 33,
+          title: 'Stanford Memorial Church',
+          description: 'Church on the Stanford University campus',
+          coordinates: [{ lat: 37.4274, lon: -122.1697 }],
+          length: 7000,
+        },
+      ])
+    );
+    const results = await poiService.fetchNearby(37.4419, -122.143);
+    const titles = results.map((p) => p.title);
+    expect(titles).not.toContain('Hewlett-Packard');
+    expect(titles).not.toContain('HP Inc.');
+    expect(titles).not.toContain('Tesla, Inc.');
+    expect(titles).toContain('Stanford Memorial Church');
+  });
+
   it('keeps real attractions with descriptive short-descriptions', async () => {
     mockFetch.mockResolvedValue(
       wikiResponse([

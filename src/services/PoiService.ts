@@ -189,6 +189,15 @@ function isTouristic(title: string, description: string | null | undefined): boo
     /\b(railway station|metro station|bus station|transit hub)\b/,
     // Generic business/brand descriptors that aren't tourist-worthy.
     /\b(american|international|public|private) (company|corporation|conglomerate)\b/,
+    // Corporate HQs leaking through GeoSearch with the "<adjective>+
+    // <industry> company/corporation" pattern. These describe the
+    // organisation itself (HP, Tesla, Alphabet) rather than a place a
+    // visitor would walk to. Two-word industry slug captures
+    // "information technology", "consumer electronics", "oil and gas",
+    // "financial services", etc., and a single-word slug catches
+    // "technology company" / "pharmaceutical corporation".
+    /\b(multinational|holding|conglomerate|publicly[\s-]?traded|limited liability) (company|corporation)\b/,
+    /\b(information technology|consumer electronics|oil and gas|financial services|investment banking|electronic commerce|software|hardware|semiconductor|biotechnology|pharmaceutical|aerospace|automotive|telecommunications|energy|insurance|media) (company|corporation|conglomerate|firm|manufacturer)\b/,
     // Schools that aren't famous (famous ones have their own descriptor like
     // "private research university" which won't match).
     /\b(elementary|middle|secondary) school\b/,
