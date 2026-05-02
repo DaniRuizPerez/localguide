@@ -27,7 +27,8 @@ import { speechService } from '../services/SpeechService';
 import { guidePrefs } from '../services/GuidePrefs';
 import type { GPSContext } from '../services/InferenceService';
 import type { Poi } from '../services/PoiService';
-import { rankByInterest } from '../services/poiRanking';
+import { rankByInterestSync, rankByInterestOffline, rankByInterestOnline } from '../services/poiRanking';
+import { wikipediaSignals } from '../services/wikipediaSignals';
 import type { Message } from '../types/chat';
 import { Colors } from '../theme/colors';
 import { Radii, Type } from '../theme/tokens';
@@ -118,15 +119,49 @@ export default function ChatScreen(props: Props) {
   // empty when none of the local places match the picked topic.
   const filteredPois = useMemo(() => filterPoisByTopics(pois, topics), [pois, topics]);
 
-  // Rank by Wikipedia article length (interest proxy) and cap at 10. Also
-  // recomputes distance from the LIVE gps fix so a small drift between
-  // fetches shows up immediately rather than waiting for the next cell-key
-  // refire. LLM-source POIs (offline mode) carry placeholder coords (== gps),
-  // so their distance is 0 by construction — that's expected, not a bug.
-  const visiblePois = useMemo(
-    () => rankByInterest(filteredPois, gps, { hiddenGems }),
-    [filteredPois, gps, hiddenGems]
-  );
+  // Two-stage ranking. Online mode paints with the cheap sync ranker first
+  // (length × distance-decay) so the user sees something within ~500ms of
+  // GPS lock, then re-ranks in place once Wikipedia signals (categories,
+  // pageviews, langlinks) land — typically 600–1500ms later. Offline mode
+  // uses the GeoNames feature-code ranker, no network, single paint.
+  // LLM-source POIs (offline only) carry placeholder coords; their distance
+  // shows 0 m by construction.
+  const [visiblePois, setVisiblePois] = useState<Poi[]>([]);
+  useEffect(() => {
+    const sync =
+      effective === 'offline'
+        ? rankByInterestOffline(filteredPois, gps, { hiddenGems, radiusMeters: poiRadiusMeters })
+        : rankByInterestSync(filteredPois, gps, { hiddenGems, radiusMeters: poiRadiusMeters });
+    setVisiblePois(sync);
+
+    if (effective !== 'online' || filteredPois.length === 0) return;
+
+    const wikiPageIds = filteredPois
+      .filter((p) => p.source === 'wikipedia')
+      .map((p) => p.pageId);
+    if (wikiPageIds.length === 0) return;
+
+    const ctrl = new AbortController();
+    let cancelled = false;
+    wikipediaSignals
+      .fetchBatch(wikiPageIds, ctrl.signal)
+      .then((signals) => {
+        if (cancelled || signals.size === 0) return;
+        const refined = rankByInterestOnline(filteredPois, gps, signals, {
+          hiddenGems,
+          radiusMeters: poiRadiusMeters,
+        });
+        setVisiblePois(refined);
+      })
+      .catch(() => {
+        // Network failure — keep the sync paint already in state.
+      });
+
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+    };
+  }, [filteredPois, gps, hiddenGems, effective, poiRadiusMeters]);
 
   // Background quiz prefetch. Fires once nearby places have settled and the
   // location label is known; the prefetch itself uses priority='low' and
