@@ -21,16 +21,26 @@ interface Props {
 }
 
 /**
- * Derive a short topic label from a guide message.
+ * Derive the POI / topic that a guide bubble is about by reading the user
+ * message that PROMPTED it, not the bubble's own GPS placeName. Otherwise a
+ * reply about "Stanford" tied to a Palo Alto GPS fix would surface "Tell me
+ * more about Palo Alto" — wrong POI.
  *
- * Priority:
- * 1. `msg.locationUsed?.placeName` when the message was tied to a named place.
- * 2. First 8 words of the message text (stripped of punctuation) — a
- *    best-effort label good enough for "Tell me more about …".
+ * Strategy:
+ * 1. Find the most recent prior user message.
+ * 2. Strip leading "Tell me about ", "What is ", "Tell me more about ",
+ *    "About ", "Walk me to " etc., then trim trailing punctuation.
+ * 3. Fall back to the guide bubble's placeName, then to the first 8 words of
+ *    its text — only if no prior user message exists (e.g. auto-guide cue).
  */
-function extractTopic(msg: Message): string {
-  // locationUsed is either a GPSContext object (with optional placeName) or a
-  // plain string (manual location). Handle both.
+function extractTopic(msg: Message, allMessages: Message[]): string {
+  const idx = allMessages.findIndex((m) => m.id === msg.id);
+  for (let i = idx - 1; i >= 0; i--) {
+    const prev = allMessages[i];
+    if (prev.role === 'user' && prev.text.trim()) {
+      return cleanQueryToTopic(prev.text);
+    }
+  }
   if (msg.locationUsed) {
     if (typeof msg.locationUsed === 'object' && msg.locationUsed.placeName) {
       return msg.locationUsed.placeName;
@@ -39,8 +49,6 @@ function extractTopic(msg: Message): string {
       return msg.locationUsed.trim();
     }
   }
-
-  // Fall back to first 8 words of the message text, punctuation stripped.
   const words = msg.text
     .replace(/[^\w\s]/g, '')
     .split(/\s+/)
@@ -49,23 +57,41 @@ function extractTopic(msg: Message): string {
   return words.join(' ');
 }
 
+const TOPIC_PREFIX_RE =
+  /^\s*(tell me more about|tell me about|what(?:'s| is)|who(?:'s| is)|where(?:'s| is)|about|walk me to|narrate|describe)\s+/i;
+
+function cleanQueryToTopic(query: string): string {
+  let topic = query.trim();
+  // Peel off question-style prefixes a couple of times so "Tell me about Stanford" → "Stanford".
+  for (let i = 0; i < 2; i++) {
+    const next = topic.replace(TOPIC_PREFIX_RE, '');
+    if (next === topic) break;
+    topic = next;
+  }
+  // Strip trailing punctuation and quote marks.
+  topic = topic.replace(/[.?!,;:'"`]+$/g, '').trim();
+  return topic || query.trim();
+}
+
 /**
- * Build the three default suggestion chips for a guide bubble.
+ * Build the suggestion chips for a guide bubble. Currently a single chip —
+ * "Tell me more" — that re-prompts the model for a fuller, non-repetitive
+ * expansion of the same POI. Earlier "Walk me there / Food nearby" chips
+ * were removed: too generic, drove off-topic follow-ups.
  */
-function buildChips(msg: Message, onSendChip: (cue: string) => void): Chip[] {
-  const topic = extractTopic(msg);
+function buildChips(
+  msg: Message,
+  allMessages: Message[],
+  onSendChip: (cue: string) => void
+): Chip[] {
+  const topic = extractTopic(msg, allMessages);
   return [
     {
       label: t('chip.tellMeMore'),
-      onPress: () => onSendChip(`Tell me more about ${topic}`),
-    },
-    {
-      label: t('chip.walkMeThere'),
-      onPress: () => onSendChip(`Walk me to ${topic}`),
-    },
-    {
-      label: t('chip.foodNearby'),
-      onPress: () => onSendChip('What food is good near here?'),
+      onPress: () =>
+        onSendChip(
+          `Tell me more about ${topic}. Give a long, detailed answer with specific facts (history, architecture, people, traditions, the "why"). Do NOT repeat what you already said — assume the prior reply was read. Add new material.`
+        ),
     },
   ];
 }
@@ -81,12 +107,12 @@ export const MessageList = forwardRef<FlatList<Message>, Props>(function Message
         <>
           <AnimatedChatBubble message={item} />
           {isGuideBubbleWithText && (
-            <SuggestionChips chips={buildChips(item, onSendChip)} />
+            <SuggestionChips chips={buildChips(item, messages, onSendChip)} />
           )}
         </>
       );
     },
-    [onSendChip]
+    [onSendChip, messages]
   );
 
   return (

@@ -119,7 +119,9 @@ export function useGuideStream({ messages, speakResponsesRef, topicRef, onScroll
 
               if (decision.mode === 'source-first') {
                 // Render Wikipedia extract directly — no LLM call.
-                const body = `From Wikipedia: ${decision.sourceFirstText ?? ''}`;
+                // The source attribution lives in the bubble's source pill;
+                // don't repeat it as a "From Wikipedia:" prefix in the body.
+                const body = decision.sourceFirstText ?? '';
                 messages.appendGuideToken(guideId, body);
                 messages.finalizeGuideMessage(guideId, Date.now() - start);
                 messages.setGuideSource(guideId, 'wikipedia');

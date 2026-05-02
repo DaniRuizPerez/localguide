@@ -36,8 +36,6 @@ export const EN = {
   },
   chip: {
     tellMeMore: 'Tell me more',
-    walkMeThere: 'Walk me there',
-    foodNearby: 'Food nearby',
   },
   chat: {
     placeholder: "Ask about what's near you…",

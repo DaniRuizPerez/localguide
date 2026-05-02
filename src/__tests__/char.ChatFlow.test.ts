@@ -310,7 +310,9 @@ describe('W2: online + perfClass=fast + factual query → source-first short-cir
 
     const guideMsg = result.current.msgs.messages.find((m) => m.role === 'guide');
     expect(guideMsg?.source).toBe('wikipedia');
-    expect(guideMsg?.text).toContain('From Wikipedia:');
+    // Source attribution is shown via the bubble's source pill, not as a
+    // "From Wikipedia:" prefix in the body.
+    expect(guideMsg?.text).not.toContain('From Wikipedia:');
     expect(guideMsg?.text).toContain('The Eiffel Tower is a wrought-iron lattice tower');
   });
 });

@@ -93,19 +93,20 @@ describe('MessageList — suggestion chips integration', () => {
     onSendChip.mockClear();
   });
 
-  it('renders chips beneath a non-empty guide bubble', () => {
+  it('renders the Tell-me-more chip beneath a non-empty guide bubble', () => {
     const messages: Message[] = [
       makeMessage({ id: '1', role: 'guide', text: 'Bryant Park has a lovely reading room.' }),
     ];
 
-    const { getByTestId } = render(
+    const { getByTestId, queryByTestId } = render(
       <MessageList messages={messages} autoGuideEnabled={false} onSendChip={onSendChip} />
     );
 
-    // All three default chips should appear.
     expect(getByTestId('suggestion-chip-Tell me more')).toBeTruthy();
-    expect(getByTestId('suggestion-chip-Walk me there')).toBeTruthy();
-    expect(getByTestId('suggestion-chip-Food nearby')).toBeTruthy();
+    // The previous Walk-me-there / Food-nearby chips were removed — they
+    // drove off-topic follow-ups. Only Tell-me-more remains.
+    expect(queryByTestId('suggestion-chip-Walk me there')).toBeNull();
+    expect(queryByTestId('suggestion-chip-Food nearby')).toBeNull();
   });
 
   it('renders chips beneath EVERY non-empty guide bubble, not just the latest', () => {
@@ -119,15 +120,8 @@ describe('MessageList — suggestion chips integration', () => {
       <MessageList messages={messages} autoGuideEnabled={false} onSendChip={onSendChip} />
     );
 
-    // Two guide bubbles => two sets of chips; each chip label appears twice.
     const tellMeMoreChips = getAllByTestId('suggestion-chip-Tell me more');
     expect(tellMeMoreChips.length).toBe(2);
-
-    const walkChips = getAllByTestId('suggestion-chip-Walk me there');
-    expect(walkChips.length).toBe(2);
-
-    const foodChips = getAllByTestId('suggestion-chip-Food nearby');
-    expect(foodChips.length).toBe(2);
   });
 
   it('does NOT render chips beneath a user bubble', () => {
@@ -140,12 +134,9 @@ describe('MessageList — suggestion chips integration', () => {
     );
 
     expect(queryByTestId('suggestion-chip-Tell me more')).toBeNull();
-    expect(queryByTestId('suggestion-chip-Walk me there')).toBeNull();
-    expect(queryByTestId('suggestion-chip-Food nearby')).toBeNull();
   });
 
   it('does NOT render chips beneath the streaming-empty guide placeholder (text is empty)', () => {
-    // The streaming placeholder has role 'guide' but empty text while tokens are arriving.
     const messages: Message[] = [
       makeMessage({ id: '1', role: 'guide', text: '' }),
     ];
@@ -155,16 +146,42 @@ describe('MessageList — suggestion chips integration', () => {
     );
 
     expect(queryByTestId('suggestion-chip-Tell me more')).toBeNull();
-    expect(queryByTestId('suggestion-chip-Walk me there')).toBeNull();
-    expect(queryByTestId('suggestion-chip-Food nearby')).toBeNull();
   });
 
-  it('tapping Tell-me-more chip calls onSendChip with placeName when available', () => {
+  it('Tell-me-more topic comes from the prior USER message, not the guide bubble placeName', () => {
+    // User asked about Stanford while their GPS placeName was Palo Alto. The
+    // chip must use "Stanford" — without this fix the topic was the bubble's
+    // placeName and the follow-up came back about the wrong POI.
+    const messages: Message[] = [
+      makeMessage({ id: '1', role: 'user', text: 'Tell me about Stanford' }),
+      makeMessage({
+        id: '2',
+        role: 'guide',
+        text: 'Stanford is a private research university.',
+        locationUsed: { latitude: 37.44, longitude: -122.14, accuracy: 5, placeName: 'Palo Alto' } as any,
+      }),
+    ];
+
+    const { getByTestId } = render(
+      <MessageList messages={messages} autoGuideEnabled={false} onSendChip={onSendChip} />
+    );
+
+    fireEvent.press(getByTestId('suggestion-chip-Tell me more'));
+    const cue = onSendChip.mock.calls[0][0];
+    expect(cue).toMatch(/^Tell me more about Stanford\b/);
+    expect(cue).not.toMatch(/Palo Alto/);
+    // The cue should also instruct the model not to repeat itself and to be verbose.
+    expect(cue).toMatch(/do not repeat/i);
+    expect(cue).toMatch(/long, detailed/i);
+  });
+
+  it('falls back to placeName when there is no prior user message', () => {
+    // Auto-guide cue: a guide bubble with no preceding user message.
     const messages: Message[] = [
       makeMessage({
         id: '1',
         role: 'guide',
-        text: 'Bryant Park is beautiful.',
+        text: 'Welcome to the area.',
         locationUsed: { latitude: 40.7, longitude: -74.0, accuracy: 5, placeName: 'Bryant Park' } as any,
       }),
     ];
@@ -174,47 +191,13 @@ describe('MessageList — suggestion chips integration', () => {
     );
 
     fireEvent.press(getByTestId('suggestion-chip-Tell me more'));
-    expect(onSendChip).toHaveBeenCalledWith('Tell me more about Bryant Park');
+    expect(onSendChip.mock.calls[0][0]).toMatch(/^Tell me more about Bryant Park\b/);
   });
 
-  it('tapping Walk-me-there chip calls onSendChip with placeName', () => {
+  it('strips question prefixes from the prior user message ("What is X?" → "X")', () => {
     const messages: Message[] = [
-      makeMessage({
-        id: '1',
-        role: 'guide',
-        text: 'The carousel is nearby.',
-        locationUsed: { latitude: 40.7, longitude: -74.0, accuracy: 5, placeName: 'Bryant Park' } as any,
-      }),
-    ];
-
-    const { getByTestId } = render(
-      <MessageList messages={messages} autoGuideEnabled={false} onSendChip={onSendChip} />
-    );
-
-    fireEvent.press(getByTestId('suggestion-chip-Walk me there'));
-    expect(onSendChip).toHaveBeenCalledWith('Walk me to Bryant Park');
-  });
-
-  it('tapping Food-nearby chip always sends fixed food query', () => {
-    const messages: Message[] = [
-      makeMessage({ id: '1', role: 'guide', text: 'The area has many options.' }),
-    ];
-
-    const { getByTestId } = render(
-      <MessageList messages={messages} autoGuideEnabled={false} onSendChip={onSendChip} />
-    );
-
-    fireEvent.press(getByTestId('suggestion-chip-Food nearby'));
-    expect(onSendChip).toHaveBeenCalledWith('What food is good near here?');
-  });
-
-  it('falls back to first 8 words of text when no placeName', () => {
-    const messages: Message[] = [
-      makeMessage({
-        id: '1',
-        role: 'guide',
-        text: 'One two three four five six seven eight nine ten.',
-      }),
+      makeMessage({ id: '1', role: 'user', text: 'What is the Hoover Institution?' }),
+      makeMessage({ id: '2', role: 'guide', text: 'A public-policy think tank.' }),
     ];
 
     const { getByTestId } = render(
@@ -222,27 +205,6 @@ describe('MessageList — suggestion chips integration', () => {
     );
 
     fireEvent.press(getByTestId('suggestion-chip-Tell me more'));
-    // 8-word cap: "One two three four five six seven eight"
-    expect(onSendChip).toHaveBeenCalledWith(
-      'Tell me more about One two three four five six seven eight'
-    );
-  });
-
-  it('uses manual location string when locationUsed is a string', () => {
-    const messages: Message[] = [
-      makeMessage({
-        id: '1',
-        role: 'guide',
-        text: 'There is a lot to see.',
-        locationUsed: 'Times Square, NYC',
-      }),
-    ];
-
-    const { getByTestId } = render(
-      <MessageList messages={messages} autoGuideEnabled={false} onSendChip={onSendChip} />
-    );
-
-    fireEvent.press(getByTestId('suggestion-chip-Tell me more'));
-    expect(onSendChip).toHaveBeenCalledWith('Tell me more about Times Square, NYC');
+    expect(onSendChip.mock.calls[0][0]).toMatch(/^Tell me more about the Hoover Institution\b/);
   });
 });
