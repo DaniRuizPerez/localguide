@@ -25,7 +25,7 @@ jest.mock('expo-device', () => ({
   get totalMemory() {
     return mockTotalMemory;
   },
-}), { virtual: true });
+}));
 
 // Controllable Platform mock.
 let mockPlatformOS: string = 'android';
@@ -54,7 +54,7 @@ function freshDevicePerf() {
     get totalMemory() {
       return mockTotalMemory;
     },
-  }), { virtual: true });
+  }));
   jest.mock('react-native', () => ({
     Platform: {
       get OS() {

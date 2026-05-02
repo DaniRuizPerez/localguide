@@ -13,7 +13,7 @@
 
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { totalMemory as expoTotalMemory } from 'expo-device';
+import * as ExpoDevice from 'expo-device';
 
 // ---------------------------------------------------------------------------
 // Tunables
@@ -95,7 +95,10 @@ function coldStartClass(): 'fast' | 'slow' {
   }
 
   // RAM check via expo-device (may be null on some devices / in tests).
-  const ram = expoTotalMemory;
+  // Read the property lazily on the namespace object: destructuring it at
+  // import time would capture the value before per-file jest.mock factories
+  // (which use a getter) can swap it under coverage instrumentation.
+  const ram = ExpoDevice.totalMemory;
   if (typeof ram === 'number' && ram < SLOW_RAM_THRESHOLD_BYTES) {
     _coldStartClass = 'slow';
     return _coldStartClass;
