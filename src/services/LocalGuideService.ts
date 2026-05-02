@@ -972,8 +972,10 @@ export const localGuideService = {
                 ]);
                 if (!wikiResult) return { title: p.title, note: '' };
                 // First sentence: split on . ! ? then cap at 120 chars.
+                // `(?<![A-Z])` skips initials like "Charles A. Coolidge" so
+                // the note doesn't truncate mid-name.
                 const firstSentence = wikiResult.extract
-                  .split(/(?<=[.!?])\s+/)[0]
+                  .split(/(?<![A-Z])(?<=[.!?])\s+/)[0]
                   ?.slice(0, 120) ?? '';
                 return { title: p.title, note: firstSentence };
               } catch {

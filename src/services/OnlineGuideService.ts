@@ -124,7 +124,9 @@ function isFactualQuery(query: string): boolean {
  */
 function firstSentences(text: string): string {
   // Split on sentence-ending punctuation followed by whitespace or end.
-  const sentenceEnd = /[.!?](?:\s|$)/g;
+  // The negative lookbehind `(?<![A-Z])` skips initials like "Charles A. "
+  // so we don't truncate Wikipedia summaries mid-name.
+  const sentenceEnd = /(?<![A-Z])[.!?](?:\s|$)/g;
   const sentences: string[] = [];
   let lastIndex = 0;
 
