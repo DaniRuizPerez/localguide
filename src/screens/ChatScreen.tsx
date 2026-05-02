@@ -20,7 +20,6 @@ import { useGuideStream } from '../hooks/useGuideStream';
 import { useNearbyPois } from '../hooks/useNearbyPois';
 import { useAppMode } from '../hooks/useAppMode';
 import { useProximityNarration } from '../hooks/useProximityNarration';
-import { useDwellDetection } from '../hooks/useDwellDetection';
 import { useFeatureTier } from '../hooks/useFeatureTier';
 import { type GuideTopic, localGuideService } from '../services/LocalGuideService';
 import { filterPoisByTopics } from '../services/poiTopic';
@@ -28,8 +27,8 @@ import { speechService } from '../services/SpeechService';
 import { guidePrefs } from '../services/GuidePrefs';
 import type { GPSContext } from '../services/InferenceService';
 import type { Poi } from '../services/PoiService';
+import { rankByInterest } from '../services/poiRanking';
 import type { Message } from '../types/chat';
-import { DwellBanner } from '../components/DwellBanner';
 import { Colors } from '../theme/colors';
 import { Radii, Type } from '../theme/tokens';
 import { VoiceRateControls } from '../components/VoiceRateControls';
@@ -71,7 +70,6 @@ export default function ChatScreen(props: Props) {
   const [noticeDismissed, setNoticeDismissed] = useState(false);
   const { features } = useFeatureTier();
   const [hiddenGems, setHiddenGems] = useState<boolean>(guidePrefs.get().hiddenGems);
-  const [dismissedDwellIds, setDismissedDwellIds] = useState<Set<number>>(new Set());
 
   useEffect(
     () =>
@@ -118,7 +116,17 @@ export default function ChatScreen(props: Props) {
   // whose category doesn't map to any of the 5 topics (hotels, transit,
   // generic buildings) are kept regardless so the list isn't unexpectedly
   // empty when none of the local places match the picked topic.
-  const visiblePois = useMemo(() => filterPoisByTopics(pois, topics), [pois, topics]);
+  const filteredPois = useMemo(() => filterPoisByTopics(pois, topics), [pois, topics]);
+
+  // Rank by Wikipedia article length (interest proxy) and cap at 10. Also
+  // recomputes distance from the LIVE gps fix so a small drift between
+  // fetches shows up immediately rather than waiting for the next cell-key
+  // refire. LLM-source POIs (offline mode) carry placeholder coords (== gps),
+  // so their distance is 0 by construction — that's expected, not a bug.
+  const visiblePois = useMemo(
+    () => rankByInterest(filteredPois, gps, { hiddenGems }),
+    [filteredPois, gps, hiddenGems]
+  );
 
   // Background quiz prefetch. Fires once nearby places have settled and the
   // location label is known; the prefetch itself uses priority='low' and
@@ -190,11 +198,6 @@ export default function ChatScreen(props: Props) {
     enabled: autoGuide.enabled && !inferring,
   });
 
-  // Dwell (prolonged presence at a POI) — runs independent of Auto-Guide.
-  const dwellCandidate = useDwellDetection({ gps, pois, enabled: !inferring });
-  const visibleDwell =
-    dwellCandidate && !dismissedDwellIds.has(dwellCandidate.poi.pageId) ? dwellCandidate : null;
-
   // One-shot welcome narration when Auto-Guide toggles on and we have GPS.
   const welcomedRef = useRef(false);
   useEffect(() => {
@@ -240,14 +243,6 @@ export default function ChatScreen(props: Props) {
     await stream({ intent: 'image', query: userQuery, location: effectiveLocation, imageUri });
   }, [inferring, effectiveLocation, input, messages, stream, scrollToEnd]);
 
-  const dismissDwell = useCallback((pageId: number) => {
-    setDismissedDwellIds((prev) => {
-      const next = new Set(prev);
-      next.add(pageId);
-      return next;
-    });
-  }, []);
-
   const lastMsg = messages.messages[messages.messages.length - 1];
   const showTyping = inferring && (lastMsg?.role !== 'guide' || !lastMsg.text);
   const hasMessages = messages.messages.length > 0;
@@ -261,14 +256,19 @@ export default function ChatScreen(props: Props) {
   const swipeBackHandlers = useEdgeSwipeBack(backToHome);
 
   // Coalesce slow-device + hallucination warnings into one dismissible
-  // notice shown once, above the input. Priority: slow-device first (it's
-  // tier-specific), else hallucination.
-  const noticeText =
-    features?.slowInference === true
+  // notice shown once, above the input. Both notices only matter when the
+  // LLM has actually been invoked — source-first Wikipedia replies don't
+  // touch the on-device model, so showing "responses may be slow" or
+  // "this can hallucinate" against a 100% Wikipedia conversation is
+  // misleading. Gate on at least one ai-online / ai-offline guide bubble.
+  const llmUsed = messages.messages.some(
+    (m) => m.role === 'guide' && (m.source === 'ai-online' || m.source === 'ai-offline')
+  );
+  const noticeText = !llmUsed
+    ? null
+    : features?.slowInference === true
       ? t('chat.slowDevice')
-      : !hasMessages
-        ? null // skip the generic hallucination warning on the Home state to keep it clean
-        : t('app.hallucinationWarning');
+      : t('app.hallucinationWarning');
 
   return (
     <KeyboardAvoidingView
@@ -308,17 +308,6 @@ export default function ChatScreen(props: Props) {
             <View style={styles.errorBanner}>
               <Text style={[Type.bodySm, { color: Colors.error }]}>{autoGuide.error}</Text>
             </View>
-          )}
-
-          {visibleDwell && (
-            <DwellBanner
-              poi={visibleDwell.poi}
-              onAccept={() => {
-                dismissDwell(visibleDwell.poi.pageId);
-                narratePoi(visibleDwell.poi);
-              }}
-              onDismiss={() => dismissDwell(visibleDwell.poi.pageId)}
-            />
           )}
 
           {noticeText && !noticeDismissed && (
