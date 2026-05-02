@@ -1,6 +1,7 @@
 package com.localguideapp.geo
 
 import android.database.sqlite.SQLiteDatabase
+import android.util.Log
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
@@ -79,24 +80,34 @@ internal class ReverseGeocoder(private val geoDb: GeoDatabase) {
         // radius (the UI caps at 5 km today).
         val cell = Geohash.encode(lat, lon, 5)
         val cells = Geohash.neighborBlock(cell, radius = 2)
+        Log.d("ReverseGeocoder", "nearbyPlaces lat=$lat lon=$lon r=${radiusMeters}m limit=$limit cell=$cell cells=${cells.size}")
 
         val byId = LinkedHashMap<Long, Match>()
 
         // Country packs first so their richer entries win the dedup race.
-        for (pack in geoDb.listInstalledPacks()) {
-            val db = geoDb.openCountryPack(pack.iso) ?: continue
-            for (m in queryWithin(db, lat, lon, cells, radiusMeters, "country:${pack.iso}")) {
+        val packs = geoDb.listInstalledPacks()
+        Log.d("ReverseGeocoder", "  installedPacks=${packs.map { it.iso }}")
+        for (pack in packs) {
+            val db = geoDb.openCountryPack(pack.iso)
+            if (db == null) { Log.w("ReverseGeocoder", "  pack ${pack.iso} openCountryPack returned null"); continue }
+            val matches = queryWithin(db, lat, lon, cells, radiusMeters, "country:${pack.iso}")
+            Log.d("ReverseGeocoder", "  pack ${pack.iso} → ${matches.size} matches within ${radiusMeters}m")
+            for (m in matches) {
                 if (!byId.containsKey(m.geonameid)) byId[m.geonameid] = m
             }
         }
 
         // Then the global cities table — dedup against pack hits above.
         val cities = geoDb.openCities()
-        for (m in queryWithin(cities, lat, lon, cells, radiusMeters, "cities15000")) {
+        val cityMatches = queryWithin(cities, lat, lon, cells, radiusMeters, "cities15000")
+        Log.d("ReverseGeocoder", "  cities15000 → ${cityMatches.size} matches within ${radiusMeters}m")
+        for (m in cityMatches) {
             if (!byId.containsKey(m.geonameid)) byId[m.geonameid] = m
         }
 
-        return byId.values.sortedBy { it.distanceMeters }.take(limit)
+        val result = byId.values.sortedBy { it.distanceMeters }.take(limit)
+        Log.d("ReverseGeocoder", "  → returning ${result.size} (deduped, top $limit)")
+        return result
     }
 
     /**
