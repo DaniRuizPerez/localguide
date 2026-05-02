@@ -1,19 +1,24 @@
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useAppMode } from '../hooks/useAppMode';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { Colors } from '../theme/colors';
-import { Radii, Shadows, Sizing, Type } from '../theme/tokens';
+import { Sizing, Type } from '../theme/tokens';
 import { t } from '../i18n';
 
 interface Props {
-  onPress: () => void;
+  /** Called when the pill is tapped. When omitted the pill is non-interactive. */
+  onPress?: () => void;
 }
 
 /**
- * Tiny pill rendered to the left of the location pill in ChatHeader.
- * Shows the effective connectivity mode (online / offline / probing).
- * Tapping opens the settings sheet (same target as the gear icon).
+ * Soft-tactile connectivity pill rendered in ChatHeader.
+ * Shows the effective connectivity mode: online (green dot), offline (amber
+ * dot), or probing (grey dot). Tap to open the "How should I answer?" sheet
+ * (Ticket 3 wires the handler; here we just expose the `onPress` prop).
+ *
+ * Visual spec: padding 5/11, borderRadius 14, inset shadow peach/white,
+ * dot 6×6 borderRadius 3, text Nunito 700 / fontSize 10.
  */
 export function ConnectionPill({ onPress }: Props) {
   const { effective } = useAppMode();
@@ -29,26 +34,46 @@ export function ConnectionPill({ onPress }: Props) {
     dotColor = Colors.textTertiary;
     label = t('mode.unknownProbing');
   } else if (effective === 'online') {
-    dotColor = Colors.success;
+    dotColor = Colors.success; // #4ea374
     label = t('mode.online');
   } else {
-    dotColor = Colors.warning;
+    dotColor = Colors.warning; // amber
     label = t('mode.offline');
   }
 
+  const pillBody = (
+    <View style={styles.pill} testID="connection-pill-body">
+      <View style={[styles.dot, { backgroundColor: dotColor }]} />
+      <Text
+        style={[Type.metaUpper, styles.label]}
+        numberOfLines={1}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        testID="connection-pill"
+      >
+        {pillBody}
+      </Pressable>
+    );
+  }
+
   return (
-    <TouchableOpacity
-      style={styles.pill}
-      onPress={onPress}
-      accessibilityRole="button"
+    <View
+      accessibilityRole="text"
       accessibilityLabel={label}
       testID="connection-pill"
     >
-      <View style={[styles.dot, { backgroundColor: dotColor }]} />
-      <Text style={[Type.metaUpper, { color: Colors.textSecondary }]} numberOfLines={1}>
-        {label}
-      </Text>
-    </TouchableOpacity>
+      {pillBody}
+    </View>
   );
 }
 
@@ -57,20 +82,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.surface,
-    paddingHorizontal: 10,
+    paddingHorizontal: 11,
     paddingVertical: 5,
-    borderRadius: Radii.md,
-    borderWidth: 1,
-    borderColor: Colors.borderLight,
+    borderRadius: 14,
     gap: 6,
     flexShrink: 0,
     maxWidth: Sizing.vw(28),
-    ...Shadows.softOutset,
+    // Inset shadow — approximated on iOS via shadowColor/offset/opacity and on
+    // Android via a subtle elevation-0 (inset shadows are not native on Android
+    // but the surface colour + border give the same depth read at small sizes).
+    shadowColor: 'rgba(184,98,58,1)',
+    shadowOffset: { width: 2, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 0,
   },
   dot: {
     width: 6,
     height: 6,
     borderRadius: 3,
     flexShrink: 0,
+  },
+  label: {
+    color: Colors.textSecondary,
   },
 });

@@ -15,6 +15,12 @@ interface Props {
   onSettingsPress: () => void;
   /** When provided, renders a back arrow on the left (shown in chat mode). */
   onBack?: () => void;
+  /**
+   * When provided, passed to ConnectionPill so tapping the pill can open the
+   * "How should I answer?" sheet (Ticket 3 wires the actual handler from
+   * ChatScreen; ChatHeader just plumbs it through here).
+   */
+  onConnectionPillPress?: () => void;
 }
 
 // Dot color reflects only GPS state — online/offline is shown by ConnectionPill.
@@ -62,7 +68,7 @@ function LocationPill({
  * The Chat tab turns off the nav header (see AppNavigator), so this
  * component is responsible for its own top safe-area inset.
  */
-export function ChatHeader({ status, gps, manualLocation, onSettingsPress, onBack }: Props) {
+export function ChatHeader({ status, gps, manualLocation, onSettingsPress, onBack, onConnectionPillPress }: Props) {
   const insets = useSafeAreaInsets();
   return (
     <View style={[styles.header, { paddingTop: 6 + insets.top }]}>
@@ -82,7 +88,7 @@ export function ChatHeader({ status, gps, manualLocation, onSettingsPress, onBac
         )}
       </View>
       <View style={styles.right}>
-        <ConnectionPill onPress={onSettingsPress} />
+        <ConnectionPill onPress={onConnectionPillPress} />
         <LocationPill status={status} gps={gps} manualLocation={manualLocation} />
         <TouchableOpacity
           style={styles.settingsBtn}
