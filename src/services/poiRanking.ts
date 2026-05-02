@@ -108,10 +108,28 @@ export function rankByInterestOffline(
   const { hiddenGems = false, cap = AROUND_YOU_CAP, radiusMeters = DEFAULT_RADIUS_METERS } = options;
   const withDist = withLiveDistances(pois, gps);
 
+  // For length-based fallback (Wikipedia POIs that survived as a stale cache
+  // without a featureCode), normalise by the median so the score lands in
+  // roughly the same scale as the feature-code tiers (0..100).
+  const lengths = withDist
+    .map((p) => p.articleLength)
+    .filter((l): l is number => typeof l === 'number');
+  lengths.sort((a, b) => a - b);
+  const median = lengths.length === 0 ? 1 : Math.max(1, lengths[Math.floor(lengths.length / 2)]);
+
   const scored = withDist.map((p) => {
-    let tier = featureCodeTier(p.featureCode, p.articleLength);
-    // Hidden-gems flips the tier ordering: D > C > B > A. Also drops the
-    // keyword boost — "less famous" trumps "name suggests landmark".
+    let tier: number;
+    if (p.featureCode) {
+      tier = featureCodeTier(p.featureCode, p.articleLength);
+    } else if (typeof p.articleLength === 'number') {
+      // Stale Wikipedia cache in offline mode — no GeoNames featureCode is
+      // available. Map article length onto roughly the Tier-A..Tier-D range
+      // so the ranker still discriminates instead of collapsing to 0.
+      const ratio = p.articleLength / median;
+      tier = Math.min(100, 30 + 30 * Math.log10(1 + ratio));
+    } else {
+      tier = 30; // unknown — Tier-C catch-all.
+    }
     if (hiddenGems) tier = 110 - tier;
     const boost = hiddenGems ? 0 : nameKeywordBoost(p.title);
     const decay = distanceDecay(p.distanceMeters, radiusMeters);

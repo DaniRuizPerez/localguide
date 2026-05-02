@@ -126,16 +126,24 @@ export default function ChatScreen(props: Props) {
   // uses the GeoNames feature-code ranker, no network, single paint.
   // LLM-source POIs (offline only) carry placeholder coords; their distance
   // shows 0 m by construction.
-  const [visiblePois, setVisiblePois] = useState<Poi[]>([]);
-  useEffect(() => {
-    const sync =
+  const syncRanked = useMemo(
+    () =>
       effective === 'offline'
         ? rankByInterestOffline(filteredPois, gps, { hiddenGems, radiusMeters: poiRadiusMeters })
-        : rankByInterestSync(filteredPois, gps, { hiddenGems, radiusMeters: poiRadiusMeters });
-    setVisiblePois(sync);
+        : rankByInterestSync(filteredPois, gps, { hiddenGems, radiusMeters: poiRadiusMeters }),
+    // gps is intentionally split into primitive deps because useLocation
+    // returns a fresh object reference on each render even when the
+    // underlying lat/lon haven't moved — depending on the object directly
+    // would re-paint endlessly. eslint-disable-next-line is honest about it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filteredPois, gps?.latitude, gps?.longitude, hiddenGems, effective, poiRadiusMeters]
+  );
 
+  const [refinedPois, setRefinedPois] = useState<Poi[] | null>(null);
+  useEffect(() => {
+    // Reset on dep change so the sync sort shows while the new fetch runs.
+    setRefinedPois(null);
     if (effective !== 'online' || filteredPois.length === 0) return;
-
     const wikiPageIds = filteredPois
       .filter((p) => p.source === 'wikipedia')
       .map((p) => p.pageId);
@@ -151,17 +159,20 @@ export default function ChatScreen(props: Props) {
           hiddenGems,
           radiusMeters: poiRadiusMeters,
         });
-        setVisiblePois(refined);
+        setRefinedPois(refined);
       })
       .catch(() => {
-        // Network failure — keep the sync paint already in state.
+        // Network failure — keep the sync paint.
       });
 
     return () => {
       cancelled = true;
       ctrl.abort();
     };
-  }, [filteredPois, gps, hiddenGems, effective, poiRadiusMeters]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredPois, gps?.latitude, gps?.longitude, hiddenGems, effective, poiRadiusMeters]);
+
+  const visiblePois = refinedPois ?? syncRanked;
 
   // Background quiz prefetch. Fires once nearby places have settled and the
   // location label is known; the prefetch itself uses priority='low' and
