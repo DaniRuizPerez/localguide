@@ -76,6 +76,32 @@ jest.mock('expo-device', () => ({
   totalMemory: 8 * 1024 * 1024 * 1024, // 8 GB — fast default
 }));
 
+// react-native-svg — stub all SVG primitives so tests can render components
+// that use inline SVG without a native bridge. Each element is a plain View
+// or null so React-Testing-Library can inspect the tree.
+jest.mock('react-native-svg', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  const Svg = ({ children, ...props }) =>
+    React.createElement(View, { testID: 'svg-root', ...props }, children);
+  const Circle = (props) => React.createElement(View, { testID: 'svg-circle', ...props });
+  const Line = (props) => React.createElement(View, { testID: 'svg-line', ...props });
+  const Path = (props) => React.createElement(View, { testID: 'svg-path', ...props });
+  const Rect = (props) => React.createElement(View, { testID: 'svg-rect', ...props });
+  const G = ({ children, ...props }) =>
+    React.createElement(View, { testID: 'svg-g', ...props }, children);
+  return {
+    __esModule: true,
+    default: Svg,
+    Svg,
+    Circle,
+    Line,
+    Path,
+    Rect,
+    G,
+  };
+});
+
 // react-native-maps calls TurboModuleRegistry.getEnforcing at import time.
 // Stub MapView/Marker/Polyline so tests can render them as plain Views.
 jest.mock('react-native-maps', () => {
