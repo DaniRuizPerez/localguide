@@ -37,7 +37,7 @@ export function AnimatedChatBubble({ message }: { message: Message }) {
           <Image source={{ uri: message.imageUri }} style={styles.bubbleImage} resizeMode="cover" />
         )}
         <Text style={[isUser ? styles.bubbleTextUser : styles.bubbleTextGuide]}>{message.text}</Text>
-        {!isUser && (message.durationMs != null || message.source != null) && (
+        {!isUser && message.text.trim().length > 0 && (message.durationMs != null || message.source != null) && (
           <View style={styles.bubbleFooter}>
             {message.durationMs != null && (
               <Text style={styles.bubbleMeta}>
