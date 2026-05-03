@@ -408,7 +408,6 @@ export default function ChatScreen(props: Props) {
           onPlanDay={() => setItineraryOpen(true)}
           onQuiz={() => setQuizOpen(true)}
           onOpenMap={() => props.navigation.navigate('Map')}
-          onAsk={(q) => sendText(q)}
           onNarratePoi={narratePoi}
           onChangeRadius={() => setSettingsOpen(true)}
           disabled={inferring}

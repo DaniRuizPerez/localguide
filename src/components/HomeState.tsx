@@ -21,8 +21,6 @@ interface Props {
   onQuiz: () => void;
   /** Navigate to the Map screen (now a pushed stack destination). */
   onOpenMap: () => void;
-  /** Ask the guide a prompt (tapping a starter chip or POI row). */
-  onAsk: (query: string) => void;
   /** Narrate a specific POI (equivalent of tapping its chip in active-chat). */
   onNarratePoi: (poi: Poi) => void;
   /** Open the settings sheet (user taps "1 km · change"). */
@@ -60,7 +58,6 @@ export function HomeState({
   onPlanDay,
   onQuiz,
   onOpenMap,
-  onAsk,
   onNarratePoi,
   onChangeRadius,
   disabled = false,
@@ -79,8 +76,6 @@ export function HomeState({
   // overflow so we intentionally don't truncate — the user asked to see
   // every attraction in the radius.
   const poiList = pois;
-
-  const starters = [t('home.starterFood'), t('home.starterHistory'), t('home.starterWalk')];
 
   return (
     <ScrollView
@@ -179,26 +174,6 @@ export function HomeState({
         </View>
       )}
 
-      <View style={styles.startersWrap}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.starters}
-        >
-          {starters.map((text) => (
-            <TouchableOpacity
-              key={text}
-              style={styles.starterChip}
-              onPress={() => onAsk(text)}
-              disabled={disabled}
-            >
-              <Text style={styles.starterLabel} numberOfLines={1}>
-                {text}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
     </ScrollView>
   );
 }
@@ -459,25 +434,5 @@ const styles = StyleSheet.create({
     ...Type.bodySm,
     color: Colors.textSecondary,
     flex: 1,
-  },
-  startersWrap: {
-    marginTop: Spacing.lg,
-    marginHorizontal: -Spacing.lg,
-  },
-  starters: {
-    paddingHorizontal: Spacing.lg,
-    gap: 6,
-  },
-  starterChip: {
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    borderRadius: Radii.md,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.borderLight,
-  },
-  starterLabel: {
-    ...Type.chip,
-    color: Colors.textSecondary,
   },
 });
