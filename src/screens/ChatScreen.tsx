@@ -231,10 +231,10 @@ export default function ChatScreen(props: Props) {
   const effectiveLocation = (gps ?? autoGuide.latestGps) ?? manualLocation ?? null;
 
   const onSendChip = useCallback(
-    (cue: string) => {
+    (displayText: string, promptText: string) => {
       if (inferring) return;
-      messages.addUserMessage(cue);
-      stream({ intent: 'text', query: cue, location: effectiveLocation ?? '' });
+      messages.addUserMessage(displayText);
+      stream({ intent: 'text', query: promptText, location: effectiveLocation ?? '' });
     },
     [inferring, messages, stream, effectiveLocation]
   );
@@ -245,9 +245,10 @@ export default function ChatScreen(props: Props) {
       if (inferring) {
         stop();
       }
-      const cue = `Tell me about ${poi.title}.`;
-      messages.addUserMessage(cue);
-      await stream({ intent: 'text', query: cue, location: effectiveLocation });
+      const displayText = `Tell me about ${poi.title}`;
+      const promptText = `Tell me about ${poi.title}.`;
+      messages.addUserMessage(displayText);
+      await stream({ intent: 'text', query: promptText, location: effectiveLocation });
     },
     [effectiveLocation, inferring, stop, messages, stream]
   );
@@ -289,7 +290,7 @@ export default function ChatScreen(props: Props) {
     }
     if (welcomedRef.current || !gps || inferring) return;
     welcomedRef.current = true;
-    messages.addUserMessage('Auto-Guide: introduce this area');
+    messages.addUserMessage('Tell me about this area');
     stream({ intent: 'text', query: AUTO_GUIDE_WELCOME_CUE, location: gps });
   }, [autoGuide.enabled, gps, inferring, messages, stream]);
 
@@ -319,7 +320,7 @@ export default function ChatScreen(props: Props) {
     if (result.canceled || !result.assets?.[0]) return;
     const imageUri = result.assets[0].uri;
     const userQuery = input.trim();
-    messages.addUserMessage(userQuery || 'What do you see here?', imageUri);
+    messages.addUserMessage(userQuery || 'What do you see?', imageUri);
     setInput('');
     scrollToEnd();
     await stream({ intent: 'image', query: userQuery, location: effectiveLocation, imageUri });
@@ -467,9 +468,10 @@ export default function ChatScreen(props: Props) {
           setItineraryOpen(false);
           if (!effectiveLocation) return;
           if (inferring) stop();
-          const cue = `Tell me about ${title}.`;
-          messages.addUserMessage(cue);
-          stream({ intent: 'text', query: cue, location: effectiveLocation });
+          const displayText = `Tell me about ${title}`;
+          const promptText = `Tell me about ${title}.`;
+          messages.addUserMessage(displayText);
+          stream({ intent: 'text', query: promptText, location: effectiveLocation });
         }}
       />
       <QuizModal
