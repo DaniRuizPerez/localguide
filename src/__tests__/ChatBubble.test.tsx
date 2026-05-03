@@ -6,6 +6,8 @@
  *  - Guide message with no `source` renders without the badge.
  *  - User message with a source set does NOT render the badge.
  *  - SourceBadge standalone snapshot (pure render, all variants).
+ *  - Streaming-placeholder (text === '') suppresses the badge even when source is set.
+ *  - Badge re-appears once the first token lands (text non-empty).
  */
 
 import React from 'react';
@@ -69,6 +71,45 @@ describe('AnimatedChatBubble — guide messages', () => {
     expect(queryByText(/Maps/)).toBeNull();
     expect(queryByText(/AI/)).toBeNull();
     expect(queryByText(/Offline/)).toBeNull();
+  });
+});
+
+// ── AnimatedChatBubble — streaming-placeholder suppresses the badge ───────────
+
+describe('AnimatedChatBubble — streaming-empty placeholder', () => {
+  const variants: Source[] = ['wikipedia', 'maps', 'ai-online', 'ai-offline'];
+
+  variants.forEach((source) => {
+    it(`does NOT render a SourceBadge when text is empty and source="${source}"`, () => {
+      const message: Message = {
+        id: 'streaming-1',
+        role: 'guide',
+        text: '',
+        source,
+      };
+      const { queryByText } = render(<AnimatedChatBubble message={message} />);
+      // The footer (badge + meta) must be absent while the bubble has no text.
+      expect(queryByText(/Wikipedia/)).toBeNull();
+      expect(queryByText(/Maps/)).toBeNull();
+      expect(queryByText(/AI/)).toBeNull();
+      expect(queryByText(/Offline/)).toBeNull();
+    });
+  });
+
+  it('renders SourceBadge once text is non-empty', () => {
+    const message: Message = {
+      id: 'streaming-2',
+      role: 'guide',
+      text: 'First token.',
+      source: 'ai-online',
+    };
+    const { queryByText } = render(<AnimatedChatBubble message={message} />);
+    // At least one of the badge label fragments must now be present.
+    const hasBadge =
+      queryByText(/AI/) !== null ||
+      queryByText(/Online/) !== null ||
+      queryByText(/🧠/) !== null; // 🧠 glyph
+    expect(hasBadge).toBe(true);
   });
 });
 
