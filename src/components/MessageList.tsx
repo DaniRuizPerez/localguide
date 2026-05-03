@@ -13,11 +13,13 @@ interface Props {
   /** Copy for the empty state — varies by whether Auto-Guide is on. */
   autoGuideEnabled: boolean;
   /**
-   * Called when the user taps a suggestion chip. The cue string is the
-   * pre-built follow-up query (e.g. "Tell me more about Bryant Park").
-   * ChatScreen wires this into useGuideStream.stream.
+   * Called when the user taps a suggestion chip.
+   * @param displayText - The short, human-friendly string shown in the user bubble.
+   * @param promptText  - The full programmatic instruction sent to the LLM.
+   * ChatScreen wires promptText into useGuideStream.stream while displayText
+   * goes to addUserMessage, so the transcript stays clean.
    */
-  onSendChip: (cue: string) => void;
+  onSendChip: (displayText: string, promptText: string) => void;
 }
 
 /**
@@ -78,20 +80,23 @@ function cleanQueryToTopic(query: string): string {
  * "Tell me more" — that re-prompts the model for a fuller, non-repetitive
  * expansion of the same POI. Earlier "Walk me there / Food nearby" chips
  * were removed: too generic, drove off-topic follow-ups.
+ *
+ * The chip passes two strings to onSendChip:
+ *  - displayText: short label shown in the user bubble ("Tell me more about X")
+ *  - promptText:  full programmatic instruction sent to the LLM
  */
 function buildChips(
   msg: Message,
   allMessages: Message[],
-  onSendChip: (cue: string) => void
+  onSendChip: (displayText: string, promptText: string) => void
 ): Chip[] {
   const topic = extractTopic(msg, allMessages);
+  const displayText = `Tell me more about ${topic}`;
+  const promptText = `Tell me more about ${topic}. Give a long, detailed answer with specific facts (history, architecture, people, traditions, the "why"). Do NOT repeat what you already said — assume the prior reply was read. Add new material.`;
   return [
     {
       label: t('chip.tellMeMore'),
-      onPress: () =>
-        onSendChip(
-          `Tell me more about ${topic}. Give a long, detailed answer with specific facts (history, architecture, people, traditions, the "why"). Do NOT repeat what you already said — assume the prior reply was read. Add new material.`
-        ),
+      onPress: () => onSendChip(displayText, promptText),
     },
   ];
 }
