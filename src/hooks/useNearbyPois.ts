@@ -73,7 +73,9 @@ export function useNearbyPois(
   // when the user hasn't really moved — protects the boundary case where
   // GPS jitter straddles a cell line (37.4249 ↔ 37.4250 with toFixed(2))
   // and would otherwise still cancel an in-flight LLM call.
-  const lastFetchPosRef = useRef<{ lat: number; lon: number } | null>(null);
+  // Also tracks the radius of that fetch so a radius change bypasses
+  // hysteresis (jitter guard would otherwise swallow the new radius).
+  const lastFetchPosRef = useRef<{ lat: number; lon: number; radius: number } | null>(null);
   const HYSTERESIS_METERS = 200;
 
   useEffect(() => {
@@ -95,7 +97,7 @@ export function useNearbyPois(
     // straddles 0.01° (e.g. 37.4249 ↔ 37.4250) and would otherwise still
     // cancel-and-restart the slow on-device LLM call for no real movement.
     const lastFetch = lastFetchPosRef.current;
-    if (lastFetch && llmFallbackTaskRef.current) {
+    if (lastFetch && lastFetch.radius === radiusMeters && llmFallbackTaskRef.current) {
       const moved = distanceMeters(lastFetch.lat, lastFetch.lon, gps.latitude, gps.longitude);
       if (moved < HYSTERESIS_METERS) {
         if (__DEV__) {
@@ -107,7 +109,7 @@ export function useNearbyPois(
         return;
       }
     }
-    lastFetchPosRef.current = { lat: gps.latitude, lon: gps.longitude };
+    lastFetchPosRef.current = { lat: gps.latitude, lon: gps.longitude, radius: radiusMeters };
 
     let cancelled = false;
 

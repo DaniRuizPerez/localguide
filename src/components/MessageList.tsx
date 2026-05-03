@@ -107,6 +107,12 @@ export const MessageList = forwardRef<FlatList<Message>, Props>(function Message
 ) {
   const renderItem: ListRenderItem<Message> = useCallback(
     ({ item }) => {
+      // Don't render empty guide placeholders — ChatScreen's <TypingIndicator />
+      // covers the streaming state. Rendering both produces a stacked
+      // avatar + empty pill on top of the dots bubble.
+      if (item.role === 'guide' && item.text.trim().length === 0 && !item.imageUri) {
+        return null;
+      }
       const isGuideBubbleWithText = item.role === 'guide' && item.text.trim().length > 0;
       return (
         <>
