@@ -80,6 +80,39 @@ describe('PoiService.fetchNearby', () => {
     expect(url2).toContain('ggsradius=10');
   });
 
+  it('ggslimit scales with radius (R1): wider radius requests more candidates', async () => {
+    // rawLimit = min(500, max(limit, round(radiusMeters / 50)))
+    // At radius=1000, limit=10: round(1000/50)=20 → ggslimit=20
+    // At radius=10000, limit=10: round(10000/50)=200 → ggslimit=200
+    // Narrow search first.
+    mockFetch.mockResolvedValue(wikiResponse([]));
+    await poiService.fetchNearby(37.4419, -122.143, 1000, 10);
+    const urlNarrow: string = mockFetch.mock.calls[0][0];
+    expect(urlNarrow).toContain('ggslimit=20');
+
+    mockFetch.mockClear();
+    poiService.clearCache();
+
+    // Wide (10 km) search — should request 200 candidates.
+    mockFetch.mockResolvedValue(wikiResponse([]));
+    await poiService.fetchNearby(37.4419, -122.143, 10000, 10);
+    const urlWide: string = mockFetch.mock.calls[0][0];
+    expect(urlWide).toContain('ggslimit=200');
+
+    // Verify the wide limit is strictly larger than the narrow limit.
+    const narrowLimit = parseInt(urlNarrow.match(/ggslimit=(\d+)/)?.[1] ?? '0', 10);
+    const wideLimit = parseInt(urlWide.match(/ggslimit=(\d+)/)?.[1] ?? '0', 10);
+    expect(wideLimit).toBeGreaterThan(narrowLimit);
+  });
+
+  it('ggslimit is capped at 500 for very large rawLimit values', async () => {
+    // round(50000/50)=1000; capped at Wikipedia's max of 500.
+    mockFetch.mockResolvedValue(wikiResponse([]));
+    await poiService.fetchNearby(37.4419, -122.143, 50000, 10);
+    const url: string = mockFetch.mock.calls[0][0];
+    expect(url).toContain('ggslimit=500');
+  });
+
   it('filters out chain-store results', async () => {
     mockFetch.mockResolvedValue(
       wikiResponse([

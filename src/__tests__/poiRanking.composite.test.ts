@@ -14,17 +14,18 @@ const gps: GPSContext = {
   placeName: 'Palo Alto',
 };
 
-function poi(p: Partial<Poi> & { pageId: number; title: string; lat: number; lon: number }): Poi {
+function poi(p: Partial<Poi> & { pageId?: number; title: string; lat?: number; lon?: number }): Poi {
   return {
-    pageId: p.pageId,
+    pageId: p.pageId ?? Math.floor(Math.random() * 1e6),
     title: p.title,
-    latitude: p.lat,
-    longitude: p.lon,
+    latitude: p.lat ?? p.latitude ?? 0,
+    longitude: p.lon ?? p.longitude ?? 0,
     distanceMeters: 0,
     source: p.source ?? 'wikipedia',
     articleLength: p.articleLength,
     description: p.description,
     featureCode: p.featureCode,
+    coordType: p.coordType,
   };
 }
 
@@ -93,13 +94,14 @@ describe('rankByInterestOnline (composite ranker)', () => {
     expect(cantorIdx).toBeLessThan(stanfordIdx);
   });
 
-  it('confidence gate: if fewer than 3 candidates have pageviews, falls back to length sort', () => {
-    const sparseSignals = new Map<number, WikipediaSignals>([
-      [3, sig({ pageviews60d: 25000 })],
-      [4, sig({ pageviews60d: 30000 })],
+  it('confidence gate: with 0 pageview hits falls back to length sort', () => {
+    // No entry has pv > 0 → gate triggers, sync (length) ranker runs.
+    const emptyPvSignals = new Map<number, WikipediaSignals>([
+      [3, sig({ pageviews60d: 0, categories: ['category:churches'] })],
+      [4, sig({ pageviews60d: 0, categories: ['category:tourist attractions'] })],
     ]);
-    const ranked = rankByInterestOnline(PALO_ALTO_POIS, gps, sparseSignals, { radiusMeters: 5000 });
-    // Length-sort fallback puts Stanford University (250k) at top.
+    const ranked = rankByInterestOnline(PALO_ALTO_POIS, gps, emptyPvSignals, { radiusMeters: 5000 });
+    // Length-sort fallback: Stanford University (250k article) ranks first.
     expect(ranked[0].title).toBe('Stanford University');
   });
 
@@ -123,6 +125,96 @@ describe('rankByInterestOnline (composite ranker)', () => {
     const wideIdx = wideRanked.findIndex((p) => p.title === 'Far Famous Park');
     // With a wide radius the far landmark survives noticeably better.
     expect(wideIdx).toBeLessThan(tightIdx === -1 ? 999 : tightIdx);
+  });
+
+  // ── R2: landmark coordType boost ─────────────────────────────────────────
+
+  it('coordType=landmark boosts a short-article/low-pv entry into the top 5', () => {
+    // El Palo Alto tree: tiny article, low pageviews, but coordType='landmark'.
+    // Alongside long-article tech HQs and Stanford, it should still surface top 5.
+    const elPaloAlto = poi({
+      pageId: 50,
+      title: 'El Palo Alto',
+      lat: 37.4474,
+      lon: -122.1644,
+      articleLength: 6000,
+      description: 'Historic redwood tree in Palo Alto, California',
+      coordType: 'landmark',
+    });
+    const inputs = [...PALO_ALTO_POIS, elPaloAlto];
+    const signals = new Map(PALO_ALTO_SIGNALS);
+    signals.set(50, sig({ pageviews60d: 500, categories: ['category:trees of california'], langlinkCount: 2 }));
+
+    const ranked = rankByInterestOnline(inputs, gps, signals, { radiusMeters: 10000 });
+    const idx = ranked.findIndex((p) => p.title === 'El Palo Alto');
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(idx).toBeLessThan(5);
+  });
+
+  it('with just 1 pageview hit the composite ranker runs (not the sync fallback)', () => {
+    // Only one entry has pv>0 — just above the new gate of 1.
+    // The composite ranker penalises corp HQs; the sync ranker would put the
+    // longest-article entry first. These should produce different top-1 results.
+    const singlePvSignals = new Map<number, WikipediaSignals>([
+      [3, sig({ pageviews60d: 1, categories: ['category:national register of historic places in california'] })],
+    ]);
+    const compositeRanked = rankByInterestOnline(PALO_ALTO_POIS, gps, singlePvSignals, { radiusMeters: 5000 });
+    const syncRanked = rankByInterestSync(PALO_ALTO_POIS, gps, { radiusMeters: 5000 });
+    // The composite ranker gives a catBoost to the church (pageId=3) which
+    // has a NRHP category. Sync would put the longest article first.
+    // They should NOT produce the same top-3 (at minimum one differs).
+    const compositeTop3 = compositeRanked.slice(0, 3).map((p) => p.title);
+    const syncTop3 = syncRanked.slice(0, 3).map((p) => p.title);
+    expect(compositeTop3).not.toEqual(syncTop3);
+  });
+});
+
+// ── R4: p75 length cap in sync fallback ───────────────────────────────────
+
+describe('rankByInterestSync — p75 length cap prevents a single massive article dominating', () => {
+  it('when one article is 10× the median, a closer landmark outranks it', () => {
+    // Set up: massive HQ (articleLength=200000, ~10x median), and a close
+    // landmark with a modest article (10000). The landmark is 200 m away,
+    // the HQ is 4 km away. Without the p75 cap the HQ would win on length
+    // alone; with the cap it gets clamped and the closer landmark wins.
+    const closeLandmark = poi({
+      title: 'Close Landmark',
+      latitude: gps.latitude + 0.001, // ~110 m away
+      longitude: gps.longitude,
+      articleLength: 10000,
+      source: 'wikipedia',
+    });
+    const massiveHQ = poi({
+      title: 'Massive HQ',
+      latitude: gps.latitude + 0.036, // ~4 km away
+      longitude: gps.longitude,
+      articleLength: 200000,
+      source: 'wikipedia',
+    });
+    // Background items to shape the median/p75 distribution
+    const mid1 = poi({ title: 'Mid1', latitude: gps.latitude, longitude: gps.longitude + 0.01, articleLength: 15000, source: 'wikipedia' });
+    const mid2 = poi({ title: 'Mid2', latitude: gps.latitude, longitude: gps.longitude + 0.01, articleLength: 20000, source: 'wikipedia' });
+    const mid3 = poi({ title: 'Mid3', latitude: gps.latitude, longitude: gps.longitude + 0.01, articleLength: 18000, source: 'wikipedia' });
+    const mid4 = poi({ title: 'Mid4', latitude: gps.latitude, longitude: gps.longitude + 0.01, articleLength: 12000, source: 'wikipedia' });
+    const inputs = [massiveHQ, closeLandmark, mid1, mid2, mid3, mid4];
+    // articles sorted: [10000,12000,15000,18000,20000,200000]
+    // p75 index = floor(6*0.75)=4 → 20000. MassiveHQ clamped to 20000.
+    const ranked = rankByInterestSync(inputs, gps, { radiusMeters: 10000 });
+    // With the p75 cap, massiveHQ's effective length is clamped to 20000 (the
+    // p75 value), while closeLandmark keeps its 10000. The mid* entries are
+    // closer and have moderate articles, so they top the list — that's fine.
+    // Key assertion: the close landmark outranks the massive HQ (whose 200k
+    // article was capped). Without the cap, massiveHQ would score 200000×decay
+    // which even at 4 km (~0.449 decay) = 89800, easily beating everything.
+    const hqIdx = ranked.findIndex((p) => p.title === 'Massive HQ');
+    const landmarkIdx = ranked.findIndex((p) => p.title === 'Close Landmark');
+    expect(hqIdx).toBeGreaterThanOrEqual(0);
+    expect(landmarkIdx).toBeGreaterThanOrEqual(0);
+    expect(landmarkIdx).toBeLessThan(hqIdx);
+    // Also assert massiveHQ does NOT appear in the top 3 (capped article + far
+    // distance means it should rank behind the mid entries).
+    const top3 = ranked.slice(0, 3).map((p) => p.title);
+    expect(top3).not.toContain('Massive HQ');
   });
 });
 

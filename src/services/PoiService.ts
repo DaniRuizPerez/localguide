@@ -40,6 +40,13 @@ export interface Poi {
    * Populated for 'wikipedia' entries, absent for 'llm' entries.
    */
   description?: string;
+  /**
+   * MediaWiki `coordinates.type` value for 'wikipedia' entries — e.g.
+   * 'landmark', 'city', 'country', 'mountain'. Populated when the geosearch
+   * or follow-up coords call returns `coprop=type`. Used by the composite
+   * ranker to boost genuine landmarks even when their article is short.
+   */
+  coordType?: string;
 }
 
 export interface FetchOptions {
@@ -153,7 +160,7 @@ interface WikiPage {
   pageid: number;
   title: string;
   description?: string;
-  coordinates?: Array<{ lat: number; lon: number }>;
+  coordinates?: Array<{ lat: number; lon: number; type?: string }>;
   length?: number;
 }
 
@@ -264,8 +271,10 @@ export const poiService = {
     // `length` (via prop=info) as a popularity proxy for hidden-gems ranking.
     // Request more than `limit` from Wikipedia since the description filter
     // trims the list; we want to land at least `limit` real attractions when
-    // possible.
-    const rawLimit = Math.max(limit, 30);
+    // possible. Scale ggslimit with radius so sub-30-ranked landmarks enter
+    // the pool at wide radii without over-fetching for tight searches:
+    // ~30 at 1 km, ~100 at 5 km, ~200 at 10 km, capped at Wikipedia's 500.
+    const rawLimit = Math.min(500, Math.max(limit, Math.round(radiusMeters / 50)));
     const url =
       `https://en.wikipedia.org/w/api.php?action=query` +
       `&generator=geosearch` +
@@ -274,6 +283,7 @@ export const poiService = {
       `&ggslimit=${Math.max(1, Math.min(500, rawLimit))}` +
       `&prop=description|coordinates|info` +
       `&inprop=length` +
+      `&coprop=type|name|globe` +
       `&format=json&origin=*`;
 
     const controller = new AbortController();
@@ -306,7 +316,7 @@ export const poiService = {
         const coordsUrl =
           `https://en.wikipedia.org/w/api.php?action=query` +
           `&pageids=${encodeURIComponent(ids)}` +
-          `&prop=coordinates&format=json&origin=*`;
+          `&prop=coordinates&coprop=type|name|globe&format=json&origin=*`;
         try {
           const coordsRes = await fetch(coordsUrl, {
             signal: controller.signal,
@@ -316,7 +326,7 @@ export const poiService = {
             const coordsData = (await coordsRes.json()) as {
               query?: { pages?: Record<string, WikiPage> };
             };
-            const coordsByPageId = new Map<number, Array<{ lat: number; lon: number }>>();
+            const coordsByPageId = new Map<number, Array<{ lat: number; lon: number; type?: string }>>();
             for (const p of Object.values(coordsData.query?.pages ?? {})) {
               if (p.coordinates) coordsByPageId.set(p.pageid, p.coordinates);
             }
@@ -346,6 +356,7 @@ export const poiService = {
             source: 'wikipedia' as const,
             articleLength: typeof p.length === 'number' ? p.length : undefined,
             description: p.description,
+            coordType: coord.type,
           };
         });
       // Cache the pre-ranked pool so we can re-rank cheaply if the toggle

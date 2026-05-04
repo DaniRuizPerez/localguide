@@ -29,7 +29,7 @@ describe('rankByInterest', () => {
     expect(ranked.map((p) => p.title)).toEqual(['Long', 'Medium', 'Short']);
   });
 
-  it('caps result at AROUND_YOU_CAP (10)', () => {
+  it('caps result at AROUND_YOU_CAP', () => {
     const input = Array.from({ length: 25 }, (_, i) =>
       poi({
         title: `POI ${i}`,

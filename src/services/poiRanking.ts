@@ -2,12 +2,13 @@ import { distanceMeters, type Poi } from './PoiService';
 import type { GPSContext } from './InferenceService';
 import type { WikipediaSignals } from './wikipediaSignals';
 
-export const AROUND_YOU_CAP = 10;
+export const AROUND_YOU_CAP = 12;  // was 10
 const DEFAULT_RADIUS_METERS = 5000;
 // Confidence gate — if fewer than this many candidates returned pageviews,
 // we assume the network call largely failed and fall back to the sync ranker
-// rather than mix scoring scales.
-const MIN_CONFIDENCE_PAGEVIEW_HITS = 3;
+// rather than mix scoring scales. 1 hit is enough: even a single pageview
+// signal is better than falling back to the length-biased sync ranker.
+const MIN_CONFIDENCE_PAGEVIEW_HITS = 1;
 
 interface RankOptions {
   hiddenGems?: boolean;
@@ -54,11 +55,16 @@ export function rankByInterestSync(
   const lengths = withDist
     .map((p) => p.articleLength)
     .filter((l): l is number => typeof l === 'number');
-  lengths.sort((a, b) => a - b);
-  const median = lengths.length === 0 ? 0 : lengths[Math.floor(lengths.length / 2)];
+  const sorted = [...lengths].sort((a, b) => a - b);
+  const median = sorted.length === 0 ? 0 : sorted[Math.floor(sorted.length / 2)];
+  // 75th-percentile cap: prevents a single massive article (e.g. a 250 KB
+  // tech-company HQ page) from dominating when all other articles are much
+  // shorter. Closer landmarks with moderate article lengths can still win.
+  const p75 = sorted.length === 0 ? 0 : sorted[Math.floor(sorted.length * 0.75)];
 
   const scored = withDist.map((p) => {
-    const len = p.articleLength ?? median;
+    const rawLen = p.articleLength ?? median;
+    const len = p75 > 0 ? Math.min(p75, rawLen) : rawLen;
     const decay = distanceDecay(p.distanceMeters, radiusMeters);
     const base = hiddenGems ? -len : len;
     return { poi: p, score: base * decay };
@@ -155,6 +161,7 @@ interface CompositeBreakdown {
   descBoost: number;
   langBoost: number;
   pvScore: number;
+  landmarkBoost: number;
   corpPenalty: number;
   noSignalPenalty: number;
   decay: number;
@@ -183,17 +190,21 @@ function compositeScore(
   const langBoost = Math.min(30, 0.5 * langCount);
   const pvNorm = maxPageviews > 0 ? Math.log10(1 + pv) / Math.log10(1 + maxPageviews) : 0;
   const pvScore = 50 * pvNorm;
+  // MediaWiki coordinates.type='landmark' identifies genuine physical
+  // landmarks (trees, statues, bridges, small monuments) that often have
+  // short Wikipedia articles and low pageviews but are real tourist stops.
+  const landmarkBoost = poi.coordType === 'landmark' ? 25 : 0;
   const corpPenalty = !hiddenGems && hasCorpCat ? 40 : 0;
   const noSignalPenalty = !hiddenGems && cats.length === 0 && pv === 0 ? 25 : 0;
 
-  let raw = catBoost + descBoost + langBoost + pvScore - corpPenalty - noSignalPenalty;
+  let raw = catBoost + descBoost + langBoost + pvScore + landmarkBoost - corpPenalty - noSignalPenalty;
   // Hidden-gems mode: divide by (1 + pv_norm) so the famous-est sink, but
   // the tourist-allowlist boost still ensures we surface real places.
   if (hiddenGems) raw = raw / (1 + pvNorm);
 
   const decay = distanceDecay(poi.distanceMeters, radiusMeters);
   const final = raw * decay;
-  return { catBoost, descBoost, langBoost, pvScore, corpPenalty, noSignalPenalty, decay, raw, final };
+  return { catBoost, descBoost, langBoost, pvScore, landmarkBoost, corpPenalty, noSignalPenalty, decay, raw, final };
 }
 
 export function rankByInterestOnline(
