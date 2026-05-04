@@ -307,37 +307,45 @@ export const poiService = {
       // coordinates — the rest come back without the prop even though the
       // page itself has primary coords. Without coords we'd have to fall
       // back to the user's GPS as a placeholder, which makes every distance
-      // read "0 m". Patch the gap with a follow-up `prop=coordinates` call
-      // keyed on pageids; one extra round-trip is cheaper than showing the
-      // wrong distance to every famous nearby landmark.
+      // read "0 m". Patch the gap with follow-up `prop=coordinates` calls
+      // keyed on pageids. Wikipedia caps `pageids` at 50 per call without
+      // apihighlimits (we have no API key), so chunk the missing IDs into
+      // batches of 50 — at ggslimit=200 we may have ~190 missing entries
+      // and a single 190-id call would silently drop everything past the
+      // first 50, costing us famous landmarks (Stanford Memorial Church,
+      // Hoover Tower, Cantor Arts Center, El Palo Alto, …).
       const missingCoords = pages.filter((p) => !p.coordinates?.[0]);
       if (missingCoords.length > 0) {
-        const ids = missingCoords.map((p) => p.pageid).join('|');
-        const coordsUrl =
-          `https://en.wikipedia.org/w/api.php?action=query` +
-          `&pageids=${encodeURIComponent(ids)}` +
-          `&prop=coordinates&coprop=type|name|globe&format=json&origin=*`;
-        try {
-          const coordsRes = await fetch(coordsUrl, {
-            signal: controller.signal,
-            headers: { 'User-Agent': 'LocalGuide/1.0 (https://github.com/DaniRuizPerez/localguide)' },
-          });
-          if (coordsRes.ok) {
+        const COORDS_BATCH_SIZE = 50;
+        const coordsByPageId = new Map<number, Array<{ lat: number; lon: number; type?: string }>>();
+        for (let i = 0; i < missingCoords.length; i += COORDS_BATCH_SIZE) {
+          const batch = missingCoords.slice(i, i + COORDS_BATCH_SIZE);
+          const ids = batch.map((p) => p.pageid).join('|');
+          const coordsUrl =
+            `https://en.wikipedia.org/w/api.php?action=query` +
+            `&pageids=${encodeURIComponent(ids)}` +
+            `&prop=coordinates&coprop=type|name|globe&format=json&origin=*`;
+          try {
+            const coordsRes = await fetch(coordsUrl, {
+              signal: controller.signal,
+              headers: { 'User-Agent': 'LocalGuide/1.0 (https://github.com/DaniRuizPerez/localguide)' },
+            });
+            if (!coordsRes.ok) continue;
             const coordsData = (await coordsRes.json()) as {
               query?: { pages?: Record<string, WikiPage> };
             };
-            const coordsByPageId = new Map<number, Array<{ lat: number; lon: number; type?: string }>>();
             for (const p of Object.values(coordsData.query?.pages ?? {})) {
               if (p.coordinates) coordsByPageId.set(p.pageid, p.coordinates);
             }
-            pages = pages.map((p) =>
-              p.coordinates?.[0] ? p : { ...p, coordinates: coordsByPageId.get(p.pageid) }
-            );
+          } catch {
+            // Best-effort enrichment; skip this batch and let the missing
+            // pages get filtered out below rather than fall through to the
+            // GPS placeholder.
           }
-        } catch {
-          // Best-effort enrichment; if it fails, drop the coordless pages
-          // below rather than fall through to the GPS placeholder.
         }
+        pages = pages.map((p) =>
+          p.coordinates?.[0] ? p : { ...p, coordinates: coordsByPageId.get(p.pageid) }
+        );
       }
 
       const pois: Poi[] = pages
