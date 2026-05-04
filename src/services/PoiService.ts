@@ -164,53 +164,18 @@ interface WikiPage {
   length?: number;
 }
 
-// Reject pages whose title or Wikipedia short-description smells like a
-// non-tourism result. The big categories that leak through GeoSearch: admin
-// areas (countries/states/counties/ZIPs), chain stores / franchises, road
-// infrastructure, generic schools, corporate entities. Tourism-relevant pages
-// (parks, museums, landmarks, historic sites) don't match any of these.
-function isTouristic(title: string, description: string | null | undefined): boolean {
-  const text = `${title} ${description ?? ''}`.toLowerCase();
-
-  // Title-only blockers (exact or prefix matches; safer than running against
-  // the combined text since a Wikipedia article's short description might
-  // legitimately contain words like "chain" when describing a mountain range).
+// Hard pre-rank filter: reject only pages that are categorically never POIs
+// (list articles, postal-code stubs, road-infrastructure entries). Everything
+// else flows into the ranker, which applies softer description-based penalties
+// via `descBlocklistPenalty` in poiRanking.ts. The previous version had a
+// long description regex blocklist here that occasionally dropped genuine
+// landmarks whose short description happened to contain a flagged word; the
+// ranker can demote those without losing them entirely.
+function isTouristic(title: string, _description: string | null | undefined): boolean {
   if (/^(list of|lists of)\b/i.test(title)) return false;
   if (/^(zip code|postal code)\b/i.test(title)) return false;
   if (/^(interstate \d+|u\.s\. route|state route|california state route)\b/i.test(title)) return false;
-
-  // Combined title+description blockers. These are pulled from what GeoSearch
-  // was leaking into the chip list (7-Eleven, United States, etc.) plus the
-  // common Wikipedia descriptor patterns they match.
-  const blockers: RegExp[] = [
-    // Chains / franchises / retail. Descriptions almost always include some
-    // form of "chain of …", "retail chain", "convenience store chain", etc.
-    /\bchain of\b/,
-    /\b(convenience|grocery|super|drug|hardware|coffee|fast.?food)\s*(store|market)?\s*(chain|company|corporation|franchise)?\b/,
-    /\b(retail|franchise|multinational)\s+(chain|corporation|company|conglomerate)\b/,
-    // Broad administrative entities — "USA", "California", "San Mateo County".
-    /\b(country|sovereign state|nation|u\.s\. state|federated state) in\b/,
-    /\b(county|state|municipality|unincorporated community) in\b/,
-    // Roads and infrastructure.
-    /\b(highway|freeway|interstate|expressway|road|state route) in\b/,
-    /\b(railway station|metro station|bus station|transit hub)\b/,
-    // Generic business/brand descriptors that aren't tourist-worthy.
-    /\b(american|international|public|private) (company|corporation|conglomerate)\b/,
-    // Corporate HQs leaking through GeoSearch with the "<adjective>+
-    // <industry> company/corporation" pattern. These describe the
-    // organisation itself (HP, Tesla, Alphabet) rather than a place a
-    // visitor would walk to. Two-word industry slug captures
-    // "information technology", "consumer electronics", "oil and gas",
-    // "financial services", etc., and a single-word slug catches
-    // "technology company" / "pharmaceutical corporation".
-    /\b(multinational|holding|conglomerate|publicly[\s-]?traded|limited liability) (company|corporation)\b/,
-    /\b(information technology|consumer electronics|oil and gas|financial services|investment banking|electronic commerce|software|hardware|semiconductor|biotechnology|pharmaceutical|aerospace|automotive|telecommunications|energy|insurance|media) (company|corporation|conglomerate|firm|manufacturer)\b/,
-    // Schools that aren't famous (famous ones have their own descriptor like
-    // "private research university" which won't match).
-    /\b(elementary|middle|secondary) school\b/,
-  ];
-
-  return !blockers.some((rx) => rx.test(text));
+  return true;
 }
 
 // Ranking function. Default (hiddenGems=false): nearest first. Hidden-gems:
@@ -348,6 +313,7 @@ export const poiService = {
         );
       }
 
+      const beforeFilter = pages.length;
       const pois: Poi[] = pages
         .filter((p) => isTouristic(p.title, p.description))
         // Drop pages we still couldn't get coords for — better to show a
@@ -367,6 +333,12 @@ export const poiService = {
             coordType: coord.type,
           };
         });
+      if (__DEV__) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[PoiService] fetchNearby r=${radiusMeters}m wikipedia raw=${beforeFilter} → kept=${pois.length} (after isTouristic + coords filter)`
+        );
+      }
       // Cache the pre-ranked pool so we can re-rank cheaply if the toggle
       // changes without a network round-trip.
       cache.set(key, { fetchedAt: now, pois });

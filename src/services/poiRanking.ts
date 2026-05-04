@@ -2,7 +2,7 @@ import { distanceMeters, type Poi } from './PoiService';
 import type { GPSContext } from './InferenceService';
 import type { WikipediaSignals } from './wikipediaSignals';
 
-export const AROUND_YOU_CAP = 12;  // was 10
+export const AROUND_YOU_CAP = 15;  // was 10
 const DEFAULT_RADIUS_METERS = 5000;
 // Confidence gate — if fewer than this many candidates returned pageviews,
 // we assume the network call largely failed and fall back to the sync ranker
@@ -67,7 +67,13 @@ export function rankByInterestSync(
     const len = p75 > 0 ? Math.min(p75, rawLen) : rawLen;
     const decay = distanceDecay(p.distanceMeters, radiusMeters);
     const base = hiddenGems ? -len : len;
-    return { poi: p, score: base * decay };
+    // Multiplicative soft demotion for the same patterns the composite
+    // ranker penalises — chains, broad admin areas, road infra, generic
+    // schools — so the sync first paint doesn't surface obvious noise that
+    // the composite ranker would have correctly buried.
+    const blockWeight = hiddenGems ? 0 : descBlocklistPenalty(p.title, p.description ?? '');
+    const blockMultiplier = blockWeight > 0 ? Math.max(0.05, 1 - blockWeight / 100) : 1;
+    return { poi: p, score: base * decay * blockMultiplier };
   });
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, cap).map((s) => s.poi);
@@ -156,6 +162,40 @@ const CORP_BLOCKLIST_RE =
 const DESCRIPTION_KEYWORD_RE =
   /\b(museum|park|memorial|historic|church|library|garden|stadium|theatre|theater|cathedral|monument|landmark|gallery|temple|cemetery|fortress|castle|palace)\b/i;
 
+// Soft-deny patterns ported from PoiService.isTouristic. These used to be a
+// hard pre-rank filter that occasionally dropped real landmarks whose
+// description happened to contain a flagged word. As a ranking penalty they
+// demote the obvious noise (chains, generic admin areas, road infra, generic
+// schools, corporate descriptors) so it almost never surfaces — but a famous
+// place caught up in the regex still has a path to the visible list if its
+// other signals are strong enough.
+const DESC_BLOCKLIST_PATTERNS: Array<{ rx: RegExp; weight: number }> = [
+  // Chains / franchises / retail.
+  { rx: /\bchain of\b/i, weight: 80 },
+  { rx: /\b(convenience|grocery|super|drug|hardware|coffee|fast.?food)\s*(store|market)?\s*(chain|company|corporation|franchise)?\b/i, weight: 80 },
+  { rx: /\b(retail|franchise|multinational)\s+(chain|corporation|company|conglomerate)\b/i, weight: 80 },
+  // Broad administrative entities.
+  { rx: /\b(country|sovereign state|nation|u\.s\. state|federated state) in\b/i, weight: 60 },
+  { rx: /\b(county|state|municipality|unincorporated community) in\b/i, weight: 50 },
+  // Roads and transit infrastructure (transit hubs themselves are usually fine; this targets the generic descriptors).
+  { rx: /\b(highway|freeway|interstate|expressway|road|state route) in\b/i, weight: 60 },
+  // Generic business / brand descriptors.
+  { rx: /\b(american|international|public|private) (company|corporation|conglomerate)\b/i, weight: 50 },
+  { rx: /\b(multinational|holding|conglomerate|publicly[\s-]?traded|limited liability) (company|corporation)\b/i, weight: 60 },
+  { rx: /\b(information technology|consumer electronics|oil and gas|financial services|investment banking|electronic commerce|software|hardware|semiconductor|biotechnology|pharmaceutical|aerospace|automotive|telecommunications|energy|insurance|media) (company|corporation|conglomerate|firm|manufacturer)\b/i, weight: 60 },
+  // Generic schools (famous ones get past via descBoost / catBoost / pageviews).
+  { rx: /\b(elementary|middle|secondary) school\b/i, weight: 40 },
+];
+
+function descBlocklistPenalty(title: string, description: string): number {
+  const text = `${title} ${description}`.toLowerCase();
+  let penalty = 0;
+  for (const { rx, weight } of DESC_BLOCKLIST_PATTERNS) {
+    if (rx.test(text)) penalty = Math.max(penalty, weight);
+  }
+  return penalty;
+}
+
 interface CompositeBreakdown {
   catBoost: number;
   descBoost: number;
@@ -164,6 +204,7 @@ interface CompositeBreakdown {
   landmarkBoost: number;
   corpPenalty: number;
   noSignalPenalty: number;
+  descBlocklist: number;
   decay: number;
   raw: number;
   final: number;
@@ -196,15 +237,20 @@ function compositeScore(
   const landmarkBoost = poi.coordType === 'landmark' ? 25 : 0;
   const corpPenalty = !hiddenGems && hasCorpCat ? 40 : 0;
   const noSignalPenalty = !hiddenGems && cats.length === 0 && pv === 0 ? 25 : 0;
+  // Soft port of the old isTouristic blocklist: heavy negative weight so
+  // chains / admin areas / corporate entries almost never surface, but a
+  // famous place caught up in the regex can still climb if its other signals
+  // are strong (catBoost 50 + pvScore 50 + landmarkBoost 25 can offset).
+  const descBlocklist = !hiddenGems ? descBlocklistPenalty(poi.title, desc) : 0;
 
-  let raw = catBoost + descBoost + langBoost + pvScore + landmarkBoost - corpPenalty - noSignalPenalty;
+  let raw = catBoost + descBoost + langBoost + pvScore + landmarkBoost - corpPenalty - noSignalPenalty - descBlocklist;
   // Hidden-gems mode: divide by (1 + pv_norm) so the famous-est sink, but
   // the tourist-allowlist boost still ensures we surface real places.
   if (hiddenGems) raw = raw / (1 + pvNorm);
 
   const decay = distanceDecay(poi.distanceMeters, radiusMeters);
   const final = raw * decay;
-  return { catBoost, descBoost, langBoost, pvScore, landmarkBoost, corpPenalty, noSignalPenalty, decay, raw, final };
+  return { catBoost, descBoost, langBoost, pvScore, landmarkBoost, corpPenalty, noSignalPenalty, descBlocklist, decay, raw, final };
 }
 
 export function rankByInterestOnline(

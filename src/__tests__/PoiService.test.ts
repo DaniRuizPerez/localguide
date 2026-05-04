@@ -132,11 +132,16 @@ describe('PoiService.fetchNearby', () => {
     );
     const results = await poiService.fetchNearby(37.4419, -122.143);
     const titles = results.map((p) => p.title);
-    expect(titles).not.toContain('7-Eleven');
+    // Pre-rank filter only drops categorical never-POI titles (list-of /
+    // postal code / interstate prefixes). Chains, admin areas, corporate
+    // pages now flow through to the ranker, which heavily demotes them via
+    // descBlocklist penalty so they almost never reach the visible top N
+    // — but the user-facing fix happens at ranking, not here.
+    expect(titles).toContain('7-Eleven');
     expect(titles).toContain('Stanford University');
   });
 
-  it('filters out administrative entities and highways', async () => {
+  it('lets administrative entities and chains through; only hard never-POI titles are dropped', async () => {
     mockFetch.mockResolvedValue(
       wikiResponse([
         {
@@ -167,13 +172,13 @@ describe('PoiService.fetchNearby', () => {
     );
     const results = await poiService.fetchNearby(37.4419, -122.143);
     const titles = results.map((p) => p.title);
-    expect(titles).not.toContain('United States');
-    expect(titles).not.toContain('Interstate 280 (California)');
-    expect(titles).not.toContain('San Mateo County');
+    expect(titles).toContain('United States');                 // admin area — passes filter, will be demoted by ranker
+    expect(titles).not.toContain('Interstate 280 (California)'); // ^interstate \d+ prefix → hard drop
+    expect(titles).toContain('San Mateo County');              // admin area — passes filter, demoted by ranker
     expect(titles).toContain('Cantor Arts Center');
   });
 
-  it('drops corporate-HQ pages (HP, HP Inc., conglomerates) so the ranker never sees them', async () => {
+  it('lets corporate-HQ pages through to the ranker (which demotes them via descBlocklist + corp-cat penalties)', async () => {
     mockFetch.mockResolvedValue(
       wikiResponse([
         {
@@ -208,9 +213,11 @@ describe('PoiService.fetchNearby', () => {
     );
     const results = await poiService.fetchNearby(37.4419, -122.143);
     const titles = results.map((p) => p.title);
-    expect(titles).not.toContain('Hewlett-Packard');
-    expect(titles).not.toContain('HP Inc.');
-    expect(titles).not.toContain('Tesla, Inc.');
+    // All four flow through the pre-rank filter now. The ranker handles
+    // demotion via descBlocklistPenalty + the existing corp-cat penalty.
+    expect(titles).toContain('Hewlett-Packard');
+    expect(titles).toContain('HP Inc.');
+    expect(titles).toContain('Tesla, Inc.');
     expect(titles).toContain('Stanford Memorial Church');
   });
 
