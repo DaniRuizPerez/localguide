@@ -236,10 +236,13 @@ export const poiService = {
     // `length` (via prop=info) as a popularity proxy for hidden-gems ranking.
     // Request more than `limit` from Wikipedia since the description filter
     // trims the list; we want to land at least `limit` real attractions when
-    // possible. Scale ggslimit with radius so sub-30-ranked landmarks enter
-    // the pool at wide radii without over-fetching for tight searches:
-    // ~30 at 1 km, ~100 at 5 km, ~200 at 10 km, capped at Wikipedia's 500.
-    const rawLimit = Math.min(500, Math.max(limit, Math.round(radiusMeters / 50)));
+    // possible. Scale ggslimit aggressively with radius — in dense Bay Area
+    // urban geography Wikipedia returns the *closest* N hits, so capping at
+    // 200 silently drops the entire 6–10 km ring (Computer History Museum,
+    // Googleplex, Shoreline, Ames Research Center, Hangar One) under the
+    // ~5.5 km Stanford bubble. radiusMeters/20 gives 50 at 1 km, 250 at
+    // 5 km, 500 at 10 km — Wikipedia's no-apihighlimits ceiling.
+    const rawLimit = Math.min(500, Math.max(limit, Math.round(radiusMeters / 20)));
     const url =
       `https://en.wikipedia.org/w/api.php?action=query` +
       `&generator=geosearch` +

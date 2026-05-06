@@ -29,11 +29,25 @@ function withLiveDistances(pois: Poi[], gps: GPSContext | null): Poi[] {
   }));
 }
 
-// Adaptive distance-decay half-life. Half-life = max(800 m, radius/2) so:
-//   • dense urban search (radius=1km) → d0=800m → close-up bias.
-//   • wide search (radius=10km) → d0=5000m → famous landmarks survive.
+// Adaptive distance-decay half-life. Tighter decay for the sync fallback
+// (length × decay is purely length-biased — no corp penalty, no descBlocklist
+// — so a long HQ article at 4 km would dominate close landmarks if decay
+// were too gentle). The composite ranker has those safeguards built in and
+// uses a looser decay (`distanceDecayComposite`) so distant Bay Area
+// landmarks survive at wide radii.
 function distanceDecay(meters: number, radiusMeters: number): number {
   const d0 = Math.max(800, radiusMeters / 2);
+  return Math.exp(-meters / d0);
+}
+
+// Looser decay for the composite ranker. Half-life = max(800 m, radius*0.85)
+// so a 10 km search surfaces things 6–9 km out (Computer History Museum,
+// Googleplex, Ames Research Center, Hangar One) instead of being crushed
+// under the dense Stanford bubble at 1.5–2.5 km. Safe to flatten here
+// because compositeScore already penalises corp/admin/road descriptors —
+// the distance signal is one of several, not the only check on noise.
+function distanceDecayComposite(meters: number, radiusMeters: number): number {
+  const d0 = Math.max(800, radiusMeters * 0.85);
   return Math.exp(-meters / d0);
 }
 
@@ -176,7 +190,10 @@ const DESC_BLOCKLIST_PATTERNS: Array<{ rx: RegExp; weight: number }> = [
   { rx: /\b(retail|franchise|multinational)\s+(chain|corporation|company|conglomerate)\b/i, weight: 80 },
   // Broad administrative entities.
   { rx: /\b(country|sovereign state|nation|u\.s\. state|federated state) in\b/i, weight: 60 },
-  { rx: /\b(county|state|municipality|unincorporated community) in\b/i, weight: 50 },
+  { rx: /\b(county|state|municipality|unincorporated community|census[- ]designated place|neighborhood|district) in\b/i, weight: 50 },
+  { rx: /\b(city|town|village|borough|suburb|hamlet|township) in\b/i, weight: 50 },
+  // Geographic features that aren't really tourist destinations themselves.
+  { rx: /\b(creek|stream|river|tributary|brook|wash) (in|of|originating)\b/i, weight: 50 },
   // Roads and transit infrastructure (transit hubs themselves are usually fine; this targets the generic descriptors).
   { rx: /\b(highway|freeway|interstate|expressway|road|state route) in\b/i, weight: 60 },
   // Generic business / brand descriptors.
@@ -248,7 +265,7 @@ function compositeScore(
   // the tourist-allowlist boost still ensures we surface real places.
   if (hiddenGems) raw = raw / (1 + pvNorm);
 
-  const decay = distanceDecay(poi.distanceMeters, radiusMeters);
+  const decay = distanceDecayComposite(poi.distanceMeters, radiusMeters);
   const final = raw * decay;
   return { catBoost, descBoost, langBoost, pvScore, landmarkBoost, corpPenalty, noSignalPenalty, descBlocklist, decay, raw, final };
 }

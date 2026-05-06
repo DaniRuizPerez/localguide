@@ -156,7 +156,11 @@ export function useNearbyPois(
         // farther than the closest 20 results — Stanford Memorial Church,
         // El Palo Alto, Hoover Tower and Cantor Arts Center are 2.5–3 km from
         // downtown Palo Alto and got truncated by the default limit of 20.
-        200,
+        // 500 matches Wikipedia's gslimit ceiling for non-apihighlimits
+        // clients so the 6–10 km ring (Computer History Museum, Googleplex,
+        // Shoreline, Ames, Hangar One) survives the pre-rank distance slice
+        // when the user picks the 10 km radius.
+        500,
         { hiddenGems, offline },
         {
           // Partial emissions land before the full network round trip (cache

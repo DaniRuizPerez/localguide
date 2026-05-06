@@ -80,24 +80,26 @@ describe('PoiService.fetchNearby', () => {
     expect(url2).toContain('ggsradius=10');
   });
 
-  it('ggslimit scales with radius (R1): wider radius requests more candidates', async () => {
-    // rawLimit = min(500, max(limit, round(radiusMeters / 50)))
-    // At radius=1000, limit=10: round(1000/50)=20 → ggslimit=20
-    // At radius=10000, limit=10: round(10000/50)=200 → ggslimit=200
+  it('ggslimit scales with radius: wider radius requests more candidates', async () => {
+    // rawLimit = min(500, max(limit, round(radiusMeters / 20)))
+    // At radius=1000, limit=10: round(1000/20)=50 → ggslimit=50
+    // At radius=10000, limit=10: round(10000/20)=500 → ggslimit=500 (Wikipedia cap)
     // Narrow search first.
     mockFetch.mockResolvedValue(wikiResponse([]));
     await poiService.fetchNearby(37.4419, -122.143, 1000, 10);
     const urlNarrow: string = mockFetch.mock.calls[0][0];
-    expect(urlNarrow).toContain('ggslimit=20');
+    expect(urlNarrow).toContain('ggslimit=50');
 
     mockFetch.mockClear();
     poiService.clearCache();
 
-    // Wide (10 km) search — should request 200 candidates.
+    // Wide (10 km) search — should request the Wikipedia max of 500
+    // candidates so the 6–10 km ring (Computer History Museum, Googleplex,
+    // Ames, Hangar One) survives the closest-200 cutoff in dense urban areas.
     mockFetch.mockResolvedValue(wikiResponse([]));
     await poiService.fetchNearby(37.4419, -122.143, 10000, 10);
     const urlWide: string = mockFetch.mock.calls[0][0];
-    expect(urlWide).toContain('ggslimit=200');
+    expect(urlWide).toContain('ggslimit=500');
 
     // Verify the wide limit is strictly larger than the narrow limit.
     const narrowLimit = parseInt(urlNarrow.match(/ggslimit=(\d+)/)?.[1] ?? '0', 10);
@@ -106,7 +108,7 @@ describe('PoiService.fetchNearby', () => {
   });
 
   it('ggslimit is capped at 500 for very large rawLimit values', async () => {
-    // round(50000/50)=1000; capped at Wikipedia's max of 500.
+    // round(50000/20)=2500; capped at Wikipedia's max of 500.
     mockFetch.mockResolvedValue(wikiResponse([]));
     await poiService.fetchNearby(37.4419, -122.143, 50000, 10);
     const url: string = mockFetch.mock.calls[0][0];
