@@ -151,7 +151,12 @@ export function useNearbyPois(
         gps.latitude,
         gps.longitude,
         radiusMeters,
-        undefined,
+        // Wide candidate pool so the downstream composite ranker (capped at
+        // AROUND_YOU_CAP=15) can see famous landmarks that sit slightly
+        // farther than the closest 20 results — Stanford Memorial Church,
+        // El Palo Alto, Hoover Tower and Cantor Arts Center are 2.5–3 km from
+        // downtown Palo Alto and got truncated by the default limit of 20.
+        200,
         { hiddenGems, offline },
         {
           // Partial emissions land before the full network round trip (cache

@@ -249,6 +249,14 @@ export const poiService = {
       `&prop=description|coordinates|info` +
       `&inprop=length` +
       `&coprop=type|name|globe` +
+      // Wikipedia caps prop=coordinates at colimit=10 by default for
+      // non-apihighlimits clients (we have no API key); 50 is the max for
+      // unauthenticated callers. Without this, with ggslimit=200 only the
+      // first 10 pages return inline coords and everything else has to be
+      // patched via the chunked follow-up — and that follow-up was *also*
+      // hitting the same default-10 cap, costing us famous landmarks
+      // (Memorial Church, Hoover Tower, Cantor Arts Center, El Palo Alto).
+      `&colimit=50` +
       `&format=json&origin=*`;
 
     const controller = new AbortController();
@@ -289,7 +297,7 @@ export const poiService = {
           const coordsUrl =
             `https://en.wikipedia.org/w/api.php?action=query` +
             `&pageids=${encodeURIComponent(ids)}` +
-            `&prop=coordinates&coprop=type|name|globe&format=json&origin=*`;
+            `&prop=coordinates&coprop=type|name|globe&colimit=50&format=json&origin=*`;
           try {
             const coordsRes = await fetch(coordsUrl, {
               signal: controller.signal,
