@@ -16,7 +16,7 @@
 // ── Native module stubs (same as char.ChatFlow.test.ts) ──────────────────────
 jest.mock('../native/LiteRTModule', () => ({ __esModule: true, default: undefined }));
 jest.mock('expo-file-system/legacy', () => ({
-  documentDirectory: 'file:///data/user/0/com.localguideapp/files/',
+  documentDirectory: 'file:///data/user/0/com.ai_offline_tourguide/files/',
   getInfoAsync: jest.fn().mockResolvedValue({ exists: false }),
   makeDirectoryAsync: jest.fn().mockResolvedValue(undefined),
 }));

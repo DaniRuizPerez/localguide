@@ -1,4 +1,4 @@
-package com.localguideapp
+package com.ai_offline_tourguide
 
 import android.os.Build
 import android.os.Bundle

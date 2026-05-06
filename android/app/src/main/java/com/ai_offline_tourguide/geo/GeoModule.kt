@@ -1,4 +1,4 @@
-package com.localguideapp.geo
+package com.ai_offline_tourguide.geo
 
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise

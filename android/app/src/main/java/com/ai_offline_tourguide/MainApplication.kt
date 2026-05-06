@@ -1,4 +1,4 @@
-package com.localguideapp
+package com.ai_offline_tourguide
 
 import android.app.Application
 import android.content.res.Configuration
@@ -14,8 +14,8 @@ import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint
 import expo.modules.ApplicationLifecycleDispatcher
 import expo.modules.ExpoReactHostFactory
 
-import com.localguideapp.geo.GeoPackage
-import com.localguideapp.litert.LiteRTPackage
+import com.ai_offline_tourguide.geo.GeoPackage
+import com.ai_offline_tourguide.litert.LiteRTPackage
 
 class MainApplication : Application(), ReactApplication {
 

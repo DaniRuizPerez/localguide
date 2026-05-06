@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.localguideapp'
+    namespace 'com.ai_offline_tourguide'
     defaultConfig {
-        applicationId 'com.localguideapp'
+        applicationId 'com.ai_offline_tourguide'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
@@ -171,7 +171,7 @@ dependencies {
     // LiteRT-LM runtime for Gemma 4 (.litertlm) on-device inference
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.10.2")
 
-    // Offline reverse-geocoder dependencies (com.localguideapp.geo).
+    // Offline reverse-geocoder dependencies (com.ai_offline_tourguide.geo).
     // FusedLocationProvider for last-known + current-location fixes.
     implementation("com.google.android.gms:play-services-location:21.3.0")
     // WorkManager scaffolding for future background country-pack refresh.

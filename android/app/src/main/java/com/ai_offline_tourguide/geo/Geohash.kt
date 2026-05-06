@@ -1,4 +1,4 @@
-package com.localguideapp.geo
+package com.ai_offline_tourguide.geo
 
 /**
  * Minimal geohash encoder + neighbor expansion for the offline reverse-geocoder.

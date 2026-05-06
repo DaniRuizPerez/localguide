@@ -1,4 +1,4 @@
-package com.localguideapp.litert
+package com.ai_offline_tourguide.litert
 
 import android.app.ActivityManager
 import android.content.Context

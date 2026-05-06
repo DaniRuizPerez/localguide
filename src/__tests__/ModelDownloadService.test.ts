@@ -7,7 +7,7 @@ const mockDeleteAsync = jest.fn();
 const mockCreateDownloadResumable = jest.fn();
 
 jest.mock('expo-file-system/legacy', () => ({
-  documentDirectory: 'file:///data/user/0/com.localguideapp/files/',
+  documentDirectory: 'file:///data/user/0/com.ai_offline_tourguide/files/',
   getInfoAsync: (...args: unknown[]) => mockGetInfoAsync(...args),
   makeDirectoryAsync: (...args: unknown[]) => mockMakeDirectoryAsync(...args),
   deleteAsync: (...args: unknown[]) => mockDeleteAsync(...args),

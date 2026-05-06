@@ -20,7 +20,7 @@ export function Wordmark({ style, size = 18 }: Props) {
         <Line x1="16" y1="2"  x2="16" y2="6"  stroke={Colors.primary} strokeWidth="1.5" />
         <Line x1="16" y1="26" x2="16" y2="30" stroke={Colors.primary} strokeWidth="1.5" />
       </Svg>
-      <Text style={[Type.title, { color: Colors.text, fontSize: size + 2 }]}>Local Guide</Text>
+      <Text style={[Type.title, { color: Colors.text, fontSize: size + 2 }]}>AI Offline Tour Guide</Text>
     </View>
   );
 }

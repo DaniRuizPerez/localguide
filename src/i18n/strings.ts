@@ -84,7 +84,7 @@ export const EN = {
   download: {
     heading: 'Making a tiny brain\nfor your pocket.',
     subtitle:
-      '{mb} MB · one-time download · no account. After this, Local Guide works wherever you go.',
+      '{mb} MB · one-time download · no account. After this, AI Offline Tour Guide works wherever you go.',
     wifiOnly: 'Wi-Fi only',
     start: 'Start download',
     pause: 'Pause download',

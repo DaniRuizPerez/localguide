@@ -1,4 +1,4 @@
-package com.localguideapp.geo
+package com.ai_offline_tourguide.geo
 
 import android.Manifest
 import android.annotation.SuppressLint

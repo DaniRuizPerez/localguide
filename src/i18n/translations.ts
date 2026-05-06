@@ -69,7 +69,7 @@ const ES: Partials = {
   },
   download: {
     heading: 'Un pequeño cerebro\npara tu bolsillo.',
-    subtitle: '{mb} MB · descarga única · sin cuenta. Luego Local Guide funciona donde sea.',
+    subtitle: '{mb} MB · descarga única · sin cuenta. Luego AI Offline Tour Guide funciona donde sea.',
     wifiOnly: 'Solo Wi-Fi',
     start: 'Descargar',
     pause: 'Pausar descarga',
@@ -164,7 +164,7 @@ const FR: Partials = {
   download: {
     heading: 'Un petit cerveau\npour ta poche.',
     subtitle:
-      '{mb} Mo · téléchargement unique · sans compte. Ensuite Local Guide fonctionne partout.',
+      '{mb} Mo · téléchargement unique · sans compte. Ensuite AI Offline Tour Guide fonctionne partout.',
     wifiOnly: 'Wi-Fi uniquement',
     start: 'Télécharger',
     pause: 'Pause',

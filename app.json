@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Local Guide",
-    "slug": "local-guide-app",
+    "name": "AI Offline Tour Guide",
+    "slug": "ai-offline-tourguide",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -14,13 +14,13 @@
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.localguideapp",
+      "bundleIdentifier": "com.ai_offline_tourguide",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Local Guide uses your location to provide information about nearby landmarks and points of interest.",
-        "NSLocationAlwaysUsageDescription": "Local Guide uses your location to provide information about nearby landmarks and points of interest.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Local Guide uses your background location to automatically tell you about interesting nearby places.",
-        "NSSpeechRecognitionUsageDescription": "Local Guide uses speech recognition so you can talk to your guide hands-free.",
-        "NSMicrophoneUsageDescription": "Local Guide needs microphone access for voice conversations with your guide."
+        "NSLocationWhenInUseUsageDescription": "AI Offline Tour Guide uses your location to provide information about nearby landmarks and points of interest.",
+        "NSLocationAlwaysUsageDescription": "AI Offline Tour Guide uses your location to provide information about nearby landmarks and points of interest.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "AI Offline Tour Guide uses your background location to automatically tell you about interesting nearby places.",
+        "NSSpeechRecognitionUsageDescription": "AI Offline Tour Guide uses speech recognition so you can talk to your guide hands-free.",
+        "NSMicrophoneUsageDescription": "AI Offline Tour Guide needs microphone access for voice conversations with your guide."
       }
     },
     "android": {
@@ -28,7 +28,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#F8F5F0"
       },
-      "package": "com.localguideapp",
+      "package": "com.ai_offline_tourguide",
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",

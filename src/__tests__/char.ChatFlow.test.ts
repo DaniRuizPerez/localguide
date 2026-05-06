@@ -15,7 +15,7 @@ import type { GPSContext } from '../services/InferenceService';
 jest.mock('../native/LiteRTModule', () => ({ __esModule: true, default: undefined }));
 // ── ModelDownloadService path constant (imported by InferenceService) ──────
 jest.mock('expo-file-system/legacy', () => ({
-  documentDirectory: 'file:///data/user/0/com.localguideapp/files/',
+  documentDirectory: 'file:///data/user/0/com.ai_offline_tourguide/files/',
   getInfoAsync: jest.fn().mockResolvedValue({ exists: false }),
   makeDirectoryAsync: jest.fn().mockResolvedValue(undefined),
 }));

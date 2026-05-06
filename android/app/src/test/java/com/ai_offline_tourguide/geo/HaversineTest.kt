@@ -1,6 +1,6 @@
-package com.localguideapp.geo
+package com.ai_offline_tourguide.geo
 
-import com.localguideapp.geo.ReverseGeocoder.Companion.haversineMeters
+import com.ai_offline_tourguide.geo.ReverseGeocoder.Companion.haversineMeters
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

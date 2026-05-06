@@ -1,4 +1,4 @@
-package com.localguideapp.geo
+package com.ai_offline_tourguide.geo
 
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase

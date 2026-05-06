@@ -1,4 +1,4 @@
-# Local Guide
+# AI Offline Tour Guide
 
 Offline-first mobile tourist guide. Runs a small language model **on-device** (Gemma 3 1B, int4) so travelers get location-aware recommendations about landmarks, history, food, and hidden gems — with **no internet connection required** after setup.
 

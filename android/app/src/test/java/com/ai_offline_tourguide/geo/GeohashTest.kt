@@ -1,4 +1,4 @@
-package com.localguideapp.geo
+package com.ai_offline_tourguide.geo
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
