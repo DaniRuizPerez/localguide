@@ -9,11 +9,16 @@ export const softTactileMapStyle = [
     elementType: 'geometry',
     stylers: [{ visibility: 'off' }],
   },
-  {
-    featureType: 'poi',
-    elementType: 'labels.icon',
-    stylers: [{ visibility: 'off' }],
-  },
+  // Tile POIs are free to render via the Maps SDK. Hide noisy commercial
+  // categories (cafes/shops — low Wikipedia hit rate, high visual noise) but
+  // expose the categories where Wikipedia coverage is good — those become
+  // tappable via onPoiClick in MapScreen and pipe through wikipediaService.
+  { featureType: 'poi.business', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi.business', elementType: 'labels.text', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi.attraction', elementType: 'labels.icon', stylers: [{ visibility: 'on' }] },
+  { featureType: 'poi.park', elementType: 'labels.icon', stylers: [{ visibility: 'on' }] },
+  { featureType: 'poi.place_of_worship', elementType: 'labels.icon', stylers: [{ visibility: 'on' }] },
+  { featureType: 'poi.school', elementType: 'labels.icon', stylers: [{ visibility: 'on' }] },
   {
     featureType: 'poi.park',
     elementType: 'geometry',

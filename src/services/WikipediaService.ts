@@ -332,12 +332,52 @@ async function summarize(
   return truncateAtSentence(result.extract.trim(), maxChars);
 }
 
+// ─── searchByName() ─────────────────────────────────────────────────────────
+
+// Fuzzy title resolution via Wikipedia's free `opensearch` endpoint. Used as
+// a fallback when summary() returns null because the caller had a colloquial
+// name that doesn't exactly match an article title — e.g. "Cantor Arts
+// Center" is not a Wikipedia title, but opensearch maps it to "Cantor
+// Center for Visual Arts" which is. One extra HTTP call only on miss.
+async function searchByName(
+  query: string,
+  opts?: { signal?: AbortSignal }
+): Promise<WikipediaSummary | null> {
+  const trimmed = query.trim();
+  if (!trimmed) return null;
+
+  const url =
+    `https://en.wikipedia.org/w/api.php?action=opensearch` +
+    `&search=${encodeURIComponent(trimmed)}` +
+    `&limit=1&format=json&origin=*`;
+
+  const { signal, cleanup } = makeSignal(opts?.signal);
+
+  try {
+    const response = await fetch(url, { signal, headers: REQUEST_HEADERS });
+    if (!response.ok) return null;
+
+    // Opensearch shape: [query, [titles[]], [descriptions[]], [urls[]]]
+    const data = (await response.json()) as unknown;
+    if (!Array.isArray(data) || !Array.isArray(data[1])) return null;
+    const title = (data[1] as unknown[])[0];
+    if (typeof title !== 'string' || !title) return null;
+
+    return await summary(title, opts);
+  } catch {
+    return null;
+  } finally {
+    cleanup();
+  }
+}
+
 // ─── Singleton ───────────────────────────────────────────────────────────────
 
 export const wikipediaService = {
   summary,
   historySection,
   summarize,
+  searchByName,
 
   // Exposed for tests that need a clean slate between runs.
   clearCache(): void {

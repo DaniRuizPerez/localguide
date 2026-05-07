@@ -20,9 +20,10 @@ export interface Poi {
    * carry real coords (safe to geofence); 'llm' entries are model-generated
    * names with the user's own position used as a placeholder — proximity
    * checks must skip them so we don't auto-narrate the user's current
-   * location.
+   * location. 'google' entries are ad-hoc taps on the SDK's tile-rendered
+   * POIs (free, via onPoiClick); they carry real coords from the SDK.
    */
-  source: 'wikipedia' | 'geonames' | 'llm';
+  source: 'wikipedia' | 'geonames' | 'llm' | 'google';
   /**
    * GeoNames feature code for 'geonames' entries (e.g. PRK = park, CH =
    * church, MUS = museum). Lets the chip-row emoji classifier do a much

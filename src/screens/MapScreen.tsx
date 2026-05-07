@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView } from 'react-native';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView, Animated, PanResponder, Dimensions } from 'react-native';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE, type Region, type PoiClickEvent } from 'react-native-maps';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useLocation } from '../hooks/useLocation';
@@ -11,7 +11,8 @@ import { useRadiusPref } from '../hooks/useRadiusPref';
 import { Colors } from '../theme/colors';
 import { Type, Radii, Shadows, Sizing, Spacing } from '../theme/tokens';
 import { softTactileMapStyle } from '../theme/mapStyle';
-import { type Poi } from '../services/PoiService';
+import { type Poi, distanceMeters } from '../services/PoiService';
+import { wikipediaService } from '../services/WikipediaService';
 import { guidePrefs } from '../services/GuidePrefs';
 import { SoftButton } from '../components/SoftButton';
 import { CompassArrow } from '../components/CompassArrow';
@@ -25,6 +26,26 @@ import { t } from '../i18n';
 type Props = NativeStackScreenProps<RootStackParamList, 'Map'>;
 
 const DEFAULT_DELTA = 0.01;
+
+// Pullup sheet snap-point math. Sheet is positioned `bottom: 0` with a fixed
+// height; we translate it down to "collapse" and to 0 to "expand fully". The
+// peek values were tuned on a Pixel 3 (1080×2160). Computed once at module
+// load — orientation changes are rare on this app's intended use.
+const SCREEN_H = Dimensions.get('window').height;
+const SHEET_HEIGHT = Math.round(SCREEN_H * 0.85);
+const SNAP_FULL = 0;                                 // entire sheet visible
+const SNAP_HALF = Math.round(SHEET_HEIGHT * 0.55);   // ~45% visible — default landing
+const SNAP_COLLAPSED = SHEET_HEIGHT - 150;           // 150 px peek (handle + header tease)
+const SNAP_POINTS = [SNAP_FULL, SNAP_HALF, SNAP_COLLAPSED] as const;
+const FLING_VY_THRESHOLD = 0.5;                      // velocity threshold for fling-to-snap
+
+function nearestSnap(y: number, vy: number): number {
+  if (vy < -FLING_VY_THRESHOLD) return SNAP_FULL;
+  if (vy > FLING_VY_THRESHOLD) return SNAP_COLLAPSED;
+  return SNAP_POINTS.reduce((best, c) => (Math.abs(c - y) < Math.abs(best - y) ? c : best));
+}
+
+export { nearestSnap, SNAP_FULL, SNAP_HALF, SNAP_COLLAPSED }; // for unit test
 
 export default function MapScreen({ navigation }: Props) {
   const { gps, status, errorMessage, refresh } = useLocation();
@@ -65,6 +86,110 @@ export default function MapScreen({ navigation }: Props) {
   const lastFitRadiusRef = useRef<number | null>(null);
   const didInitialFitRef = useRef(false);
   const [mapReady, setMapReady] = useState(false);
+
+  // Generation counter for Google POI taps. Each tap increments it; async
+  // Wikipedia enrichment checks against the latest value before applying its
+  // result, so a fast second tap doesn't get clobbered by the first's late
+  // response.
+  const tapGenRef = useRef(0);
+
+  // ── Pullup bottom sheet (gesture-driven, native-driver spring) ────────────
+  // Sheet starts at SNAP_HALF. PanResponder is attached to the drag handle +
+  // header only, so the inner ScrollView's scrolls are not intercepted.
+  const sheetY = useRef(new Animated.Value(SNAP_HALF)).current;
+  const currentSnapRef = useRef<number>(SNAP_HALF);
+  const [atFull, setAtFull] = useState(false);
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 4,
+        onPanResponderGrant: () => {
+          // No setOffset/flattenOffset — those caused inconsistent state
+          // across consecutive gestures (the Animated.Value's internal
+          // offset accounting got out of sync with currentSnapRef). We
+          // just write the absolute position directly each frame.
+        },
+        onPanResponderMove: (_, g) => {
+          const target = currentSnapRef.current + g.dy;
+          const clamped = Math.min(Math.max(target, SNAP_FULL), SNAP_COLLAPSED);
+          sheetY.setValue(clamped);
+        },
+        onPanResponderRelease: (_, g) => {
+          const releasedY = currentSnapRef.current + g.dy;
+          const target = nearestSnap(releasedY, g.vy);
+          currentSnapRef.current = target;
+          setAtFull(target === SNAP_FULL);
+          // useNativeDriver kept FALSE on purpose: once a native-driven
+          // spring runs, the Animated.Value gets "captured" on the native
+          // side and subsequent `setValue` calls (which PanResponder.move
+          // uses to track the finger) have no visual effect. JS-thread
+          // springs still hit 60 fps for the short snap window on Pixel 3.
+          Animated.spring(sheetY, {
+            toValue: target,
+            useNativeDriver: false,
+            tension: 80,
+            friction: 12,
+          }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(sheetY, {
+            toValue: currentSnapRef.current,
+            useNativeDriver: false,
+            tension: 80,
+            friction: 12,
+          }).start();
+        },
+      }),
+    [sheetY]
+  );
+
+  const handleGooglePoi = async (e: PoiClickEvent) => {
+    const { name, coordinate } = e.nativeEvent;
+    const myGen = ++tapGenRef.current;
+
+    // Overlap dedup: if the Google POI matches one already in our ranked list
+    // (case-insensitive trimmed title), reuse that Poi — no stub, no extra
+    // network call. Stanford Memorial Church is the canonical example.
+    const existing = ranked.find(
+      (p) => p.title.trim().toLowerCase() === name.trim().toLowerCase()
+    );
+    if (existing) {
+      setCompassTarget(existing);
+      return;
+    }
+
+    // Synthesize a stub Poi with a guaranteed-disjoint negative pageId
+    // (same pattern as LLM POIs in useNearbyPois.ts).
+    const stub: Poi = {
+      pageId: -Date.now(),
+      title: name,
+      latitude: coordinate.latitude,
+      longitude: coordinate.longitude,
+      distanceMeters: gps
+        ? distanceMeters(gps.latitude, gps.longitude, coordinate.latitude, coordinate.longitude)
+        : 0,
+      source: 'google',
+    };
+    setCompassTarget(stub);
+
+    // Enrich with Wikipedia. Try exact title first; on miss, fuzzy-match via
+    // opensearch (e.g. "Cantor Arts Center" → "Cantor Center for Visual
+    // Arts"). Generation guard drops stale resolutions.
+    let summary = await wikipediaService.summary(name).catch(() => null);
+    if (myGen !== tapGenRef.current) return;
+    if (!summary) {
+      summary = await wikipediaService.searchByName(name).catch(() => null);
+      if (myGen !== tapGenRef.current) return;
+    }
+    if (summary) {
+      setCompassTarget((prev) =>
+        prev?.pageId === stub.pageId
+          ? { ...stub, description: summary!.description ?? summary!.extract }
+          : prev
+      );
+    }
+  };
 
   // Fit camera to markers + user position whenever markers arrive or radius changes.
   // Gated on mapReady because Android react-native-maps drops fitToCoordinates
@@ -184,6 +309,7 @@ export default function MapScreen({ navigation }: Props) {
         toolbarEnabled={false}
         customMapStyle={softTactileMapStyle}
         onMapReady={() => setMapReady(true)}
+        onPoiClick={handleGooglePoi}
         onRegionChangeComplete={(_region, details) => {
           if (programmaticMoveRef.current) {
             programmaticMoveRef.current = false;
@@ -281,14 +407,19 @@ export default function MapScreen({ navigation }: Props) {
         </TouchableOpacity>
       )}
 
-      <View style={styles.sheet} pointerEvents="box-none">
-        <View style={styles.sheetHandle} />
-        <Text style={[Type.title, { color: Colors.text }]}>{t('map.aroundYou')}</Text>
-        <Text style={[Type.hint, { color: Colors.textTertiary, marginTop: 2 }]}>
-          {ranked.length > 0
-            ? t('map.stopsPickedOut', { count: ranked.length })
-            : t('map.scanning')}
-        </Text>
+      <Animated.View
+        style={[styles.sheet, { transform: [{ translateY: sheetY }] }]}
+        pointerEvents="box-none"
+      >
+        <View {...panResponder.panHandlers} style={styles.sheetDragArea}>
+          <View style={styles.sheetHandle} />
+          <Text style={[Type.title, { color: Colors.text }]}>{t('map.aroundYou')}</Text>
+          <Text style={[Type.hint, { color: Colors.textTertiary, marginTop: 2 }]}>
+            {ranked.length > 0
+              ? t('map.stopsPickedOut', { count: ranked.length })
+              : t('map.scanning')}
+          </Text>
+        </View>
 
         {compassTarget && gps && compassTarget.source !== 'llm' && (
           <TouchableOpacity
@@ -308,11 +439,16 @@ export default function MapScreen({ navigation }: Props) {
         )}
 
         <ScrollView
-          // Cap the inline POI list to ~22vh so on small phones it doesn't
-          // crowd the map and on big phones we use the extra real estate.
-          style={{ marginTop: 10, maxHeight: Sizing.vh(22) }}
-          contentContainerStyle={{ gap: 6 }}
-          showsVerticalScrollIndicator={false}
+          // ScrollView only scrolls at the Full snap; at Half/Collapsed the
+          // user expects vertical drags to move the sheet, not the list.
+          // Without this guard a drag in the list area would scroll instead
+          // of pulling the sheet up. removeClippedSubviews trims off-screen
+          // rows on Android for a small render-cost win at Full.
+          scrollEnabled={atFull}
+          removeClippedSubviews
+          style={{ marginTop: 10, flex: 1 }}
+          contentContainerStyle={{ gap: 6, paddingBottom: 12 }}
+          showsVerticalScrollIndicator={atFull}
         >
           {ranked.map((p) => {
             const isTarget = compassTarget?.pageId === p.pageId;
@@ -362,7 +498,7 @@ export default function MapScreen({ navigation }: Props) {
             );
           })}
         </ScrollView>
-      </View>
+      </Animated.View>
 
       <TimelineModal
         visible={timelinePoi != null}
@@ -527,6 +663,7 @@ const styles = StyleSheet.create({
     left: 10,
     right: 10,
     bottom: 10,
+    height: SHEET_HEIGHT,
     backgroundColor: Colors.surface,
     borderRadius: Radii.xl,
     paddingHorizontal: 14,
@@ -536,11 +673,19 @@ const styles = StyleSheet.create({
     borderColor: Colors.borderLight,
     ...Shadows.softFloating,
   },
+  // Drag area covers the handle + header text. PanResponder is attached only
+  // here so the inner ScrollView can capture its own touches at Full snap.
+  // The padding gives a generous tap target — easier than fishing for the
+  // 4×40 handle bar alone.
+  sheetDragArea: {
+    paddingTop: 4,
+    paddingBottom: 8,
+  },
   sheetHandle: {
     width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: Colors.border,
+    backgroundColor: Colors.borderLight,
     alignSelf: 'center',
     marginBottom: 10,
   },
