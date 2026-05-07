@@ -97,11 +97,21 @@ android {
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
 
-        // Google Maps SDK for Android API key. Set MAPS_API_KEY in gradle.properties
-        // (keep it out of git) or export MAPS_API_KEY in the build environment.
+        // Google Maps SDK for Android API key. Resolution order:
+        //   1. -PMAPS_API_KEY=... on the gradle CLI
+        //   2. MAPS_API_KEY in android/local.properties (gitignored — preferred dev spot)
+        //   3. MAPS_API_KEY env var (CI)
         // An empty value still builds but map tiles will not render.
+        def localProps = new Properties()
+        def localPropsFile = rootProject.file('local.properties')
+        if (localPropsFile.exists()) {
+            localPropsFile.withInputStream { localProps.load(it) }
+        }
         manifestPlaceholders = [
-            MAPS_API_KEY: (findProperty('MAPS_API_KEY') ?: System.getenv('MAPS_API_KEY') ?: '').toString()
+            MAPS_API_KEY: (findProperty('MAPS_API_KEY')
+                ?: localProps.getProperty('MAPS_API_KEY')
+                ?: System.getenv('MAPS_API_KEY')
+                ?: '').toString()
         ]
     }
     packagingOptions {
