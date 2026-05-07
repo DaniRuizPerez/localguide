@@ -84,7 +84,7 @@ export function ChatHeader({ status, gps, manualLocation, onSettingsPress, onBac
             <Text style={styles.backGlyph}>‹</Text>
           </TouchableOpacity>
         ) : (
-          <Wordmark />
+          <Wordmark iconOnly />
         )}
       </View>
       <View style={styles.right}>
