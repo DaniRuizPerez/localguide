@@ -151,6 +151,7 @@ describe('Characterization: LocalGuideService — response shaping', () => {
 import { renderHook, act } from '@testing-library/react-native';
 import { useChatMessages } from '../hooks/useChatMessages';
 import { useGuideStream } from '../hooks/useGuideStream';
+import { chatStore } from '../services/ChatStore';
 import { devicePerf } from '../services/DevicePerf';
 
 let mockEffectiveMode: 'online' | 'offline' = 'online';
@@ -194,6 +195,12 @@ let mockPerfClass: 'fast' | 'slow' | 'unknown' = 'fast';
 let perfClassSpy: jest.SpyInstance | null = null;
 let recordStreamSpy: jest.SpyInstance | null = null;
 
+// chatStore is now a module-level singleton — every test must start with a
+// clean message log or earlier-test residue leaks into assertions.
+beforeEach(() => {
+  chatStore.clear();
+});
+
 beforeAll(() => {
   perfClassSpy = jest.spyOn(devicePerf, 'perfClass').mockImplementation(() => mockPerfClass);
   recordStreamSpy = jest.spyOn(devicePerf, 'recordStream').mockImplementation(() => {});
@@ -211,7 +218,7 @@ const LOCATION = 'Paris';
 function setupPipeline() {
   const { result } = renderHook(() => {
     const msgs = useChatMessages();
-    const guide = useGuideStream({ messages: msgs, speakResponsesRef: _speakRef, topicRef: _topicRef });
+    const guide = useGuideStream({ speakResponsesRef: _speakRef, topicRef: _topicRef });
     return { msgs, guide };
   });
   return result;

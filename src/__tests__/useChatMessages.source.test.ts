@@ -7,8 +7,15 @@
 
 import { renderHook, act } from '@testing-library/react-native';
 import { useChatMessages } from '../hooks/useChatMessages';
+import { chatStore } from '../services/ChatStore';
 
 describe('useChatMessages — source field', () => {
+  // chatStore is a module-level singleton; reset between cases so prior
+  // adds don't leak into the next test's `messages` array.
+  beforeEach(() => {
+    chatStore.clear();
+  });
+
   it('addGuidePlaceholder with source stores the source on the message', () => {
     const { result } = renderHook(() => useChatMessages());
 

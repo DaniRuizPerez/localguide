@@ -74,7 +74,6 @@ export default function MapScreen({ navigation }: Props) {
   const topicRef = useRef<readonly ['everything']>(['everything']);
   const listRef = useRef<any>(null);
   const { inferring, stream, stop } = useGuideStream({
-    messages,
     speakResponsesRef,
     topicRef,
     onScroll: () => listRef.current?.scrollToEnd({ animated: true }),

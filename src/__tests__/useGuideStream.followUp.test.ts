@@ -101,6 +101,7 @@ afterAll(() => {
 import { renderHook, act } from '@testing-library/react-native';
 import { useChatMessages } from '../hooks/useChatMessages';
 import { useGuideStream } from '../hooks/useGuideStream';
+import { chatStore } from '../services/ChatStore';
 
 const _speakRef = { current: false };
 const _topicRef = { current: [] as readonly never[] };
@@ -109,7 +110,7 @@ const LOCATION = 'Stanford, CA';
 function setupPipeline() {
   const { result } = renderHook(() => {
     const msgs = useChatMessages();
-    const guide = useGuideStream({ messages: msgs, speakResponsesRef: _speakRef, topicRef: _topicRef });
+    const guide = useGuideStream({ speakResponsesRef: _speakRef, topicRef: _topicRef });
     return { msgs, guide };
   });
   return result;
@@ -121,6 +122,7 @@ describe('Regression: follow-up history threading', () => {
   beforeEach(() => {
     mockCallCount = 0;
     mockRunInferenceStreamSpy.mockClear();
+    chatStore.clear();
   });
 
   it('second stream() call prompt contains text from first guide reply', async () => {

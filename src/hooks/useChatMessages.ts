@@ -1,13 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { GPSContext } from '../services/InferenceService';
 import type { Message } from '../types/chat';
 import type { Source } from '../components/SourceBadge';
-
-let idSeq = 0;
-function nextId(prefix: string): string {
-  idSeq += 1;
-  return `${Date.now()}-${idSeq}-${prefix}`;
-}
+import { chatStore } from '../services/ChatStore';
 
 export interface ChatMessagesApi {
   messages: Message[];
@@ -44,58 +39,58 @@ export interface ChatMessagesApi {
   clear(): void;
 }
 
+/**
+ * Thin reactive wrapper around the shared `chatStore` singleton. Both
+ * ChatScreen and the Map pullup's Chat tab call this hook independently —
+ * each subscriber re-renders when messages or inferring change. The store
+ * coalesces no-op token writes so we don't pay for a rerender per token
+ * across multiple mounted MessageLists.
+ */
 export function useChatMessages(): ChatMessagesApi {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [snap, setSnap] = useState(() => chatStore.get());
 
-  const addUserMessage = useCallback((text: string, imageUri?: string): string => {
-    const id = nextId('u');
-    setMessages((prev) => [...prev, { id, role: 'user', text, imageUri }]);
-    return id;
+  useEffect(() => {
+    return chatStore.subscribe(setSnap);
+  }, []);
+
+  const addUserMessage = useCallback((text: string, imageUri?: string) => {
+    return chatStore.addUserMessage(text, imageUri);
   }, []);
 
   const addGuideMessage = useCallback(
-    (text: string, locationUsed: GPSContext | string, durationMs?: number, source?: Source): string => {
-      const id = nextId('g');
-      setMessages((prev) => [...prev, { id, role: 'guide', text, locationUsed, durationMs, source }]);
-      return id;
+    (text: string, locationUsed: GPSContext | string, durationMs?: number, source?: Source) => {
+      return chatStore.addGuideMessage(text, locationUsed, durationMs, source);
     },
     []
   );
 
-  const addGuidePlaceholder = useCallback((locationUsed: GPSContext | string, source?: Source): string => {
-    const id = nextId('gp');
-    setMessages((prev) => [...prev, { id, role: 'guide', text: '', locationUsed, source }]);
-    return id;
+  const addGuidePlaceholder = useCallback(
+    (locationUsed: GPSContext | string, source?: Source) => {
+      return chatStore.addGuidePlaceholder(locationUsed, source);
+    },
+    []
+  );
+
+  const appendGuideToken = useCallback((id: string, delta: string) => {
+    chatStore.appendGuideToken(id, delta);
   }, []);
 
-  const appendGuideToken = useCallback((id: string, delta: string): void => {
-    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, text: m.text + delta } : m)));
+  const finalizeGuideMessage = useCallback((id: string, durationMs: number) => {
+    chatStore.finalizeGuideMessage(id, durationMs);
   }, []);
 
-  const finalizeGuideMessage = useCallback((id: string, durationMs: number): void => {
-    setMessages((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, text: m.text.trim(), durationMs } : m))
-    );
+  const setGuideError = useCallback((id: string, message: string) => {
+    chatStore.setGuideError(id, message);
   }, []);
 
-  const setGuideError = useCallback((id: string, message: string): void => {
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === id ? { ...m, text: m.text || `Sorry, something went wrong. (${message})` } : m
-      )
-    );
+  const setGuideSource = useCallback((id: string, source: Source) => {
+    chatStore.setGuideSource(id, source);
   }, []);
 
-  const setGuideSource = useCallback((id: string, source: Source): void => {
-    setMessages((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, source } : m))
-    );
-  }, []);
-
-  const clear = useCallback(() => setMessages([]), []);
+  const clear = useCallback(() => chatStore.clear(), []);
 
   return {
-    messages,
+    messages: snap.messages,
     addUserMessage,
     addGuideMessage,
     addGuidePlaceholder,

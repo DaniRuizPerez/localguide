@@ -11,6 +11,13 @@
 import React from 'react';
 import { render, fireEvent, act, waitFor } from '@testing-library/react-native';
 import ChatScreen from '../screens/ChatScreen';
+import { chatStore } from '../services/ChatStore';
+
+// chatStore is now a module-level singleton; messages must be wiped between
+// tests so prior assertions don't bleed into later ones.
+beforeEach(() => {
+  chatStore.clear();
+});
 
 // ── Standard mock suite (same as App.test.tsx) ────────────────────────────
 

@@ -101,7 +101,6 @@ export default function ChatScreen(props: Props) {
 
   const messages = useChatMessages();
   const { inferring, stream, stop } = useGuideStream({
-    messages,
     speakResponsesRef: speakRef,
     topicRef,
     onScroll: scrollToEnd,

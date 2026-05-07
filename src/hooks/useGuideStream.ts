@@ -4,7 +4,7 @@ import { speechService } from '../services/SpeechService';
 import { SpeechChunker } from '../services/SpeechChunker';
 import type { GPSContext, StreamHandle } from '../services/InferenceService';
 import type { Message } from '../types/chat';
-import type { ChatMessagesApi } from './useChatMessages';
+import { chatStore } from '../services/ChatStore';
 import { appMode } from '../services/AppMode';
 import type { Source } from '../components/SourceBadge';
 import { devicePerf } from '../services/DevicePerf';
@@ -13,8 +13,6 @@ import { devicePerf } from '../services/DevicePerf';
 import { onlineGuideService } from '../services/OnlineGuideService';
 
 export interface GuideStreamDeps {
-  /** Message state surface — stream writes into it. */
-  messages: ChatMessagesApi;
   /** Fresh ref to the current Speak toggle — read on each token. */
   speakResponsesRef: React.MutableRefObject<boolean>;
   /** Fresh ref to the current topic selection — read once per stream start. */
@@ -31,7 +29,7 @@ export interface GuideStream {
    *
    * `source` seeds the placeholder badge. Defaults to `'ai-online'` or
    * `'ai-offline'` based on appMode. Wave-2 callers (RAG, Wikipedia race)
-   * can override at call-time or later via messages.setGuideSource(id, …).
+   * can override at call-time or later via chatStore.setGuideSource(id, …).
    */
   stream(params: {
     intent: 'text' | 'image';
@@ -44,14 +42,16 @@ export interface GuideStream {
   stop(): void;
 }
 
-export function useGuideStream({ messages, speakResponsesRef, topicRef, onScroll }: GuideStreamDeps): GuideStream {
-  const [inferring, setInferring] = useState(false);
+export function useGuideStream({ speakResponsesRef, topicRef, onScroll }: GuideStreamDeps): GuideStream {
+  // Local mirror of chatStore.inferring so React re-renders this consumer
+  // when streams start/end. The store is the source of truth — multiple
+  // mounted screens stay in sync.
+  const [inferring, setInferringLocal] = useState(chatStore.get().inferring);
   const streamRef = useRef<StreamHandle | null>(null);
-  const inferringRef = useRef(false);
 
   useEffect(() => {
-    inferringRef.current = inferring;
-  }, [inferring]);
+    return chatStore.subscribe((snap) => setInferringLocal(snap.inferring));
+  }, []);
 
   // Tear down on unmount: cancel any in-flight stream and stop TTS.
   useEffect(() => {
@@ -66,7 +66,7 @@ export function useGuideStream({ messages, speakResponsesRef, topicRef, onScroll
     streamRef.current?.abort();
     streamRef.current = null;
     speechService.stop();
-    setInferring(false);
+    chatStore.setInferring(false);
   }, []);
 
   const stream = useCallback(
@@ -85,14 +85,23 @@ export function useGuideStream({ messages, speakResponsesRef, topicRef, onScroll
     }): Promise<void> => {
       // Snapshot prior turns for the model so a follow-up POI tap (or typed
       // question) lands in the same conversation thread instead of starting
-      // fresh. addUserMessage queued a setState in the caller; React hasn't
-      // re-rendered yet, so messages.messages is the state from BEFORE the
-      // new user cue was appended — which is exactly the history we want.
-      const history = priorTurnsFor(messages.messages);
-      setInferring(true);
+      // fresh. The user message has already been added to the store by the
+      // caller (ChatScreen / MapScreen). We exclude the just-added user
+      // bubble from history because the model receives `query` separately.
+      const allMessages = chatStore.get().messages;
+      // Drop the trailing user message that matches the current query so we
+      // don't double-send it.
+      const historyMessages =
+        allMessages.length > 0 &&
+        allMessages[allMessages.length - 1].role === 'user' &&
+        allMessages[allMessages.length - 1].text === query
+          ? allMessages.slice(0, -1)
+          : allMessages;
+      const history = priorTurnsFor(historyMessages);
+      chatStore.setInferring(true);
       // Default source from appMode so every guide bubble is tagged from day one.
       const resolvedSource: Source = source ?? (appMode.get() === 'online' ? 'ai-online' : 'ai-offline');
-      const guideId = messages.addGuidePlaceholder(location, resolvedSource);
+      const guideId = chatStore.addGuidePlaceholder(location, resolvedSource);
       onScroll?.();
 
       const chunker = new SpeechChunker((segment) => {
@@ -122,10 +131,10 @@ export function useGuideStream({ messages, speakResponsesRef, topicRef, onScroll
                 // The source attribution lives in the bubble's source pill;
                 // don't repeat it as a "From Wikipedia:" prefix in the body.
                 const body = decision.sourceFirstText ?? '';
-                messages.appendGuideToken(guideId, body);
-                messages.finalizeGuideMessage(guideId, Date.now() - start);
-                messages.setGuideSource(guideId, 'wikipedia');
-                setInferring(false);
+                chatStore.appendGuideToken(guideId, body);
+                chatStore.finalizeGuideMessage(guideId, Date.now() - start);
+                chatStore.setGuideSource(guideId, 'wikipedia');
+                chatStore.setInferring(false);
                 onScroll?.();
                 resolve();
                 return;
@@ -135,7 +144,7 @@ export function useGuideStream({ messages, speakResponsesRef, topicRef, onScroll
                 // Inject Wikipedia extract as reference, run LLM.
                 const callbacks = {
                   onToken: (delta: string) => {
-                    messages.appendGuideToken(guideId, delta);
+                    chatStore.appendGuideToken(guideId, delta);
                     chunker.push(delta);
                     deltaCount += 1;
                     onScroll?.();
@@ -143,18 +152,18 @@ export function useGuideStream({ messages, speakResponsesRef, topicRef, onScroll
                   onDone: () => {
                     chunker.flush();
                     const durationMs = Date.now() - start;
-                    messages.finalizeGuideMessage(guideId, durationMs);
+                    chatStore.finalizeGuideMessage(guideId, durationMs);
                     devicePerf.recordStream(deltaCount, durationMs);
-                    messages.setGuideSource(guideId, 'wikipedia');
+                    chatStore.setGuideSource(guideId, 'wikipedia');
                     streamRef.current = null;
-                    setInferring(false);
+                    chatStore.setInferring(false);
                     onScroll?.();
                     resolve();
                   },
                   onError: (message: string) => {
-                    messages.setGuideError(guideId, message);
+                    chatStore.setGuideError(guideId, message);
                     streamRef.current = null;
-                    setInferring(false);
+                    chatStore.setInferring(false);
                     onScroll?.();
                     resolve();
                   },
@@ -178,7 +187,7 @@ export function useGuideStream({ messages, speakResponsesRef, topicRef, onScroll
             // ── Offline or image intent: existing behavior ────────────────────────────
             const callbacks = {
               onToken: (delta: string) => {
-                messages.appendGuideToken(guideId, delta);
+                chatStore.appendGuideToken(guideId, delta);
                 chunker.push(delta);
                 deltaCount += 1;
                 onScroll?.();
@@ -186,17 +195,17 @@ export function useGuideStream({ messages, speakResponsesRef, topicRef, onScroll
               onDone: () => {
                 chunker.flush();
                 const durationMs = Date.now() - start;
-                messages.finalizeGuideMessage(guideId, durationMs);
+                chatStore.finalizeGuideMessage(guideId, durationMs);
                 devicePerf.recordStream(deltaCount, durationMs);
                 streamRef.current = null;
-                setInferring(false);
+                chatStore.setInferring(false);
                 onScroll?.();
                 resolve();
               },
               onError: (message: string) => {
-                messages.setGuideError(guideId, message);
+                chatStore.setGuideError(guideId, message);
                 streamRef.current = null;
-                setInferring(false);
+                chatStore.setInferring(false);
                 onScroll?.();
                 resolve();
               },
@@ -221,15 +230,15 @@ export function useGuideStream({ messages, speakResponsesRef, topicRef, onScroll
             streamRef.current = handle;
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            messages.setGuideError(guideId, message);
+            chatStore.setGuideError(guideId, message);
             streamRef.current = null;
-            setInferring(false);
+            chatStore.setInferring(false);
             resolve();
           }
         })();
       });
     },
-    [messages, onScroll, speakResponsesRef, topicRef]
+    [onScroll, speakResponsesRef, topicRef]
   );
 
   return { inferring, stream, stop };
