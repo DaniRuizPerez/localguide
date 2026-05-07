@@ -64,10 +64,15 @@ export default function MapScreen({ navigation }: Props) {
   const programmaticMoveRef = useRef(false);
   const lastFitRadiusRef = useRef<number | null>(null);
   const didInitialFitRef = useRef(false);
+  const [mapReady, setMapReady] = useState(false);
 
   // Fit camera to markers + user position whenever markers arrive or radius changes.
+  // Gated on mapReady because Android react-native-maps drops fitToCoordinates
+  // calls that arrive before onMapReady; without the gate the camera silently
+  // stays at initialRegion (~1 km around the user) even with 15 markers loaded.
   useEffect(() => {
     if (!gps) return;
+    if (!mapReady) return;
 
     const isFirstArrival = !didInitialFitRef.current && visibleMarkers.length > 0;
     const radiusChanged = lastFitRadiusRef.current !== null && lastFitRadiusRef.current !== radiusMeters;
@@ -101,7 +106,7 @@ export default function MapScreen({ navigation }: Props) {
 
     didInitialFitRef.current = true;
     lastFitRadiusRef.current = radiusMeters;
-  }, [visibleMarkers, radiusMeters, gps]);
+  }, [visibleMarkers, radiusMeters, gps, mapReady]);
 
   // Record every GPS fix into the breadcrumb buffer. The service itself
   // handles distance de-duplication so fast callbacks don't thrash storage.
@@ -178,6 +183,7 @@ export default function MapScreen({ navigation }: Props) {
         showsCompass={false}
         toolbarEnabled={false}
         customMapStyle={softTactileMapStyle}
+        onMapReady={() => setMapReady(true)}
         onRegionChangeComplete={(_region, details) => {
           if (programmaticMoveRef.current) {
             programmaticMoveRef.current = false;
@@ -216,8 +222,10 @@ export default function MapScreen({ navigation }: Props) {
               coordinate={{ latitude: p.latitude, longitude: p.longitude }}
               anchor={{ x: 0.5, y: 0.5 }}
               onPress={() => setCompassTarget(p)}
+              tracksViewChanges={isSelected}
             >
               <View style={styles.poiMarkerWrap}>
+                <View style={isPrimary ? styles.poiDotPrimary : styles.poiDotSecondary} />
                 {isSelected && (
                   <View style={styles.poiCallout}>
                     <Text style={styles.poiCalloutText} numberOfLines={1}>
@@ -225,7 +233,6 @@ export default function MapScreen({ navigation }: Props) {
                     </Text>
                   </View>
                 )}
-                <View style={isPrimary ? styles.poiDotPrimary : styles.poiDotSecondary} />
               </View>
             </Marker>
           );
@@ -428,8 +435,15 @@ const styles = StyleSheet.create({
     ...Shadows.pinDrop,
   },
   // ── New dot marker styles ────────────────────────────────────────────────
+  // Explicit size needed: react-native-maps on Android measures custom Marker
+  // children at first render and renders an empty bitmap if the wrap reports
+  // 0×0. The dot inside is positioned absolutely so the wrap's intrinsic size
+  // doesn't depend on its child's measured layout.
   poiMarkerWrap: {
+    width: 18,
+    height: 18,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   poiDotPrimary: {
     width: 14,
@@ -450,13 +464,15 @@ const styles = StyleSheet.create({
     ...Shadows.pinDrop,
   },
   poiCallout: {
+    position: 'absolute',
+    bottom: 22,
     backgroundColor: Colors.surface,
     borderRadius: Radii.sm,
     borderWidth: 1,
     borderColor: Colors.borderLight,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    marginBottom: 4,
+    minWidth: 80,
     maxWidth: 140,
     ...Shadows.pinDrop,
   },
