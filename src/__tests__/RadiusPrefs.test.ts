@@ -1,0 +1,84 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { radiusPrefs } from '../services/RadiusPrefs';
+
+describe('radiusPrefs', () => {
+  beforeEach(async () => {
+    radiusPrefs.__resetForTest();
+    await AsyncStorage.clear();
+  });
+
+  it('defaults radiusMeters to 5000', () => {
+    expect(radiusPrefs.get().radiusMeters).toBe(5000);
+  });
+
+  it('set(10000) persists + notifies subscriber', async () => {
+    const listener = jest.fn();
+    radiusPrefs.subscribe(listener);
+    radiusPrefs.set(10000);
+
+    expect(radiusPrefs.get().radiusMeters).toBe(10000);
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ radiusMeters: 10000 }));
+
+    // Persistence round-trip: reset and re-hydrate from storage.
+    radiusPrefs.__resetForTest();
+    await radiusPrefs.hydrate();
+    expect(radiusPrefs.get().radiusMeters).toBe(10000);
+  });
+
+  it('does not notify when value is unchanged', () => {
+    const listener = jest.fn();
+    radiusPrefs.subscribe(listener);
+    radiusPrefs.set(5000); // already 5000 (default)
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('subscribe fires on set and unsubscribe stops firing', () => {
+    const listener = jest.fn();
+    const unsub = radiusPrefs.subscribe(listener);
+
+    radiusPrefs.set(1000);
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    unsub();
+    radiusPrefs.set(2000);
+    expect(listener).toHaveBeenCalledTimes(1); // still 1 — no extra call after unsub
+  });
+
+  it('rejects invalid value — store stays unchanged and no notification fires', () => {
+    const listener = jest.fn();
+    radiusPrefs.subscribe(listener);
+
+    radiusPrefs.set(3000 as number); // not in valid set
+    expect(radiusPrefs.get().radiusMeters).toBe(5000); // unchanged default
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('all valid values round-trip through AsyncStorage', async () => {
+    for (const valid of [1000, 2000, 5000, 10000]) {
+      radiusPrefs.__resetForTest();
+      await AsyncStorage.clear();
+
+      radiusPrefs.set(valid);
+      radiusPrefs.__resetForTest();
+      await radiusPrefs.hydrate();
+      expect(radiusPrefs.get().radiusMeters).toBe(valid);
+    }
+  });
+
+  it('hydrate() falls back to defaults on corrupt storage', async () => {
+    await AsyncStorage.setItem('@localguide/radius-prefs-v1', 'not-json{{');
+    radiusPrefs.__resetForTest();
+    await radiusPrefs.hydrate();
+    expect(radiusPrefs.get().radiusMeters).toBe(5000);
+  });
+
+  it('hydrate() falls back to defaults when stored radius is invalid', async () => {
+    await AsyncStorage.setItem(
+      '@localguide/radius-prefs-v1',
+      JSON.stringify({ radiusMeters: 9999 })
+    );
+    radiusPrefs.__resetForTest();
+    await radiusPrefs.hydrate();
+    expect(radiusPrefs.get().radiusMeters).toBe(5000);
+  });
+});
