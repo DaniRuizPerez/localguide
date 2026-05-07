@@ -37,13 +37,15 @@ jest.mock('../hooks/useAppMode', () => ({
 }));
 
 // Intercept POI fetches so tests are deterministic and don't hit the network.
-const mockFetchNearby = jest.fn();
+// MapScreen now uses useNearbyPois which calls fetchNearbyStreaming (not fetchNearby).
+const mockFetchNearbyStreaming = jest.fn();
 jest.mock('../services/PoiService', () => ({
   poiService: {
-    fetchNearby: (...args: unknown[]) => mockFetchNearby(...args),
-    fetchNearbyStreaming: jest.fn().mockResolvedValue([]),
+    fetchNearby: jest.fn().mockResolvedValue([]),
+    fetchNearbyStreaming: (...args: unknown[]) => mockFetchNearbyStreaming(...args),
     clearCache: jest.fn(),
   },
+  distanceMeters: jest.fn().mockReturnValue(300),
 }));
 
 import MapScreen from '../screens/MapScreen';
@@ -85,7 +87,7 @@ const offlinePoi = {
 describe('MapScreen', () => {
   beforeEach(() => {
     mockEffective = 'online';
-    mockFetchNearby.mockResolvedValue([onlinePoi]);
+    mockFetchNearbyStreaming.mockResolvedValue([onlinePoi]);
   });
 
   afterEach(() => {
@@ -129,61 +131,64 @@ describe('MapScreen', () => {
     await act(async () => {});
   });
 
-  // The core regression guard: verify the offline flag is passed correctly.
-  // Marker rendering is not assertable here since MapView falls back to the
-  // "Map unavailable" view when EXPO_PUBLIC_GOOGLE_MAPS_API_KEY is unset in CI.
-  // The fetchNearby call-arg assertions are what matter for A10.
+  // The core regression guard: verify the offline flag is passed correctly to
+  // fetchNearbyStreaming (used by useNearbyPois). MapScreen now delegates POI
+  // fetching to useNearbyPois + useRankedPois instead of calling fetchNearby
+  // directly, so these tests assert against fetchNearbyStreaming.
 
-  it('online mode: calls fetchNearby with offline=false', async () => {
+  it('online mode: fetches POIs with offline=false via useNearbyPois', async () => {
     mockEffective = 'online';
-    mockFetchNearby.mockResolvedValue([onlinePoi]);
+    mockFetchNearbyStreaming.mockResolvedValue([onlinePoi]);
 
     render(<MapScreen navigation={mockNavigation} route={mockRoute} />);
 
     await waitFor(() => {
-      expect(mockFetchNearby).toHaveBeenCalledWith(
+      expect(mockFetchNearbyStreaming).toHaveBeenCalledWith(
         expect.any(Number),
         expect.any(Number),
-        2000,
-        6,
-        { offline: false }
+        expect.any(Number), // radiusMeters from useRadiusPref (default 5000)
+        500,               // wide candidate pool
+        expect.objectContaining({ offline: false }),
+        expect.any(Object)  // streaming callbacks
       );
     });
   });
 
   // Regression for A10: offline mode previously short-circuited to setPois([])
-  // and rendered an empty map. Now it delegates to fetchNearby({ offline: true })
+  // and rendered an empty map. Now it delegates to fetchNearbyStreaming({ offline: true })
   // which returns GeoNames hits with real coords.
-  it('offline mode: calls fetchNearby with offline=true (GeoNames path)', async () => {
+  it('offline mode: fetches POIs with offline=true (GeoNames path)', async () => {
     mockEffective = 'offline';
-    mockFetchNearby.mockResolvedValue([offlinePoi]);
+    mockFetchNearbyStreaming.mockResolvedValue([offlinePoi]);
 
     render(<MapScreen navigation={mockNavigation} route={mockRoute} />);
 
     await waitFor(() => {
-      expect(mockFetchNearby).toHaveBeenCalledWith(
+      expect(mockFetchNearbyStreaming).toHaveBeenCalledWith(
         expect.any(Number),
         expect.any(Number),
-        2000,
-        6,
-        { offline: true }
+        expect.any(Number), // radiusMeters from useRadiusPref (default 5000)
+        500,               // wide candidate pool
+        expect.objectContaining({ offline: true }),
+        expect.any(Object)  // streaming callbacks
       );
     });
   });
 
-  it('offline mode with empty GeoNames response: still calls fetchNearby with offline=true', async () => {
+  it('offline mode with empty GeoNames response: still fetches with offline=true', async () => {
     mockEffective = 'offline';
-    mockFetchNearby.mockResolvedValue([]);
+    mockFetchNearbyStreaming.mockResolvedValue([]);
 
     render(<MapScreen navigation={mockNavigation} route={mockRoute} />);
 
     await waitFor(() => {
-      expect(mockFetchNearby).toHaveBeenCalledWith(
+      expect(mockFetchNearbyStreaming).toHaveBeenCalledWith(
         expect.any(Number),
         expect.any(Number),
-        2000,
-        6,
-        { offline: true }
+        expect.any(Number),
+        500,
+        expect.objectContaining({ offline: true }),
+        expect.any(Object)
       );
     });
   });

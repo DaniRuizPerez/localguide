@@ -25,10 +25,9 @@ import { type GuideTopic, localGuideService } from '../services/LocalGuideServic
 import { filterPoisByTopics } from '../services/poiTopic';
 import { speechService } from '../services/SpeechService';
 import { guidePrefs } from '../services/GuidePrefs';
-import type { GPSContext } from '../services/InferenceService';
 import type { Poi } from '../services/PoiService';
-import { rankByInterestSync, rankByInterestOffline, rankByInterestOnline } from '../services/poiRanking';
-import { wikipediaSignals } from '../services/wikipediaSignals';
+import { useRankedPois } from '../hooks/useRankedPois';
+import { useRadiusPref } from '../hooks/useRadiusPref';
 import type { Message } from '../types/chat';
 import { Colors } from '../theme/colors';
 import { Radii, Type } from '../theme/tokens';
@@ -67,7 +66,7 @@ export default function ChatScreen(props: Props) {
     return initial ? [initial] : ['everything'];
   });
   const [speakResponses, setSpeakResponses] = useState(true);
-  const [poiRadiusMeters, setPoiRadiusMeters] = useState(5000);
+  const { radiusMeters: poiRadiusMeters, setRadiusMeters: setPoiRadiusMeters } = useRadiusPref();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [itineraryOpen, setItineraryOpen] = useState(false);
   const [quizOpen, setQuizOpen] = useState(false);
@@ -146,60 +145,16 @@ export default function ChatScreen(props: Props) {
   // empty when none of the local places match the picked topic.
   const filteredPois = useMemo(() => filterPoisByTopics(pois, topics), [pois, topics]);
 
-  // Two-stage ranking. Online mode paints with the cheap sync ranker first
-  // (length × distance-decay) so the user sees something within ~500ms of
-  // GPS lock, then re-ranks in place once Wikipedia signals (categories,
-  // pageviews, langlinks) land — typically 600–1500ms later. Offline mode
-  // uses the GeoNames feature-code ranker, no network, single paint.
-  // LLM-source POIs (offline only) carry placeholder coords; their distance
-  // shows 0 m by construction.
-  const syncRanked = useMemo(
-    () =>
-      effective === 'offline'
-        ? rankByInterestOffline(filteredPois, gps, { hiddenGems, radiusMeters: poiRadiusMeters })
-        : rankByInterestSync(filteredPois, gps, { hiddenGems, radiusMeters: poiRadiusMeters }),
-    // gps is intentionally split into primitive deps because useLocation
-    // returns a fresh object reference on each render even when the
-    // underlying lat/lon haven't moved — depending on the object directly
-    // would re-paint endlessly. eslint-disable-next-line is honest about it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filteredPois, gps?.latitude, gps?.longitude, hiddenGems, effective, poiRadiusMeters]
-  );
+  // Two-stage ranking delegated to the shared hook. Online mode paints with
+  // the cheap sync ranker first, then re-ranks once Wikipedia signals land.
+  // Offline mode uses the GeoNames feature-code ranker, no network.
+  const { ranked, loading: rankLoading } = useRankedPois(filteredPois, gps, {
+    hiddenGems,
+    offline: effective === 'offline',
+    radiusMeters: poiRadiusMeters,
+  });
 
-  const [refinedPois, setRefinedPois] = useState<Poi[] | null>(null);
-  useEffect(() => {
-    // Reset on dep change so the sync sort shows while the new fetch runs.
-    setRefinedPois(null);
-    if (effective !== 'online' || filteredPois.length === 0) return;
-    const wikiPageIds = filteredPois
-      .filter((p) => p.source === 'wikipedia')
-      .map((p) => p.pageId);
-    if (wikiPageIds.length === 0) return;
-
-    const ctrl = new AbortController();
-    let cancelled = false;
-    wikipediaSignals
-      .fetchBatch(wikiPageIds, ctrl.signal)
-      .then((signals) => {
-        if (cancelled || signals.size === 0) return;
-        const refined = rankByInterestOnline(filteredPois, gps, signals, {
-          hiddenGems,
-          radiusMeters: poiRadiusMeters,
-        });
-        setRefinedPois(refined);
-      })
-      .catch(() => {
-        // Network failure — keep the sync paint.
-      });
-
-    return () => {
-      cancelled = true;
-      ctrl.abort();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredPois, gps?.latitude, gps?.longitude, hiddenGems, effective, poiRadiusMeters]);
-
-  const visiblePois = refinedPois ?? syncRanked;
+  const visiblePois = ranked;
 
   // Background quiz prefetch. Fires once nearby places have settled and the
   // location label is known; the prefetch itself uses priority='low' and
@@ -412,7 +367,7 @@ export default function ChatScreen(props: Props) {
           onNarratePoi={narratePoi}
           onChangeRadius={() => setSettingsOpen(true)}
           disabled={inferring}
-          loading={poisLoading}
+          loading={poisLoading || rankLoading}
           awaitingLocation={!gps && !manualLocation && (status === 'idle' || status === 'requesting')}
           locationDenied={!gps && !manualLocation && (status === 'denied' || status === 'error')}
         />

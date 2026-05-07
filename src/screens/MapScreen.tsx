@@ -5,10 +5,14 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useLocation } from '../hooks/useLocation';
 import { useAppMode } from '../hooks/useAppMode';
+import { useNearbyPois } from '../hooks/useNearbyPois';
+import { useRankedPois } from '../hooks/useRankedPois';
+import { useRadiusPref } from '../hooks/useRadiusPref';
 import { Colors } from '../theme/colors';
 import { Type, Radii, Shadows, Sizing, Spacing } from '../theme/tokens';
 import { softTactileMapStyle } from '../theme/mapStyle';
-import { poiService, type Poi } from '../services/PoiService';
+import { type Poi } from '../services/PoiService';
+import { guidePrefs } from '../services/GuidePrefs';
 import { SoftButton } from '../components/SoftButton';
 import { CompassArrow } from '../components/CompassArrow';
 import { TimelineModal } from '../components/TimelineModal';
@@ -33,12 +37,71 @@ export default function MapScreen({ navigation }: Props) {
   };
   const swipeBackHandlers = useEdgeSwipeBack(goBackToChat);
   const mapRef = useRef<MapView>(null);
-  const didInitialCenter = useRef(false);
-  const [pois, setPois] = useState<Poi[]>([]);
   const [compassTarget, setCompassTarget] = useState<Poi | null>(null);
   const [timelinePoi, setTimelinePoi] = useState<Poi | null>(null);
   const { effective } = useAppMode();
   const trail = useBreadcrumbTrail();
+
+  // ── Radius + hiddenGems prefs ─────────────────────────────────────────────
+  const { radiusMeters } = useRadiusPref();
+  const [hiddenGems, setHiddenGems] = useState<boolean>(guidePrefs.get().hiddenGems);
+  useEffect(() => guidePrefs.subscribe((p) => setHiddenGems(p.hiddenGems)), []);
+
+  const offline = effective === 'offline';
+
+  // ── POI pipeline: fetch → rank → filter LLM ──────────────────────────────
+  const { pois: rawPois } = useNearbyPois(gps, radiusMeters, {
+    hiddenGems,
+    offline,
+    skipLlmFill: !offline,
+  });
+  const { ranked } = useRankedPois(rawPois, gps, { hiddenGems, offline, radiusMeters });
+  // LLM POIs have placeholder coords (= user GPS); never show as map markers.
+  const visibleMarkers = ranked.filter((p) => p.source !== 'llm');
+
+  // ── Auto-fit camera ───────────────────────────────────────────────────────
+  const userPannedRef = useRef(false);
+  const programmaticMoveRef = useRef(false);
+  const lastFitRadiusRef = useRef<number | null>(null);
+  const didInitialFitRef = useRef(false);
+
+  // Fit camera to markers + user position whenever markers arrive or radius changes.
+  useEffect(() => {
+    if (!gps) return;
+
+    const isFirstArrival = !didInitialFitRef.current && visibleMarkers.length > 0;
+    const radiusChanged = lastFitRadiusRef.current !== null && lastFitRadiusRef.current !== radiusMeters;
+
+    if (visibleMarkers.length === 0) {
+      // Nothing to fit yet — if this is truly the first render, animate to GPS point.
+      if (!didInitialFitRef.current) {
+        programmaticMoveRef.current = true;
+        mapRef.current?.animateToRegion(buildRegion(gps), 600);
+      }
+      return;
+    }
+
+    if (!isFirstArrival && !radiusChanged) return;
+    if (radiusChanged && userPannedRef.current) {
+      // User has manually panned; respect their viewport even on radius change.
+      lastFitRadiusRef.current = radiusMeters;
+      return;
+    }
+
+    const coords = [
+      { latitude: gps.latitude, longitude: gps.longitude },
+      ...visibleMarkers.map((p) => ({ latitude: p.latitude, longitude: p.longitude })),
+    ];
+
+    programmaticMoveRef.current = true;
+    mapRef.current?.fitToCoordinates(coords, {
+      edgePadding: { top: 80, bottom: 280, left: 40, right: 40 },
+      animated: true,
+    });
+
+    didInitialFitRef.current = true;
+    lastFitRadiusRef.current = radiusMeters;
+  }, [visibleMarkers, radiusMeters, gps]);
 
   // Record every GPS fix into the breadcrumb buffer. The service itself
   // handles distance de-duplication so fast callbacks don't thrash storage.
@@ -47,30 +110,9 @@ export default function MapScreen({ navigation }: Props) {
     breadcrumbTrail.record(gps.latitude, gps.longitude);
   }, [gps]);
 
-  useEffect(() => {
-    if (!gps || didInitialCenter.current) return;
-    didInitialCenter.current = true;
-    mapRef.current?.animateToRegion(buildRegion(gps), 600);
-  }, [gps]);
-
-  // Fetch nearby POIs for the map pins + bottom sheet. Coarse grid-cell cache
-  // so tiny GPS jitter doesn't thrash the network. Offline mode uses the
-  // bundled GeoNames data via PoiService so the map still shows real pins.
-  useEffect(() => {
-    if (!gps) return;
-    let cancelled = false;
-    const offline = effective === 'offline';
-    poiService.fetchNearby(gps.latitude, gps.longitude, 2000, 6, { offline }).then((list) => {
-      if (cancelled) return;
-      setPois(list);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [gps && gps.latitude.toFixed(3), gps && gps.longitude.toFixed(3), effective]);
-
   const recenter = () => {
     if (!gps) return;
+    userPannedRef.current = false;
     mapRef.current?.animateToRegion(buildRegion(gps), 400);
   };
 
@@ -136,6 +178,16 @@ export default function MapScreen({ navigation }: Props) {
         showsCompass={false}
         toolbarEnabled={false}
         customMapStyle={softTactileMapStyle}
+        onRegionChangeComplete={(_region, details) => {
+          if (programmaticMoveRef.current) {
+            programmaticMoveRef.current = false;
+            return;
+          }
+          // isGesture is present in react-native-maps ≥1.x; fall back to
+          // treating all non-programmatic region changes as gestures.
+          const isGesture = (details as { isGesture?: boolean } | undefined)?.isGesture ?? true;
+          if (isGesture) userPannedRef.current = true;
+        }}
       >
         {trail.length >= 2 && (
           <Polyline
@@ -155,20 +207,29 @@ export default function MapScreen({ navigation }: Props) {
             </View>
           </Marker>
         )}
-        {pois.map((p) => (
-          <Marker
-            key={`${p.source}-${p.pageId}`}
-            coordinate={{ latitude: p.latitude, longitude: p.longitude }}
-            anchor={{ x: 0.5, y: 1 }}
-          >
-            <View style={styles.poiPin}>
-              <Text style={styles.poiPinLabel} numberOfLines={1}>
-                {p.title}
-              </Text>
-              <View style={styles.poiPinDot} />
-            </View>
-          </Marker>
-        ))}
+        {visibleMarkers.map((p, idx) => {
+          const isPrimary = idx < 3;
+          const isSelected = compassTarget?.pageId === p.pageId;
+          return (
+            <Marker
+              key={`${p.source}-${p.pageId}`}
+              coordinate={{ latitude: p.latitude, longitude: p.longitude }}
+              anchor={{ x: 0.5, y: 0.5 }}
+              onPress={() => setCompassTarget(p)}
+            >
+              <View style={styles.poiMarkerWrap}>
+                {isSelected && (
+                  <View style={styles.poiCallout}>
+                    <Text style={styles.poiCalloutText} numberOfLines={1}>
+                      {p.title}
+                    </Text>
+                  </View>
+                )}
+                <View style={isPrimary ? styles.poiDotPrimary : styles.poiDotSecondary} />
+              </View>
+            </Marker>
+          );
+        })}
       </MapView>
 
       <View style={styles.overlayTop} pointerEvents="box-none">
@@ -217,8 +278,8 @@ export default function MapScreen({ navigation }: Props) {
         <View style={styles.sheetHandle} />
         <Text style={[Type.title, { color: Colors.text }]}>{t('map.aroundYou')}</Text>
         <Text style={[Type.hint, { color: Colors.textTertiary, marginTop: 2 }]}>
-          {pois.length > 0
-            ? t('map.stopsPickedOut', { count: pois.length })
+          {ranked.length > 0
+            ? t('map.stopsPickedOut', { count: ranked.length })
             : t('map.scanning')}
         </Text>
 
@@ -246,7 +307,7 @@ export default function MapScreen({ navigation }: Props) {
           contentContainerStyle={{ gap: 6 }}
           showsVerticalScrollIndicator={false}
         >
-          {pois.map((p) => {
+          {ranked.map((p) => {
             const isTarget = compassTarget?.pageId === p.pageId;
             const canGuide = p.source !== 'llm';
             return (
@@ -366,30 +427,44 @@ const styles = StyleSheet.create({
     borderColor: '#FFFFFF',
     ...Shadows.pinDrop,
   },
-  poiPin: {
+  // ── New dot marker styles ────────────────────────────────────────────────
+  poiMarkerWrap: {
     alignItems: 'center',
-    maxWidth: 140,
   },
-  poiPinLabel: {
-    ...Type.chip,
-    color: Colors.text,
-    backgroundColor: Colors.surface,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: Radii.sm,
-    borderWidth: 1,
-    borderColor: Colors.borderLight,
-    marginBottom: 2,
-    ...Shadows.pinDrop,
-  },
-  poiPinDot: {
+  poiDotPrimary: {
     width: 14,
     height: 14,
     borderRadius: 7,
     backgroundColor: Colors.primary,
-    borderWidth: 2.5,
+    borderWidth: 2,
     borderColor: '#FFFFFF',
+    ...Shadows.pinDrop,
   },
+  poiDotSecondary: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.textSecondary,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+    ...Shadows.pinDrop,
+  },
+  poiCallout: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radii.sm,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginBottom: 4,
+    maxWidth: 140,
+    ...Shadows.pinDrop,
+  },
+  poiCalloutText: {
+    ...Type.chip,
+    color: Colors.text,
+  },
+  // ── End new dot marker styles ───────────────────────────────────────────
   fab: {
     position: 'absolute',
     right: 16,
@@ -462,9 +537,10 @@ const styles = StyleSheet.create({
     borderRadius: Radii.md,
   },
   poiRowActive: {
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: Colors.primary,
     backgroundColor: 'rgba(232,132,92,0.08)',
+    borderRadius: Radii.md,
   },
   poiIcon: {
     width: 34,
