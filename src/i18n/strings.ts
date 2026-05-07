@@ -119,12 +119,6 @@ export const EN = {
     pickDuration: 'How long do you have to explore?',
     empty: 'Could not assemble a route — try a different duration or move to a more populated area.',
   },
-  timeline: {
-    title: 'Timeline',
-    generating: 'Building timeline…',
-    empty: 'Not enough reliable history for this spot offline — try again online for richer data.',
-    openButton: 'Timeline',
-  },
   quiz: {
     title: 'Local trivia',
     startButton: 'Start quiz',

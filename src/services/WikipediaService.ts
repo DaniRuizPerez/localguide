@@ -2,9 +2,10 @@
 // historical timelines. No API key needed; Wikipedia is free + public.
 // Matches the abort + timeout pattern from PoiService.
 
-import { type TimelineEvent } from './LocalGuideService';
-
-export { type TimelineEvent };
+export interface TimelineEvent {
+  year: string;
+  event: string;
+}
 
 export interface WikipediaSummary {
   title: string;

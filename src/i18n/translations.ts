@@ -98,7 +98,6 @@ const ES: Partials = {
     button: 'Planear mi día',
     generating: 'Planeando tu día…',
   },
-  timeline: { title: 'Cronología', generating: 'Construyendo cronología…' },
   quiz: {
     title: 'Trivia local',
     startButton: 'Empezar',
@@ -193,7 +192,6 @@ const FR: Partials = {
     button: 'Planifier ma journée',
     generating: 'Planification…',
   },
-  timeline: { title: 'Chronologie', generating: 'Construction de la chronologie…' },
   quiz: {
     title: 'Trivia locale',
     startButton: 'Commencer',

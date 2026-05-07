@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView, Animated, PanResponder, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView, Animated, PanResponder, Dimensions, KeyboardAvoidingView, Keyboard } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE, type Region, type PoiClickEvent } from 'react-native-maps';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
@@ -8,15 +8,19 @@ import { useAppMode } from '../hooks/useAppMode';
 import { useNearbyPois } from '../hooks/useNearbyPois';
 import { useRankedPois } from '../hooks/useRankedPois';
 import { useRadiusPref } from '../hooks/useRadiusPref';
+import { useChatMessages } from '../hooks/useChatMessages';
+import { useGuideStream } from '../hooks/useGuideStream';
 import { Colors } from '../theme/colors';
 import { Type, Radii, Shadows, Sizing, Spacing } from '../theme/tokens';
 import { softTactileMapStyle } from '../theme/mapStyle';
 import { type Poi, distanceMeters } from '../services/PoiService';
 import { wikipediaService } from '../services/WikipediaService';
 import { guidePrefs } from '../services/GuidePrefs';
+import { chatStore } from '../services/ChatStore';
 import { SoftButton } from '../components/SoftButton';
 import { CompassArrow } from '../components/CompassArrow';
-import { TimelineModal } from '../components/TimelineModal';
+import { MessageList } from '../components/MessageList';
+import { ChatInputBar } from '../components/ChatInputBar';
 import { OfflineNotice } from '../components/OfflineNotice';
 import { useEdgeSwipeBack } from '../components/EdgeSwipeBack';
 import { breadcrumbTrail } from '../services/BreadcrumbTrail';
@@ -59,9 +63,43 @@ export default function MapScreen({ navigation }: Props) {
   const swipeBackHandlers = useEdgeSwipeBack(goBackToChat);
   const mapRef = useRef<MapView>(null);
   const [compassTarget, setCompassTarget] = useState<Poi | null>(null);
-  const [timelinePoi, setTimelinePoi] = useState<Poi | null>(null);
+  const [tab, setTab] = useState<'places' | 'chat'>('places');
+  const [chatInput, setChatInput] = useState('');
   const { effective } = useAppMode();
   const trail = useBreadcrumbTrail();
+
+  // ── Chat hooks for the pullup Chat tab ───────────────────────────────────
+  const messages = useChatMessages();
+  const speakResponsesRef = useRef(true);
+  const topicRef = useRef<readonly ['everything']>(['everything']);
+  const listRef = useRef<any>(null);
+  const { inferring, stream, stop } = useGuideStream({
+    messages,
+    speakResponsesRef,
+    topicRef,
+    onScroll: () => listRef.current?.scrollToEnd({ animated: true }),
+  });
+
+  const handleSend = async () => {
+    const query = chatInput.trim();
+    if (!query || inferring) return;
+    setChatInput('');
+    if (!gps) return;
+    messages.addUserMessage(query);
+    await stream({ intent: 'text', query, location: gps });
+  };
+
+  const askAboutPoi = (p: Poi) => {
+    if (!gps) return;
+    if (inferring) stop();
+    chatStore.addUserMessage(`Tell me about ${p.title}`);
+    stream({ intent: 'text', query: `Tell me about ${p.title}.`, location: gps });
+    setTab('chat');
+    // Snap sheet to FULL
+    currentSnapRef.current = SNAP_FULL;
+    setAtFull(true);
+    Animated.spring(sheetY, { toValue: SNAP_FULL, useNativeDriver: false, tension: 80, friction: 12 }).start();
+  };
 
   // ── Radius + hiddenGems prefs ─────────────────────────────────────────────
   const { radiusMeters } = useRadiusPref();
@@ -240,6 +278,23 @@ export default function MapScreen({ navigation }: Props) {
     breadcrumbTrail.record(gps.latitude, gps.longitude);
   }, [gps]);
 
+  // Auto-snap sheet to FULL when the keyboard shows (chat input focused).
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      if (currentSnapRef.current !== SNAP_FULL) {
+        currentSnapRef.current = SNAP_FULL;
+        setAtFull(true);
+        Animated.spring(sheetY, {
+          toValue: SNAP_FULL,
+          useNativeDriver: false,
+          tension: 80,
+          friction: 12,
+        }).start();
+      }
+    });
+    return () => sub.remove();
+  }, [sheetY]);
+
   const recenter = () => {
     if (!gps) return;
     userPannedRef.current = false;
@@ -352,6 +407,9 @@ export default function MapScreen({ navigation }: Props) {
             >
               <View style={styles.poiMarkerWrap}>
                 <View style={isPrimary ? styles.poiDotPrimary : styles.poiDotSecondary} />
+                <View style={styles.poiLabelPill}>
+                  <Text style={styles.poiLabelText} numberOfLines={1}>{p.title}</Text>
+                </View>
                 {isSelected && (
                   <View style={styles.poiCallout}>
                     <Text style={styles.poiCalloutText} numberOfLines={1}>
@@ -421,91 +479,135 @@ export default function MapScreen({ navigation }: Props) {
           </Text>
         </View>
 
-        {compassTarget && gps && compassTarget.source !== 'llm' && (
+        {/* Tab switcher */}
+        <View style={styles.tabRow}>
           <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={() => setCompassTarget(null)}
-            accessibilityHint={t('compass.tapToClear')}
-            style={{ marginTop: 10 }}
+            style={[styles.tabBtn, tab === 'places' && styles.tabBtnActive]}
+            onPress={() => setTab('places')}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: tab === 'places' }}
           >
-            <CompassArrow
-              targetLat={compassTarget.latitude}
-              targetLon={compassTarget.longitude}
-              userLat={gps.latitude}
-              userLon={gps.longitude}
-              label={compassTarget.title}
-            />
+            <Text style={[styles.tabBtnText, tab === 'places' && styles.tabBtnTextActive]}>
+              Places
+            </Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabBtn, tab === 'chat' && styles.tabBtnActive]}
+            onPress={() => setTab('chat')}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: tab === 'chat' }}
+          >
+            <Text style={[styles.tabBtnText, tab === 'chat' && styles.tabBtnTextActive]}>
+              Chat
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {tab === 'places' && (
+          <>
+            {compassTarget && gps && compassTarget.source !== 'llm' && (
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={() => setCompassTarget(null)}
+                accessibilityHint={t('compass.tapToClear')}
+                style={{ marginTop: 10 }}
+              >
+                <CompassArrow
+                  targetLat={compassTarget.latitude}
+                  targetLon={compassTarget.longitude}
+                  userLat={gps.latitude}
+                  userLon={gps.longitude}
+                  label={compassTarget.title}
+                />
+              </TouchableOpacity>
+            )}
+
+            <ScrollView
+              // ScrollView only scrolls at the Full snap; at Half/Collapsed the
+              // user expects vertical drags to move the sheet, not the list.
+              // Without this guard a drag in the list area would scroll instead
+              // of pulling the sheet up. removeClippedSubviews trims off-screen
+              // rows on Android for a small render-cost win at Full.
+              scrollEnabled={atFull}
+              removeClippedSubviews
+              style={{ marginTop: 10, flex: 1 }}
+              contentContainerStyle={{ gap: 6, paddingBottom: 12 }}
+              showsVerticalScrollIndicator={atFull}
+            >
+              {ranked.map((p) => {
+                const isTarget = compassTarget?.pageId === p.pageId;
+                const canGuide = p.source !== 'llm';
+                return (
+                  <TouchableOpacity
+                    key={`row-${p.source}-${p.pageId}`}
+                    style={[styles.poiRow, isTarget && styles.poiRowActive]}
+                    onPress={() => {
+                      if (!canGuide) return;
+                      setCompassTarget(isTarget ? null : p);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('compass.guideMeTo', { label: p.title })}
+                    activeOpacity={canGuide ? 0.7 : 1}
+                  >
+                    <View style={styles.poiIcon}>
+                      <Text style={{ fontSize: 14 }}>{p.source === 'llm' ? '🧠' : '📍'}</Text>
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                      <Text style={[Type.poi, { color: Colors.text }]} numberOfLines={1}>
+                        {p.title}
+                      </Text>
+                      <Text style={[Type.hint, { color: Colors.textTertiary }]} numberOfLines={1}>
+                        {p.source === 'llm' ? t('map.aiSuggested') : t('map.wikipedia')}
+                      </Text>
+                    </View>
+                    <View style={styles.poiBadge}>
+                      <Text style={[Type.chip, { color: Colors.primary }]}>
+                        {p.distanceMeters < 1000
+                          ? `${Math.round(p.distanceMeters)} m`
+                          : `${(p.distanceMeters / 1000).toFixed(1)} km`}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.timelineIcon}
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        askAboutPoi(p);
+                      }}
+                      accessibilityLabel="Ask about this place"
+                      testID={`ask-${p.pageId}`}
+                    >
+                      <Text style={{ fontSize: 14 }}>💬</Text>
+                    </TouchableOpacity>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </>
         )}
 
-        <ScrollView
-          // ScrollView only scrolls at the Full snap; at Half/Collapsed the
-          // user expects vertical drags to move the sheet, not the list.
-          // Without this guard a drag in the list area would scroll instead
-          // of pulling the sheet up. removeClippedSubviews trims off-screen
-          // rows on Android for a small render-cost win at Full.
-          scrollEnabled={atFull}
-          removeClippedSubviews
-          style={{ marginTop: 10, flex: 1 }}
-          contentContainerStyle={{ gap: 6, paddingBottom: 12 }}
-          showsVerticalScrollIndicator={atFull}
-        >
-          {ranked.map((p) => {
-            const isTarget = compassTarget?.pageId === p.pageId;
-            const canGuide = p.source !== 'llm';
-            return (
-              <TouchableOpacity
-                key={`row-${p.source}-${p.pageId}`}
-                style={[styles.poiRow, isTarget && styles.poiRowActive]}
-                onPress={() => {
-                  if (!canGuide) return;
-                  setCompassTarget(isTarget ? null : p);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={t('compass.guideMeTo', { label: p.title })}
-                activeOpacity={canGuide ? 0.7 : 1}
-              >
-                <View style={styles.poiIcon}>
-                  <Text style={{ fontSize: 14 }}>{p.source === 'llm' ? '🧠' : '📍'}</Text>
-                </View>
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={[Type.poi, { color: Colors.text }]} numberOfLines={1}>
-                    {p.title}
-                  </Text>
-                  <Text style={[Type.hint, { color: Colors.textTertiary }]} numberOfLines={1}>
-                    {p.source === 'llm' ? t('map.aiSuggested') : t('map.wikipedia')}
-                  </Text>
-                </View>
-                <View style={styles.poiBadge}>
-                  <Text style={[Type.chip, { color: Colors.primary }]}>
-                    {p.distanceMeters < 1000
-                      ? `${Math.round(p.distanceMeters)} m`
-                      : `${(p.distanceMeters / 1000).toFixed(1)} km`}
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.timelineIcon}
-                  onPress={(e) => {
-                    e.stopPropagation?.();
-                    setTimelinePoi(p);
-                  }}
-                  accessibilityLabel={t('timeline.openButton')}
-                  testID={`timeline-${p.pageId}`}
-                >
-                  <Text style={{ fontSize: 14 }}>📜</Text>
-                </TouchableOpacity>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+        {tab === 'chat' && (
+          <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+            <MessageList
+              ref={listRef}
+              messages={messages.messages}
+              autoGuideEnabled={false}
+              onSendChip={() => {}}
+            />
+            {currentSnapRef.current !== SNAP_COLLAPSED && (
+              <ChatInputBar
+                input={chatInput}
+                onChangeInput={setChatInput}
+                onSend={handleSend}
+                onStop={stop}
+                inferring={inferring}
+                onCameraPress={() => {}}
+                onMicToggle={() => {}}
+                isListening={false}
+              />
+            )}
+          </KeyboardAvoidingView>
+        )}
       </Animated.View>
-
-      <TimelineModal
-        visible={timelinePoi != null}
-        onClose={() => setTimelinePoi(null)}
-        poiTitle={timelinePoi?.title ?? null}
-        location={gps}
-      />
     </View>
   );
 }
@@ -571,15 +673,11 @@ const styles = StyleSheet.create({
     ...Shadows.pinDrop,
   },
   // ── New dot marker styles ────────────────────────────────────────────────
-  // Explicit size needed: react-native-maps on Android measures custom Marker
-  // children at first render and renders an empty bitmap if the wrap reports
-  // 0×0. The dot inside is positioned absolutely so the wrap's intrinsic size
-  // doesn't depend on its child's measured layout.
+  // alignItems: 'center' centres dot + label. minWidth ensures Android
+  // react-native-maps measures a non-zero bitmap on first render.
   poiMarkerWrap: {
-    width: 18,
-    height: 18,
     alignItems: 'center',
-    justifyContent: 'center',
+    minWidth: 18,
   },
   poiDotPrimary: {
     width: 14,
@@ -599,6 +697,20 @@ const styles = StyleSheet.create({
     borderColor: '#FFFFFF',
     ...Shadows.pinDrop,
   },
+  poiLabelPill: {
+    marginTop: 2,
+    backgroundColor: Colors.surface,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    maxWidth: 100,
+  },
+  poiLabelText: {
+    fontSize: 9,
+    color: Colors.text,
+  },
   poiCallout: {
     position: 'absolute',
     bottom: 22,
@@ -610,6 +722,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     minWidth: 80,
     maxWidth: 140,
+    zIndex: 10,
     ...Shadows.pinDrop,
   },
   poiCalloutText: {
@@ -730,5 +843,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 6,
+  },
+  tabRow: {
+    flexDirection: 'row',
+    marginTop: 8,
+    borderRadius: Radii.md,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+  },
+  tabBtn: {
+    flex: 1,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.surface,
+  },
+  tabBtnActive: {
+    backgroundColor: Colors.primary,
+  },
+  tabBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  tabBtnTextActive: {
+    color: '#FFFFFF',
   },
 });
