@@ -303,9 +303,31 @@ export default function ChatScreen(props: Props) {
   const showTyping = inferring && (lastMsg?.role !== 'guide' || !lastMsg.text);
   const hasMessages = messages.messages.length > 0;
 
+  // viewHome lets the user return to the Home cards without clearing chat
+  // history — chat is now persisted to AsyncStorage, so wiping it on every
+  // "back" tap would surprise users who want to keep their conversation.
+  // Setting viewHome=true overrides hasMessages and forces the HomeState
+  // render. Any new send action flips it back to false so the user sees
+  // their reply land.
+  const [viewHome, setViewHome] = useState(false);
+  const showHome = !hasMessages || viewHome;
+
+  // When a new message lands and the user was on Home, snap back to chat
+  // view so they can see it. (Last user message id is the trigger — guide
+  // tokens streaming after that don't re-toggle.)
+  const lastUserIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const lastUser = [...messages.messages].reverse().find((m) => m.role === 'user');
+    if (lastUser && lastUser.id !== lastUserIdRef.current) {
+      lastUserIdRef.current = lastUser.id;
+      if (lastUserIdRef.current !== null) setViewHome(false);
+    }
+  }, [messages.messages]);
+
   const backToHome = useCallback(() => {
     if (inferring) stop();
     speechService.stop();
+    setViewHome(true);
   }, [inferring, stop]);
 
   const swipeBackHandlers = useEdgeSwipeBack(backToHome);
@@ -337,7 +359,7 @@ export default function ChatScreen(props: Props) {
         manualLocation={manualLocation}
         onSettingsPress={() => setSettingsOpen(true)}
         onConnectionPillPress={() => setHowShouldIOpen(true)}
-        onBack={hasMessages ? backToHome : undefined}
+        onBack={hasMessages && !viewHome ? backToHome : undefined}
       />
 
       <OfflineNotice />
@@ -350,7 +372,7 @@ export default function ChatScreen(props: Props) {
         />
       )}
 
-      {hasMessages ? (
+      {hasMessages && !showHome ? (
         <>
           <MessageList
             ref={listRef}

@@ -1,14 +1,18 @@
-import { Animated, StyleSheet } from 'react-native';
+import { Animated, StyleSheet, Text } from 'react-native';
 import { useEffect, useRef } from 'react';
 import { useAppMode } from '../hooks/useAppMode';
 import { Colors } from '../theme/colors';
+import { t } from '../i18n';
 
 /**
- * Persistent visual signal of offline mode. Decorative — not interactive,
- * not announced by screen readers (which already get the OfflineNotice
- * banner's accessibilityRole="alert"). Renders once at root in App.tsx;
- * absolute-positioned + pointerEvents="none" so it sits above all screens
- * without intercepting taps.
+ * Persistent visual signal of offline mode. A 16 px amber bar with an
+ * "OFFLINE" label centered, fading in/out over 200 ms when the effective
+ * mode flips. Decorative + non-interactive — pointerEvents="none". The
+ * label is announced as `accessible={false}` because OfflineNotice's
+ * banner already carries an accessibilityRole="alert".
+ *
+ * Mounted once at root (App.tsx) so it sits above every screen via
+ * absolute positioning + zIndex 1000.
  */
 export function ModeStripe() {
   const { effective } = useAppMode();
@@ -27,7 +31,11 @@ export function ModeStripe() {
       pointerEvents="none"
       accessible={false}
       style={[styles.stripe, { opacity }]}
-    />
+    >
+      <Text style={styles.label} accessible={false}>
+        {t('mode.offline').toUpperCase()}
+      </Text>
+    </Animated.View>
   );
 }
 
@@ -37,10 +45,16 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: 8,
-    // Colors.warning (#E8A84E light / #F0B85E dark) — confirmed present in
-    // src/theme/colors.ts in both LIGHT_PALETTE and DARK_PALETTE.
+    height: 16,
     backgroundColor: Colors.warning,
     zIndex: 1000,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  label: {
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: '#5C3408',
   },
 });
