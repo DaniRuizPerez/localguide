@@ -502,19 +502,24 @@ export default function MapScreen({ navigation }: Props) {
               }}
               tracksViewChanges={isSelected}
             >
-              <View style={[styles.poiMarkerWrap, isSelected && styles.poiMarkerWrapSelected, offline && styles.poiDotOffline]}>
+              {/*
+                IMPORTANT: marker child dimensions must stay CONSTANT across
+                selected/unselected re-renders. react-native-maps under Fabric
+                throws a ClassCastException in MarkerManager.onLayoutChange
+                when a custom marker's size changes mid-flight (it tries to
+                cast the parent ReactViewGroup to MapMarker and fails). So
+                selection is signalled via border/text colour ONLY — wrap +
+                bubble + label slot all keep fixed sizes.
+              */}
+              <View style={[styles.poiMarkerWrap, offline && styles.poiDotOffline]}>
                 <View style={[styles.poiEmojiBubble, isSelected && styles.poiEmojiBubbleSelected]}>
-                  <Text style={[styles.poiEmoji, isSelected && styles.poiEmojiSelected]}>{poiEmojiFor(p)}</Text>
+                  <Text style={styles.poiEmoji}>{poiEmojiFor(p)}</Text>
                 </View>
-                {isSelected ? (
-                  <View style={styles.poiCallout}>
-                    <Text style={styles.poiCalloutText} numberOfLines={1}>{p.title}</Text>
-                  </View>
-                ) : (
-                  <View style={styles.poiLabelPill}>
-                    <Text style={styles.poiLabelText} numberOfLines={1}>{p.title}</Text>
-                  </View>
-                )}
+                <View style={[styles.poiLabelPill, isSelected && styles.poiLabelPillSelected]}>
+                  <Text style={[styles.poiLabelText, isSelected && styles.poiLabelTextSelected]} numberOfLines={1}>
+                    {p.title}
+                  </Text>
+                </View>
               </View>
             </Marker>
           );
@@ -781,14 +786,12 @@ const styles = StyleSheet.create({
   // ── Pin marker styles ────────────────────────────────────────────────────
   // alignItems: 'center' centres pin + label. minWidth ensures Android
   // react-native-maps measures a non-zero bitmap on first render.
+  // Marker dimensions stay CONSTANT across selected/unselected — see the
+  // long comment at the marker JSX. Fabric's MarkerManager.onLayoutChange
+  // crashes if the wrap size changes between renders.
   poiMarkerWrap: {
     alignItems: 'center',
-    minWidth: 28,
-  },
-  poiMarkerWrapSelected: {
-    // Selected marker uses a larger emoji bubble; subtle elevation lifts
-    // it above neighbours.
-    zIndex: 1,
+    width: 32,
   },
   // Emoji bubble matches the home-screen PoiRow icon style — a soft round
   // disc with the category emoji centered. Same visual vocabulary on both
@@ -803,17 +806,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Selection signal: thicker primary-colour border. NO size change.
   poiEmojiBubbleSelected: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 2,
+    borderWidth: 2.5,
+    borderColor: Colors.primaryDark,
   },
   poiEmoji: {
     fontSize: 14,
-  },
-  poiEmojiSelected: {
-    fontSize: 18,
   },
   poiDotOffline: {
     opacity: 0.65,
@@ -828,9 +827,19 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     maxWidth: 100,
   },
+  // Selection: stronger border + tinted fill. Same dimensions, no layout change.
+  poiLabelPillSelected: {
+    borderColor: Colors.primary,
+    borderWidth: 1.5,
+    backgroundColor: Colors.warningLight,
+  },
   poiLabelText: {
     fontSize: 11,
     color: Colors.text,
+  },
+  poiLabelTextSelected: {
+    color: Colors.text,
+    fontWeight: '700',
   },
   poiCallout: {
     position: 'absolute',
