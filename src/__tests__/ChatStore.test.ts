@@ -57,6 +57,22 @@ describe('chatStore', () => {
     expect(msg.durationMs).toBe(250);
   });
 
+  it('replaceGuideText overwrites the bubble body in one shot', () => {
+    const id = chatStore.addGuidePlaceholder('Paris');
+    chatStore.appendGuideToken(id, 'loop loop loop ');
+    chatStore.replaceGuideText(id, 'cleaned\n\n_(stopped — got stuck repeating)_');
+    expect(chatStore.get().messages[0].text).toBe('cleaned\n\n_(stopped — got stuck repeating)_');
+  });
+
+  it('replaceGuideText on a non-existent id is a no-op', () => {
+    chatStore.addGuidePlaceholder('Paris');
+    const fired: number[] = [];
+    const unsub = chatStore.subscribe((s) => fired.push(s.messages.length));
+    chatStore.replaceGuideText('nope', 'x');
+    unsub();
+    expect(fired).toEqual([]);
+  });
+
   it('subscribe fires for every successful token append', () => {
     const id = chatStore.addGuidePlaceholder('Paris');
     const fires: string[] = [];

@@ -8,6 +8,7 @@ import { chatStore } from '../services/ChatStore';
 import { appMode } from '../services/AppMode';
 import type { Source } from '../components/SourceBadge';
 import { devicePerf } from '../services/DevicePerf';
+import { StreamPostfilter, trailerFor } from '../services/responsePostfilter';
 
 // W2 imports — OnlineGuideService routing
 import { onlineGuideService } from '../services/OnlineGuideService';
@@ -107,8 +108,54 @@ export function useGuideStream({ speakResponsesRef, topicRef, onScroll }: GuideS
       const chunker = new SpeechChunker((segment) => {
         if (speakResponsesRef.current) speechService.enqueue(segment);
       });
+      const postfilter = new StreamPostfilter();
+      // Race guard: streamHandle.abort() is best-effort on the native side and
+      // one or two onToken events can land after we asked it to stop. Without
+      // this we'd double-finalize and re-append junk to a bubble we already
+      // cleaned up.
+      let aborted = false;
       const start = Date.now();
       let deltaCount = 0;
+
+      // Shared by both onToken sites (RAG path + offline/image path). When the
+      // postfilter trips, replace the bubble body with the cleaned tail + a
+      // trailer, stop TTS, and finalise. Returns true if aborted (caller should
+      // bail out of the rest of its onToken handler).
+      const handleAbortIfNeeded = (
+        guideId: string,
+        delta: string,
+        onDoneExtra?: () => void,
+      ): boolean => {
+        if (aborted) return true;
+        const reason = postfilter.pushDelta(delta);
+        if (reason === 'ok') return false;
+        aborted = true;
+        streamRef.current?.abort();
+        streamRef.current = null;
+        chunker.cancel();
+        speechService.stop();
+        const trailer = trailerFor(reason);
+        const cleaned = postfilter.getCleanedText();
+        const body = trailer ? `${cleaned}\n\n${trailer}` : cleaned;
+        chatStore.replaceGuideText(guideId, body.trim());
+        const durationMs = Date.now() - start;
+        chatStore.finalizeGuideMessage(guideId, durationMs);
+        devicePerf.recordStream(deltaCount, durationMs);
+        onDoneExtra?.();
+        chatStore.setInferring(false);
+        onScroll?.();
+        return true;
+      };
+
+      // Run at end-of-stream (onDone) before finalize. Trims trailing duplicate
+      // sentences from natural-finish answers without surfacing any trailer.
+      const applyFinalizeTrim = (guideId: string): void => {
+        if (aborted) return;
+        const { cleanedText, trimmedReason } = postfilter.finalize();
+        if (trimmedReason !== null) {
+          chatStore.replaceGuideText(guideId, cleanedText);
+        }
+      };
 
       return new Promise<void>((resolve) => {
         (async () => {
@@ -144,13 +191,21 @@ export function useGuideStream({ speakResponsesRef, topicRef, onScroll }: GuideS
                 // Inject Wikipedia extract as reference, run LLM.
                 const callbacks = {
                   onToken: (delta: string) => {
+                    if (handleAbortIfNeeded(guideId, delta, () => {
+                      chatStore.setGuideSource(guideId, 'wikipedia');
+                    })) {
+                      resolve();
+                      return;
+                    }
                     chatStore.appendGuideToken(guideId, delta);
                     chunker.push(delta);
                     deltaCount += 1;
                     onScroll?.();
                   },
                   onDone: () => {
+                    if (aborted) return;
                     chunker.flush();
+                    applyFinalizeTrim(guideId);
                     const durationMs = Date.now() - start;
                     chatStore.finalizeGuideMessage(guideId, durationMs);
                     devicePerf.recordStream(deltaCount, durationMs);
@@ -161,6 +216,7 @@ export function useGuideStream({ speakResponsesRef, topicRef, onScroll }: GuideS
                     resolve();
                   },
                   onError: (message: string) => {
+                    if (aborted) return;
                     chatStore.setGuideError(guideId, message);
                     streamRef.current = null;
                     chatStore.setInferring(false);
@@ -187,13 +243,19 @@ export function useGuideStream({ speakResponsesRef, topicRef, onScroll }: GuideS
             // ── Offline or image intent: existing behavior ────────────────────────────
             const callbacks = {
               onToken: (delta: string) => {
+                if (handleAbortIfNeeded(guideId, delta)) {
+                  resolve();
+                  return;
+                }
                 chatStore.appendGuideToken(guideId, delta);
                 chunker.push(delta);
                 deltaCount += 1;
                 onScroll?.();
               },
               onDone: () => {
+                if (aborted) return;
                 chunker.flush();
+                applyFinalizeTrim(guideId);
                 const durationMs = Date.now() - start;
                 chatStore.finalizeGuideMessage(guideId, durationMs);
                 devicePerf.recordStream(deltaCount, durationMs);
@@ -203,6 +265,7 @@ export function useGuideStream({ speakResponsesRef, topicRef, onScroll }: GuideS
                 resolve();
               },
               onError: (message: string) => {
+                if (aborted) return;
                 chatStore.setGuideError(guideId, message);
                 streamRef.current = null;
                 chatStore.setInferring(false);

@@ -118,6 +118,19 @@ export const chatStore = {
     if (changed) { notify(); schedulePersist(); }
   },
 
+  // Overwrites a streaming bubble's body in one shot. Used by the response
+  // postfilter when an abort needs to replace the in-flight tail (e.g. strip
+  // a repeating block and append a "(stopped — repeating)" trailer).
+  replaceGuideText(id: string, fullText: string): void {
+    let changed = false;
+    messages = messages.map((m) => {
+      if (m.id !== id) return m;
+      changed = true;
+      return { ...m, text: fullText };
+    });
+    if (changed) { notify(); schedulePersist(); }
+  },
+
   finalizeGuideMessage(id: string, durationMs?: number): void {
     let changed = false;
     messages = messages.map((m) => {

@@ -41,6 +41,13 @@ export class SpeechChunker {
     this.buffer = '';
   }
 
+  // Drop any buffered text without emitting a final segment. Used by the
+  // response postfilter when it aborts a stream — we don't want TTS to read
+  // out the partial tail or the trailing repeat block.
+  cancel(): void {
+    this.buffer = '';
+  }
+
   private drain(): void {
     // Emit complete sentences greedily. The first segment only fires once
     // we have `minFirstChars` of buffered text so TTS isn't kicked off by a
