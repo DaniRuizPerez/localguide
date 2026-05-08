@@ -212,6 +212,23 @@ export const EN = {
     food: 'Food',
     culture: 'Culture',
   },
+  welcome: {
+    slide1Emoji: '👋',
+    slide1Title: 'Welcome',
+    slide1Body: 'Ask any question about places near you. Tap the mic to use your voice.',
+    slide2Emoji: '📍',
+    slide2Title: 'Your data stays here',
+    slide2Body: 'Your location, voice, and photos are processed on this device. Nothing is sent to a server.',
+    slide3Emoji: '💬',
+    slide3Title: 'Tap a place to learn its story',
+    slide3Body: "On the map, tap any pin or label and ask 'tell me about this'.",
+    slide4Emoji: '🔌',
+    slide4Title: 'Works wherever you go',
+    slide4Body: 'After this download, the AI runs entirely on your phone. Use it on a flight, in a tunnel, or in another country.',
+    next: 'Next',
+    gotIt: 'Got it',
+    skip: 'Skip',
+  },
 } as const;
 
 export type StringKey = keyof typeof EN;

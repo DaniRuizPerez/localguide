@@ -25,6 +25,7 @@ import { networkStatus } from './src/services/NetworkStatus';
 import { breadcrumbTrail } from './src/services/BreadcrumbTrail';
 import { visitedStore } from './src/services/VisitedStore';
 import { speechBackgroundKeeper } from './src/services/SpeechBackgroundKeeper';
+import { WelcomeTour } from './src/components/WelcomeTour';
 
 type AppState = 'checking' | 'needs_download' | 'warming_up' | 'ready';
 
@@ -171,6 +172,10 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AppNavigator initialTopic={topics.find((t) => t !== 'everything')} />
+      {/* One-time welcome tour — rendered as an absolute overlay above the nav.
+          WelcomeTour manages its own AsyncStorage check internally and returns
+          null when the tour has already been seen, so no extra state is needed. */}
+      <WelcomeTour onDismiss={() => {}} />
       <StatusBar style="dark" />
     </SafeAreaProvider>
   );

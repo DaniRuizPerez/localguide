@@ -13,6 +13,19 @@ type Partials = {
 };
 
 const ES: Partials = {
+  welcome: {
+    slide1Title: 'Bienvenido',
+    slide1Body: 'Haz cualquier pregunta sobre los lugares cercanos. Toca el micrófono para usar tu voz.',
+    slide2Title: 'Tus datos se quedan aquí',
+    slide2Body: 'Tu ubicación, voz y fotos se procesan en este dispositivo. Nada se envía a un servidor.',
+    slide3Title: 'Toca un lugar para conocer su historia',
+    slide3Body: "En el mapa, toca cualquier pin o etiqueta y pregunta '¿qué me cuentas de esto?'.",
+    slide4Title: 'Funciona donde vayas',
+    slide4Body: 'Tras esta descarga, la IA funciona completamente en tu teléfono. Úsala en un avión, en un túnel o en otro país.',
+    next: 'Siguiente',
+    gotIt: 'Entendido',
+    skip: 'Omitir',
+  },
   mode: {
     // Ticket 3 — "How should I answer?" sheet. English fallbacks until translated.
     howShouldIAnswerTitle: 'How should I answer?',
@@ -123,6 +136,19 @@ const ES: Partials = {
 };
 
 const FR: Partials = {
+  welcome: {
+    slide1Title: 'Bienvenue',
+    slide1Body: "Pose n'importe quelle question sur les lieux proches de toi. Appuie sur le micro pour utiliser ta voix.",
+    slide2Title: 'Tes données restent ici',
+    slide2Body: "Ta position, ta voix et tes photos sont traitées sur cet appareil. Rien n'est envoyé à un serveur.",
+    slide3Title: 'Appuie sur un lieu pour découvrir son histoire',
+    slide3Body: "Sur la carte, appuie sur un marqueur ou une étiquette et demande 'parle-moi de ça'.",
+    slide4Title: 'Fonctionne partout où tu vas',
+    slide4Body: "Après ce téléchargement, l'IA tourne entièrement sur ton téléphone. Utilise-la dans un avion, dans un tunnel ou à l'étranger.",
+    next: 'Suivant',
+    gotIt: 'Compris',
+    skip: 'Passer',
+  },
   app: {
     ready: 'Quand tu veux',
     warmupTitle: 'Préparation de ton guide…',
@@ -223,6 +249,19 @@ const FR: Partials = {
 };
 
 const DE: Partials = {
+  welcome: {
+    slide1Title: 'Willkommen',
+    slide1Body: 'Stell jede Frage über Orte in deiner Nähe. Tippe auf das Mikrofon, um deine Stimme zu nutzen.',
+    slide2Title: 'Deine Daten bleiben hier',
+    slide2Body: 'Dein Standort, deine Stimme und deine Fotos werden auf diesem Gerät verarbeitet. Nichts wird an einen Server gesendet.',
+    slide3Title: 'Tippe auf einen Ort, um seine Geschichte zu erfahren',
+    slide3Body: "Tippe auf der Karte auf eine Markierung oder ein Etikett und frage 'erzähl mir davon'.",
+    slide4Title: 'Funktioniert überall',
+    slide4Body: 'Nach diesem Download läuft die KI vollständig auf deinem Telefon. Nutze sie im Flugzeug, im Tunnel oder in einem anderen Land.',
+    next: 'Weiter',
+    gotIt: 'Verstanden',
+    skip: 'Überspringen',
+  },
   mode: {
     // Ticket 3 — "How should I answer?" sheet. English fallbacks until translated.
     howShouldIAnswerTitle: 'How should I answer?',
@@ -306,6 +345,19 @@ const DE: Partials = {
 };
 
 const IT: Partials = {
+  welcome: {
+    slide1Title: 'Benvenuto',
+    slide1Body: 'Fai qualsiasi domanda sui luoghi vicino a te. Tocca il microfono per usare la voce.',
+    slide2Title: 'I tuoi dati rimangono qui',
+    slide2Body: 'La tua posizione, voce e foto vengono elaborate su questo dispositivo. Niente viene inviato a un server.',
+    slide3Title: 'Tocca un luogo per conoscere la sua storia',
+    slide3Body: "Sulla mappa, tocca un pin o un'etichetta e chiedi 'raccontami di questo'.",
+    slide4Title: 'Funziona ovunque tu vada',
+    slide4Body: "Dopo questo download, l'IA gira interamente sul tuo telefono. Usala su un aereo, in una galleria o in un altro paese.",
+    next: 'Avanti',
+    gotIt: 'Capito',
+    skip: 'Salta',
+  },
   nav: { chat: 'Chat', map: 'Mappa' },
   chat: {
     placeholder: 'Cosa c’è vicino a te?',
@@ -349,6 +401,19 @@ const IT: Partials = {
 };
 
 const PT: Partials = {
+  welcome: {
+    slide1Title: 'Bem-vindo',
+    slide1Body: 'Faz qualquer pergunta sobre os lugares perto de ti. Toca no microfone para usar a voz.',
+    slide2Title: 'Os teus dados ficam aqui',
+    slide2Body: 'A tua localização, voz e fotos são processadas neste dispositivo. Nada é enviado para um servidor.',
+    slide3Title: 'Toca num lugar para conhecer a sua história',
+    slide3Body: "No mapa, toca em qualquer marcador ou etiqueta e pergunta 'fala-me sobre isto'.",
+    slide4Title: 'Funciona onde quer que vás',
+    slide4Body: 'Após este download, a IA funciona inteiramente no teu telemóvel. Usa-a num avião, num túnel ou noutro país.',
+    next: 'Seguinte',
+    gotIt: 'Entendido',
+    skip: 'Ignorar',
+  },
   nav: { chat: 'Chat', map: 'Mapa' },
   chat: {
     placeholder: 'O que tem por perto?',
@@ -387,6 +452,19 @@ const PT: Partials = {
 };
 
 const JA: Partials = {
+  welcome: {
+    slide1Title: 'ようこそ',
+    slide1Body: '近くの場所について何でも質問できます。マイクをタップして音声で使いましょう。',
+    slide2Title: 'データはここに残ります',
+    slide2Body: '位置情報・音声・写真はすべてこのデバイスで処理されます。サーバーには何も送信されません。',
+    slide3Title: '場所をタップしてその物語を知ろう',
+    slide3Body: '地図上のピンやラベルをタップして「これについて教えて」と聞いてみましょう。',
+    slide4Title: 'どこでも使えます',
+    slide4Body: 'このダウンロードが完了すると、AIはすべてあなたのスマートフォン上で動作します。飛行機の中、トンネル内、海外でも使えます。',
+    next: '次へ',
+    gotIt: 'わかった',
+    skip: 'スキップ',
+  },
   nav: { chat: 'チャット', map: '地図' },
   chat: {
     placeholder: '近くに何がある?',
@@ -424,6 +502,19 @@ const JA: Partials = {
 };
 
 const ZH: Partials = {
+  welcome: {
+    slide1Title: '欢迎',
+    slide1Body: '随时询问附近地点的任何问题。点击麦克风使用语音。',
+    slide2Title: '您的数据保留在此',
+    slide2Body: '您的位置、语音和照片均在本设备上处理，不会发送到任何服务器。',
+    slide3Title: '点击地点了解其故事',
+    slide3Body: '在地图上点击任意图钉或标签，并询问"告诉我这里的故事"。',
+    slide4Title: '随处可用',
+    slide4Body: '下载完成后，AI 完全在您的手机上运行。可在飞机上、隧道中或国外使用。',
+    next: '下一步',
+    gotIt: '明白了',
+    skip: '跳过',
+  },
   nav: { chat: '聊天', map: '地图' },
   chat: {
     placeholder: '附近有什么?',
