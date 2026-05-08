@@ -1,56 +1,56 @@
 /**
- * RouteService — OSRM walking-time matrix wrapper.
+ * RouteService — walking-distance matrix for nearby POIs and itineraries.
  *
- * Calls the free OSRM public demo server to get an N×N matrix of walking
- * durations (seconds → minutes) and distances (metres). Falls back to
- * haversine per-cell when OSRM returns a null for an unreachable pair.
- * Returns null for the whole matrix on network failure, non-OK HTTP,
- * or 6 s timeout.
+ * Returns an N×N matrix of estimated walking metres + minutes between coord
+ * pairs. Used by both the Around-You distance overlay and the Plan-My-Day
+ * itinerary's TSP ordering + per-leg display.
  *
- * Cache layers:
- *   1. In-memory LRU (32 entries) — instant hit for same-session re-opens.
- *   2. AsyncStorage with 24 h TTL — survives app restarts; avoids OSRM
- *      traffic when the user re-opens an itinerary the next morning.
+ * History: an earlier version called the OSRM public demo server's
+ * `/table/v1/foot/...` endpoint expecting walking durations. The demo only
+ * runs the *car* profile though — the foot path returns driving times
+ * (~26 km/h implied speed) and driving distances (which detour around
+ * freeways and ignore pedestrian shortcuts through campuses, parks, etc).
+ * Both wrong for walking. The Plan-My-Day "≈ 37 min · 14.7 km" header on
+ * a Stanford 8-stop tour was the giveaway — 14.7 km at car speed in 37 min.
  *
- * Fair-use: single user, one call per fresh itinerary open, 24 h cache.
- * OSRM soft rate limit is ~1 req/sec; we're well under.
+ * Replacement: haversine straight-line × 1.4 urban detour factor. 1.4 is the
+ * standard rule-of-thumb for street-network distance over Euclidean in dense
+ * urban areas (range ~1.2 in grid cities, up to 1.6 in winding suburbs).
+ * Always free, instant, no network, no API key, and consistent: minutes is
+ * always meters ÷ 5 km/h, so the displayed distance and time can never
+ * disagree the way OSRM's car-vs-walking did.
+ *
+ * Trade-off: this can't account for actual pedestrian routing (it doesn't
+ * know whether a creek has a bridge or not), but the previous OSRM
+ * implementation didn't either — it gave car routing. For the kinds of
+ * city/campus walks this app supports, haversine × 1.4 is well within the
+ * uncertainty of the true walking time anyway. If a real foot-profile router
+ * becomes useful (Valhalla, OpenRouteService self-hosted, etc.), swap the
+ * implementation here without changing the public API.
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { distanceMeters } from './PoiService';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const OSRM_BASE = 'https://router.project-osrm.org/table/v1/foot';
-const USER_AGENT = 'LocalGuide/1.0 (https://github.com/DaniRuizPerez/localguide)';
-const FETCH_TIMEOUT_MS = 6000;
-// 16 = user position + 15 ranked POIs (AROUND_YOU_CAP). OSRM's table demo
-// allows up to 100 sources, so 16 is well within fair-use; ItineraryModal's
-// caller still tops out at ~8 stops.
+// 16 = user position + 15 ranked POIs (AROUND_YOU_CAP). Defends against
+// future regressions; no real cost since we're computing locally.
 const COORD_CAP = 16;
-const STORAGE_PREFIX = 'route-matrix:';
-const STORAGE_TTL_MS = 24 * 60 * 60 * 1000; // 24 h
 const LRU_MAX = 32;
 
-// Walking speed for haversine fallback: 5 km/h = 5000 m / 60 min
-const WALK_MPS = 5000 / 60; // metres per minute
+// Walking speed: 5 km/h = 5000 m / 60 min ≈ 83.3 m/min.
+const WALK_MPS = 5000 / 60;
+// Urban detour factor: how much further the actual street-network walk is
+// than the straight-line haversine. 1.4 is a well-known rule of thumb for
+// dense urban / mixed campus areas; lower in pure grid cities, higher in
+// winding suburbs. Tuned for Bay Area / Palo Alto.
+const URBAN_DETOUR = 1.4;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface WalkingMatrix {
   minutes: number[][];
   meters: number[][];
-}
-
-interface OsrmTableResponse {
-  code: string;
-  durations: (number | null)[][];
-  distances: (number | null)[][];
-}
-
-interface StorageEntry {
-  ts: number;
-  data: WalkingMatrix;
 }
 
 // ─── In-memory LRU cache ──────────────────────────────────────────────────────
@@ -88,154 +88,63 @@ function matrixCacheKey(coords: Array<{ lat: number; lon: number }>): string {
   return parts.join('|');
 }
 
-// ─── Haversine helpers ────────────────────────────────────────────────────────
-
-function haversineMinutes(
-  coords: Array<{ lat: number; lon: number }>,
-  i: number,
-  j: number
-): number {
-  const m = distanceMeters(coords[i].lat, coords[i].lon, coords[j].lat, coords[j].lon);
-  return Math.max(1, Math.round(m / WALK_MPS));
-}
-
-function haversineMeters(
-  coords: Array<{ lat: number; lon: number }>,
-  i: number,
-  j: number
-): number {
-  return Math.round(distanceMeters(coords[i].lat, coords[i].lon, coords[j].lat, coords[j].lon));
-}
-
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 export const routeService = {
   /**
-   * Returns an N×N matrix of walking minutes and metres.
-   * Returns null if the coord list exceeds COORD_CAP, or on any fetch failure.
+   * Returns an N×N matrix of estimated walking minutes and metres.
+   * Uses haversine × URBAN_DETOUR for distance and walking speed for time.
+   * Returns null only when the coord list exceeds COORD_CAP.
+   *
+   * Async signature is preserved from the previous network-backed
+   * implementation so existing call sites don't have to change.
    */
   async walkingTimeMatrix(
     coords: Array<{ lat: number; lon: number }>,
-    opts?: { signal?: AbortSignal }
+    _opts?: { signal?: AbortSignal }
   ): Promise<WalkingMatrix | null> {
-    // Hard cap — defend contract, no fetch.
     if (coords.length > COORD_CAP) {
       if (__DEV__) console.log(`[RouteService] matrix N=${coords.length} from=cap_exceeded`);
       return null;
     }
 
     const key = matrixCacheKey(coords);
-
-    // 1. In-memory LRU hit.
     const memHit = lruGet(key);
     if (memHit) {
       if (__DEV__) console.log(`[RouteService] matrix N=${coords.length} from=memory`);
       return memHit;
     }
 
-    // 2. AsyncStorage hit (cold start / previous session).
-    try {
-      const raw = await AsyncStorage.getItem(STORAGE_PREFIX + key);
-      if (raw) {
-        const entry: StorageEntry = JSON.parse(raw);
-        if (Date.now() - entry.ts < STORAGE_TTL_MS) {
-          lruSet(key, entry.data); // warm the in-memory cache too
-          if (__DEV__) console.log(`[RouteService] matrix N=${coords.length} from=storage`);
-          return entry.data;
+    const n = coords.length;
+    const minutes: number[][] = [];
+    const meters: number[][] = [];
+
+    for (let i = 0; i < n; i++) {
+      minutes[i] = [];
+      meters[i] = [];
+      for (let j = 0; j < n; j++) {
+        if (i === j) {
+          minutes[i][j] = 0;
+          meters[i][j] = 0;
+          continue;
         }
+        const straight = distanceMeters(
+          coords[i].lat,
+          coords[i].lon,
+          coords[j].lat,
+          coords[j].lon
+        );
+        const m = Math.round(straight * URBAN_DETOUR);
+        meters[i][j] = m;
+        // Math.max(1, …) so ultra-short hops don't display "0 min walk".
+        minutes[i][j] = Math.max(1, Math.round(m / WALK_MPS));
       }
-    } catch {
-      // Storage read failure is non-fatal — fall through to network.
     }
 
-    // 3. Fetch from OSRM.
-    const result = await routeService._fetchOsrm(coords, opts);
-    if (!result) return null;
-
-    // Cache the successful result.
+    const result: WalkingMatrix = { minutes, meters };
     lruSet(key, result);
-    try {
-      const entry: StorageEntry = { ts: Date.now(), data: result };
-      await AsyncStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(entry));
-    } catch {
-      // Storage write failure is non-fatal.
-    }
-
-    if (__DEV__) console.log(`[RouteService] matrix N=${coords.length} from=osrm`);
+    if (__DEV__) console.log(`[RouteService] matrix N=${coords.length} from=haversine`);
     return result;
-  },
-
-  /** Internal: fetch from OSRM, merge abort signals, apply conversions. */
-  async _fetchOsrm(
-    coords: Array<{ lat: number; lon: number }>,
-    opts?: { signal?: AbortSignal }
-  ): Promise<WalkingMatrix | null> {
-    // Build the coord path — OSRM uses lon,lat order.
-    const coordPath = coords.map((c) => `${c.lon},${c.lat}`).join(';');
-    const url = `${OSRM_BASE}/${coordPath}?annotations=duration,distance`;
-
-    // Merge caller signal with our own 6 s timeout signal.
-    const timeoutAc = new AbortController();
-    const timeoutId = setTimeout(() => timeoutAc.abort(), FETCH_TIMEOUT_MS);
-
-    let combinedSignal: AbortSignal;
-    if (opts?.signal) {
-      // AbortSignal.any is not universally available in RN; wire both manually.
-      const merged = new AbortController();
-      const onAbort = () => merged.abort();
-      opts.signal.addEventListener('abort', onAbort);
-      timeoutAc.signal.addEventListener('abort', onAbort);
-      combinedSignal = merged.signal;
-      // Note: we don't clean up these listeners on success to keep it simple;
-      // they'll be GC'd with the AbortController instances.
-    } else {
-      combinedSignal = timeoutAc.signal;
-    }
-
-    try {
-      const response = await fetch(url, {
-        signal: combinedSignal,
-        headers: { 'User-Agent': USER_AGENT },
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) return null;
-
-      const json: OsrmTableResponse = await response.json();
-      if (json.code !== 'Ok') return null;
-
-      const n = coords.length;
-      const minutes: number[][] = [];
-      const meters: number[][] = [];
-
-      for (let i = 0; i < n; i++) {
-        minutes[i] = [];
-        meters[i] = [];
-        for (let j = 0; j < n; j++) {
-          const dur = json.durations[i]?.[j] ?? null;
-          const dist = json.distances[i]?.[j] ?? null;
-
-          if (dur !== null) {
-            minutes[i][j] = Math.max(1, Math.round(dur / 60));
-          } else {
-            // Haversine fallback for unreachable pairs.
-            minutes[i][j] = haversineMinutes(coords, i, j);
-          }
-
-          if (dist !== null) {
-            meters[i][j] = Math.round(dist);
-          } else {
-            meters[i][j] = haversineMeters(coords, i, j);
-          }
-        }
-      }
-
-      return { minutes, meters };
-    } catch {
-      clearTimeout(timeoutId);
-      return null;
-    }
   },
 
   /** Test helper: evict all in-memory LRU entries. */

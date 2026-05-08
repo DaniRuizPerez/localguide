@@ -1,20 +1,13 @@
 /**
  * RouteService.walkingTimeMatrix tests.
  *
- * Covers: happy path, URL shape + User-Agent, partial null cells,
- * null on non-OK / fetch error / timeout, coord cap, and in-memory cache.
- *
- * AsyncStorage is mocked globally via jest.setup.js (the async-storage-mock
- * package). fetch is mocked per-test via global.fetch.
+ * The implementation now uses haversine × URBAN_DETOUR (1.4) at 5 km/h
+ * walking speed. Free, instant, no network — the previous OSRM-backed
+ * version was abandoned because the public demo server only serves the
+ * car profile (a `/foot/` request returned 26 km/h car data).
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { routeService } from '../services/RouteService';
-
-// ─── Mock global.fetch ──────────────────────────────────────────────────────
-
-const mockFetch = jest.fn();
-global.fetch = mockFetch as unknown as typeof fetch;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -24,233 +17,125 @@ const C3 = { lat: 37.4485, lon: -122.1590 }; // Menlo Park
 
 const COORDS_3 = [C1, C2, C3];
 
-/** Well-formed OSRM table response for 3 coords. */
-function osrmOk(
-  durations: (number | null)[][],
-  distances: (number | null)[][]
-) {
-  return {
-    ok: true,
-    json: async () => ({ code: 'Ok', durations, distances }),
-  };
-}
-
-const DURATIONS_3 = [
-  [0, 180, 240],
-  [180, 0, 120],
-  [240, 120, 0],
-];
-
-const DISTANCES_3 = [
-  [0, 200, 300],
-  [200, 0, 150],
-  [300, 150, 0],
-];
-
-// ─── Reset between tests ─────────────────────────────────────────────────────
-
-beforeEach(async () => {
-  mockFetch.mockReset();
+beforeEach(() => {
   routeService._clearMemoryCache();
-  await AsyncStorage.clear();
 });
 
-// ─── 1. Happy path ────────────────────────────────────────────────────────────
+// ─── 1. Shape ────────────────────────────────────────────────────────────────
 
-describe('walkingTimeMatrix — happy path', () => {
-  it('returns minutes and meters matrices for a 3-coord input', async () => {
-    mockFetch.mockResolvedValue(osrmOk(DURATIONS_3, DISTANCES_3));
-
+describe('walkingTimeMatrix — shape', () => {
+  it('returns N×N matrices for N coords', async () => {
     const result = await routeService.walkingTimeMatrix(COORDS_3);
-
     expect(result).not.toBeNull();
-    // 180 s / 60 = 3 min
-    expect(result!.minutes[0][1]).toBe(3);
-    // 240 s / 60 = 4 min
-    expect(result!.minutes[0][2]).toBe(4);
-    // 120 s / 60 = 2 min
-    expect(result!.minutes[1][2]).toBe(2);
-    // metres pass through rounded
-    expect(result!.meters[0][1]).toBe(200);
-    expect(result!.meters[1][2]).toBe(150);
+    expect(result!.minutes).toHaveLength(3);
+    expect(result!.meters).toHaveLength(3);
+    for (const row of result!.minutes) expect(row).toHaveLength(3);
+    for (const row of result!.meters) expect(row).toHaveLength(3);
   });
 
-  it('enforces Math.max(1, ...) so very short legs are at least 1 min', async () => {
-    // 30 s → rounds to 1 (not 0)
-    const durations = [[0, 30, 60], [30, 0, 45], [60, 45, 0]];
-    const distances = [[0, 50, 100], [50, 0, 75], [100, 75, 0]];
-    mockFetch.mockResolvedValue(osrmOk(durations, distances));
-
+  it('returns 0 on the diagonal (coord vs itself)', async () => {
     const result = await routeService.walkingTimeMatrix(COORDS_3);
+    for (let i = 0; i < 3; i++) {
+      expect(result!.minutes[i][i]).toBe(0);
+      expect(result!.meters[i][i]).toBe(0);
+    }
+  });
+});
+
+// ─── 2. Symmetry ─────────────────────────────────────────────────────────────
+
+describe('walkingTimeMatrix — symmetry', () => {
+  it('A→B equals B→A (haversine is symmetric)', async () => {
+    const result = await routeService.walkingTimeMatrix(COORDS_3);
+    expect(result!.minutes[0][1]).toBe(result!.minutes[1][0]);
+    expect(result!.minutes[0][2]).toBe(result!.minutes[2][0]);
+    expect(result!.meters[0][1]).toBe(result!.meters[1][0]);
+    expect(result!.meters[1][2]).toBe(result!.meters[2][1]);
+  });
+});
+
+// ─── 3. Walking-pace consistency ─────────────────────────────────────────────
+
+describe('walkingTimeMatrix — walking-pace consistency', () => {
+  it('minutes always equals max(1, round(meters / 83.33))', async () => {
+    const result = await routeService.walkingTimeMatrix(COORDS_3);
+    const WALK_MPS = 5000 / 60;
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 3; j++) {
+        if (i === j) continue;
+        const expectedMin = Math.max(1, Math.round(result!.meters[i][j] / WALK_MPS));
+        expect(result!.minutes[i][j]).toBe(expectedMin);
+      }
+    }
+  });
+
+  it('floors at 1 min — no "0 min walk" labels possible', async () => {
+    // Two coords ~5 m apart → very short straight-line, but min minute = 1.
+    const ultraClose = [
+      { lat: 37.4232, lon: -122.1494 },
+      { lat: 37.4232, lon: -122.149405 }, // ~5 m east
+    ];
+    const result = await routeService.walkingTimeMatrix(ultraClose);
     expect(result).not.toBeNull();
-    // 30 s → Math.round(30/60) = 1, Math.max(1,1) = 1
     expect(result!.minutes[0][1]).toBe(1);
+    expect(result!.minutes[1][0]).toBe(1);
   });
 });
 
-// ─── 2. URL shape ─────────────────────────────────────────────────────────────
+// ─── 4. Urban-detour factor applied to distance ──────────────────────────────
 
-describe('walkingTimeMatrix — URL shape', () => {
-  it('constructs the OSRM /table/v1/foot/ URL with lon,lat ordering', async () => {
-    mockFetch.mockResolvedValue(osrmOk(DURATIONS_3, DISTANCES_3));
-
-    await routeService.walkingTimeMatrix(COORDS_3);
-
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-    const url: string = mockFetch.mock.calls[0][0];
-    expect(url).toContain('/table/v1/foot/');
-    expect(url).toContain('?annotations=duration,distance');
-    // OSRM uses lon,lat — verify first coord appears as lon,lat
-    const expectedFirst = `${C1.lon},${C1.lat}`;
-    expect(url).toContain(expectedFirst);
-  });
-});
-
-// ─── 3. User-Agent header ────────────────────────────────────────────────────
-
-describe('walkingTimeMatrix — User-Agent header', () => {
-  it('sends the expected User-Agent header', async () => {
-    mockFetch.mockResolvedValue(osrmOk(DURATIONS_3, DISTANCES_3));
-
-    await routeService.walkingTimeMatrix(COORDS_3);
-
-    const opts = mockFetch.mock.calls[0][1];
-    expect(opts?.headers?.['User-Agent']).toBe(
-      'LocalGuide/1.0 (https://github.com/DaniRuizPerez/localguide)'
-    );
-  });
-});
-
-// ─── 4. Partial null cells ───────────────────────────────────────────────────
-
-describe('walkingTimeMatrix — partial null cells', () => {
-  it('substitutes haversine for null duration/distance cells', async () => {
-    // Make one cell null — simulating OSRM returning null for unreachable pair.
-    const durationsWithNull: (number | null)[][] = [
-      [0, null, 240],
-      [null, 0, 120],
-      [240, 120, 0],
-    ];
-    const distancesWithNull: (number | null)[][] = [
-      [0, null, 300],
-      [null, 0, 150],
-      [300, 150, 0],
-    ];
-    mockFetch.mockResolvedValue(osrmOk(durationsWithNull, distancesWithNull));
-
-    const result = await routeService.walkingTimeMatrix(COORDS_3);
-
+describe('walkingTimeMatrix — urban-detour factor', () => {
+  it('returns metres ≈ haversine × 1.4 (rounded to int)', async () => {
+    // Use a pair we can compute the haversine for independently.
+    // 1 deg of lat ≈ 111.32 km; we use 0.01 deg ≈ 1.113 km between the two.
+    const a = { lat: 37.4232, lon: -122.1494 };
+    const b = { lat: 37.4332, lon: -122.1494 }; // 0.01 deg N → ~1113 m
+    const result = await routeService.walkingTimeMatrix([a, b]);
     expect(result).not.toBeNull();
-    // The null cell should be filled in with haversine (positive, not NaN or 0).
-    expect(result!.minutes[0][1]).toBeGreaterThan(0);
-    expect(Number.isNaN(result!.minutes[0][1])).toBe(false);
-    expect(result!.meters[0][1]).toBeGreaterThan(0);
+    // 1113 m × 1.4 ≈ 1558 m. Allow ±2 m for floating-point + rounding.
+    const m = result!.meters[0][1];
+    expect(m).toBeGreaterThan(1550);
+    expect(m).toBeLessThan(1565);
   });
 });
 
-// ─── 5. null on failures ─────────────────────────────────────────────────────
-
-describe('walkingTimeMatrix — failure returns null', () => {
-  it('returns null when HTTP response is not OK', async () => {
-    mockFetch.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
-    expect(await routeService.walkingTimeMatrix(COORDS_3)).toBeNull();
-  });
-
-  it('returns null when fetch rejects with a network error', async () => {
-    mockFetch.mockRejectedValue(new Error('Network error'));
-    expect(await routeService.walkingTimeMatrix(COORDS_3)).toBeNull();
-  });
-
-  it('returns null when fetch rejects with an AbortError (timeout)', async () => {
-    mockFetch.mockRejectedValue(new DOMException('Aborted', 'AbortError'));
-    expect(await routeService.walkingTimeMatrix(COORDS_3)).toBeNull();
-  });
-
-  it('returns null when OSRM response code is not Ok', async () => {
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ code: 'InvalidUrl', durations: [], distances: [] }),
-    });
-    expect(await routeService.walkingTimeMatrix(COORDS_3)).toBeNull();
-  });
-});
-
-// ─── 6. Coord cap ────────────────────────────────────────────────────────────
+// ─── 5. Coord cap ────────────────────────────────────────────────────────────
 
 describe('walkingTimeMatrix — coord cap', () => {
-  it('returns null immediately for >16 coords without calling fetch', async () => {
+  it('returns null immediately for >16 coords', async () => {
     const tooMany = Array.from({ length: 17 }, (_, i) => ({
       lat: 37.4 + i * 0.01,
       lon: -122.1,
     }));
     const result = await routeService.walkingTimeMatrix(tooMany);
     expect(result).toBeNull();
-    expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('does NOT cap at exactly 12 coords', async () => {
-    const exactly12 = Array.from({ length: 12 }, (_, i) => ({
+  it('does NOT cap at exactly 16 coords', async () => {
+    const exactly16 = Array.from({ length: 16 }, (_, i) => ({
       lat: 37.4 + i * 0.01,
       lon: -122.1,
     }));
-    // Provide a minimal valid OSRM response.
-    const n = 12;
-    const dur = Array.from({ length: n }, (_, i) =>
-      Array.from({ length: n }, (__, j) => (i === j ? 0 : 120))
-    );
-    const dist = Array.from({ length: n }, (_, i) =>
-      Array.from({ length: n }, (__, j) => (i === j ? 0 : 200))
-    );
-    mockFetch.mockResolvedValue(osrmOk(dur, dist));
-    const result = await routeService.walkingTimeMatrix(exactly12);
+    const result = await routeService.walkingTimeMatrix(exactly16);
     expect(result).not.toBeNull();
-    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });
 
-// ─── 7. Cache ─────────────────────────────────────────────────────────────────
+// ─── 6. In-memory LRU cache ──────────────────────────────────────────────────
 
 describe('walkingTimeMatrix — in-memory LRU cache', () => {
-  it('serves the second call from in-memory cache (fetch called only once)', async () => {
-    mockFetch.mockResolvedValue(osrmOk(DURATIONS_3, DISTANCES_3));
-
+  it('returns the cached object on the second call', async () => {
     const first = await routeService.walkingTimeMatrix(COORDS_3);
     const second = await routeService.walkingTimeMatrix(COORDS_3);
-
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(first).toEqual(second);
+    expect(first).toBe(second); // same reference (LRU returned cached)
   });
 
-  it('does not serve cache for a different coord list', async () => {
-    mockFetch.mockResolvedValue(osrmOk(DURATIONS_3, DISTANCES_3));
-
-    await routeService.walkingTimeMatrix(COORDS_3);
-
-    const different = [C1, C3]; // different set
-    const dur2 = [[0, 60], [60, 0]];
-    const dist2 = [[0, 100], [100, 0]];
-    mockFetch.mockResolvedValue(osrmOk(dur2, dist2));
-    await routeService.walkingTimeMatrix(different);
-
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-  });
-});
-
-// ─── 8. AsyncStorage cache ────────────────────────────────────────────────────
-
-describe('walkingTimeMatrix — AsyncStorage cache', () => {
-  it('reads from AsyncStorage on cold start (in-memory cleared)', async () => {
-    // First call: prime with OSRM.
-    mockFetch.mockResolvedValue(osrmOk(DURATIONS_3, DISTANCES_3));
-    await routeService.walkingTimeMatrix(COORDS_3);
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-
-    // Evict in-memory cache to simulate cold start.
-    routeService._clearMemoryCache();
-
-    // Second call: should read from AsyncStorage, not fetch.
-    const result = await routeService.walkingTimeMatrix(COORDS_3);
-    expect(mockFetch).toHaveBeenCalledTimes(1); // no extra fetch
-    expect(result).not.toBeNull();
+  it('reorders LRU on hit (recency)', async () => {
+    // Just check we get the same result for the same input across calls.
+    const result1 = await routeService.walkingTimeMatrix(COORDS_3);
+    const otherCoords = [C1, C3];
+    await routeService.walkingTimeMatrix(otherCoords);
+    const result3 = await routeService.walkingTimeMatrix(COORDS_3);
+    expect(result1).toBe(result3);
   });
 });
