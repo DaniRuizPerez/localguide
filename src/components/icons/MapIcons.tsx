@@ -6,6 +6,30 @@ interface IconProps {
   color?: string;
 }
 
+// Teardrop pin marker for map POIs. Primary fill with white outline and white
+// centre dot. The tail makes the SVG aspect 1.3×height so it render height
+// should be size * 1.3. Pass selected=true to bump stroke for the active marker.
+export function MapPinIcon({ size = 20, color = '#000', selected = false }: IconProps & { selected?: boolean }) {
+  return (
+    <Svg width={size} height={size * 1.3} viewBox="0 0 22 28" fill="none">
+      <Path d="M11 1 C5 1 2 5 2 11 C2 18 11 27 11 27 C11 27 20 18 20 11 C20 5 17 1 11 1 Z"
+            fill={color} stroke="#FFFFFF" strokeWidth={selected ? 2.5 : 2} />
+      <Circle cx="11" cy="11" r="3.5" fill="#FFFFFF" />
+    </Svg>
+  );
+}
+
+// Chat bubble icon for the "ask about this place" button on each POI row.
+// Rendered as a stroke-only rounded rectangle with a tail (message pointer).
+export function ChatBubbleIcon({ size = 18, color = '#000' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 22 22" fill="none">
+      <Path d="M3 4 H19 V15 H10 L5 19 V15 H3 Z"
+            stroke={color} strokeWidth="2" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
 // Crosshair-with-dot, the Google-Maps "my location" pictogram. Outer ring +
 // four cardinal tick marks crossing it + filled centre dot. Universal enough
 // that users don't need a label to know it recentres on their position.

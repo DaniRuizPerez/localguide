@@ -102,6 +102,30 @@ jest.mock('react-native-svg', () => {
   };
 });
 
+// expo-speech-recognition — stub the native module so any file that imports
+// useVoiceInput (which calls useSpeechRecognitionEvent) doesn't crash at
+// module load time. Tests that exercise voice behaviour can override.
+jest.mock('expo-speech-recognition', () => ({
+  useSpeechRecognitionEvent: jest.fn(),
+}));
+
+// expo-image-picker — stub so tests never hit the camera native bridge.
+jest.mock('expo-image-picker', () => ({
+  requestCameraPermissionsAsync: jest.fn().mockResolvedValue({ status: 'granted' }),
+  launchCameraAsync: jest.fn().mockResolvedValue({ canceled: true, assets: [] }),
+  MediaTypeOptions: { Images: 'Images' },
+}));
+
+// VoiceRecognitionService — stub the native mic bridge.
+jest.mock('./src/services/VoiceRecognitionService', () => ({
+  voiceRecognitionService: {
+    isAvailable: jest.fn().mockResolvedValue(false),
+    requestPermission: jest.fn().mockResolvedValue(false),
+    start: jest.fn(),
+    stop: jest.fn(),
+  },
+}));
+
 // react-native-maps calls TurboModuleRegistry.getEnforcing at import time.
 // Stub MapView/Marker/Polyline so tests can render them as plain Views.
 jest.mock('react-native-maps', () => {

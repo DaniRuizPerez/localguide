@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView, Animated, PanResponder, Dimensions, KeyboardAvoidingView, Keyboard } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Linking, View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView, Animated, PanResponder, Dimensions, KeyboardAvoidingView, Keyboard } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE, type Region, type PoiClickEvent } from 'react-native-maps';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
@@ -11,6 +12,7 @@ import { useRadiusPref } from '../hooks/useRadiusPref';
 import { useWalkingDistances } from '../hooks/useWalkingDistances';
 import { useChatMessages } from '../hooks/useChatMessages';
 import { useGuideStream } from '../hooks/useGuideStream';
+import { useVoiceInput } from '../hooks/useVoiceInput';
 import { Colors } from '../theme/colors';
 import { Type, Radii, Shadows, Sizing, Spacing } from '../theme/tokens';
 import { softTactileMapStyle } from '../theme/mapStyle';
@@ -25,7 +27,7 @@ import { ChatInputBar } from '../components/ChatInputBar';
 import { OfflineNotice } from '../components/OfflineNotice';
 import { ModeChangeToast } from '../components/ModeChangeToast';
 import { useEdgeSwipeBack } from '../components/EdgeSwipeBack';
-import { MyLocationIcon, TrashIcon } from '../components/icons/MapIcons';
+import { MyLocationIcon, TrashIcon, ChatBubbleIcon, MapPinIcon } from '../components/icons/MapIcons';
 import { breadcrumbTrail } from '../services/BreadcrumbTrail';
 import { useBreadcrumbTrail } from '../hooks/useBreadcrumbTrail';
 import { t } from '../i18n';
@@ -90,6 +92,52 @@ export default function MapScreen({ navigation }: Props) {
     onScroll: () => listRef.current?.scrollToEnd({ animated: true }),
   });
 
+  // ── Camera permission state for the Map chat tab ─────────────────────────
+  const [cameraPermission, setCameraPermission] = useState<'undetermined' | 'granted' | 'denied'>('undetermined');
+
+  // ── Voice input for the Map chat tab ─────────────────────────────────────
+  const handleVoiceResult = useCallback((transcript: string) => {
+    if (!gps || inferring) return;
+    messages.addUserMessage(transcript);
+    stream({ intent: 'text', query: transcript, location: gps });
+  }, [gps, inferring, messages, stream]);
+  const voice = useVoiceInput(handleVoiceResult);
+
+  // ── Camera capture for the Map chat tab ──────────────────────────────────
+  const takePicture = useCallback(async () => {
+    if (inferring) return;
+    if (cameraPermission === 'denied') {
+      Linking.openSettings();
+      return;
+    }
+    if (!gps) {
+      Alert.alert('No Location', 'Location not available yet.');
+      return;
+    }
+    const { status: camStatus } = await ImagePicker.requestCameraPermissionsAsync();
+    if (camStatus !== 'granted') {
+      setCameraPermission('denied');
+      Alert.alert('Camera Permission', 'Camera access is required to take photos.');
+      return;
+    }
+    setCameraPermission('granted');
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
+      allowsEditing: false,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    const imageUri = result.assets[0].uri;
+    const userQuery = chatInput.trim();
+    messages.addUserMessage(userQuery || 'What do you see?', imageUri);
+    setChatInput('');
+    listRef.current?.scrollToEnd({ animated: true });
+    await stream({ intent: 'image', query: userQuery, location: gps, imageUri });
+  }, [inferring, cameraPermission, gps, chatInput, messages, stream]);
+
+  // ── Row scroll ref for tap-marker-scrolls-to-row (Phase E) ───────────────
+  const rowScrollRef = useRef<ScrollView>(null);
+
   const handleSend = async () => {
     const query = chatInput.trim();
     if (!query || inferring) return;
@@ -125,7 +173,7 @@ export default function MapScreen({ navigation }: Props) {
     skipLlmFill: !offline,
   });
   const { ranked: rankedRaw } = useRankedPois(rawPois, gps, { hiddenGems, offline, radiusMeters });
-  // OSRM walking-distance overlay. Falls back to Haversine while in flight.
+  // Walking-distance overlay (haversine × 1.4). Falls back to Haversine while in flight.
   const { enriched: ranked } = useWalkingDistances(rankedRaw, gps);
   // LLM POIs have placeholder coords (= user GPS); never show as map markers.
   const visibleMarkers = ranked.filter((p) => p.source !== 'llm');
@@ -426,28 +474,39 @@ export default function MapScreen({ navigation }: Props) {
             </View>
           </Marker>
         )}
-        {visibleMarkers.map((p, idx) => {
-          const isPrimary = idx < 3;
+        {visibleMarkers.map((p) => {
           const isSelected = compassTarget?.pageId === p.pageId;
           const offline = effective === 'offline';
           return (
             <Marker
               key={`${p.source}-${p.pageId}`}
               coordinate={{ latitude: p.latitude, longitude: p.longitude }}
-              anchor={{ x: 0.5, y: 0.5 }}
-              onPress={() => setCompassTarget(p)}
+              anchor={{ x: 0.5, y: 0.95 }}
+              onPress={() => {
+                setCompassTarget(p);
+                // Phase E: scroll the row list to this POI's row
+                const idx = ranked.findIndex((r) => r.pageId === p.pageId);
+                if (idx >= 0) {
+                  rowScrollRef.current?.scrollTo({ y: idx * 75, animated: true });
+                }
+                // If sheet is collapsed, snap to half so the row is visible
+                if (currentSnapRef.current === SNAP_COLLAPSED) {
+                  currentSnapRef.current = SNAP_HALF;
+                  setAtFull(false);
+                  Animated.spring(sheetY, { toValue: SNAP_HALF, useNativeDriver: false, tension: 80, friction: 12 }).start();
+                }
+              }}
               tracksViewChanges={isSelected}
             >
-              <View style={styles.poiMarkerWrap}>
-                <View style={[isPrimary ? styles.poiDotPrimary : styles.poiDotSecondary, offline && styles.poiDotOffline]} />
-                <View style={[styles.poiLabelPill, offline && styles.poiDotOffline]}>
-                  <Text style={styles.poiLabelText} numberOfLines={1}>{p.title}</Text>
-                </View>
-                {isSelected && (
+              <View style={[styles.poiMarkerWrap, isSelected && styles.poiMarkerWrapSelected, offline && styles.poiDotOffline]}>
+                <MapPinIcon size={isSelected ? 24 : 20} color={Colors.primary} selected={isSelected} />
+                {isSelected ? (
                   <View style={styles.poiCallout}>
-                    <Text style={styles.poiCalloutText} numberOfLines={1}>
-                      {p.title}
-                    </Text>
+                    <Text style={styles.poiCalloutText} numberOfLines={1}>{p.title}</Text>
+                  </View>
+                ) : (
+                  <View style={styles.poiLabelPill}>
+                    <Text style={styles.poiLabelText} numberOfLines={1}>{p.title}</Text>
                   </View>
                 )}
               </View>
@@ -573,6 +632,7 @@ export default function MapScreen({ navigation }: Props) {
               // Without this guard a drag in the list area would scroll instead
               // of pulling the sheet up. removeClippedSubviews trims off-screen
               // rows on Android for a small render-cost win at Full.
+              ref={rowScrollRef}
               scrollEnabled={atFull}
               removeClippedSubviews
               style={{ marginTop: 10, flex: 1 }}
@@ -610,6 +670,16 @@ export default function MapScreen({ navigation }: Props) {
                     <View style={styles.poiBadge}>
                       <Text style={[Type.chip, { color: Colors.primary }]}>{distanceLabel}</Text>
                     </View>
+                    <TouchableOpacity
+                      style={styles.poiChatBtn}
+                      onPress={(e) => { e?.stopPropagation?.(); askAboutPoi(p); }}
+                      hitSlop={8}
+                      accessibilityLabel="Ask about this place"
+                      accessibilityRole="button"
+                      testID={`poi-chat-${p.pageId}`}
+                    >
+                      <ChatBubbleIcon size={18} color={Colors.primary} />
+                    </TouchableOpacity>
                   </TouchableOpacity>
                 );
               })}
@@ -632,9 +702,10 @@ export default function MapScreen({ navigation }: Props) {
                 onSend={handleSend}
                 onStop={stop}
                 inferring={inferring}
-                onCameraPress={() => {}}
-                onMicToggle={() => {}}
-                isListening={false}
+                onCameraPress={takePicture}
+                onMicToggle={voice.isListening ? voice.stopListening : voice.startListening}
+                isListening={voice.isListening}
+                cameraPermissionDenied={cameraPermission === 'denied'}
               />
             )}
           </KeyboardAvoidingView>
@@ -704,30 +775,17 @@ const styles = StyleSheet.create({
     borderColor: '#FFFFFF',
     ...Shadows.pinDrop,
   },
-  // ── New dot marker styles ────────────────────────────────────────────────
-  // alignItems: 'center' centres dot + label. minWidth ensures Android
+  // ── Pin marker styles ────────────────────────────────────────────────────
+  // alignItems: 'center' centres pin + label. minWidth ensures Android
   // react-native-maps measures a non-zero bitmap on first render.
   poiMarkerWrap: {
     alignItems: 'center',
-    minWidth: 18,
+    minWidth: 20,
   },
-  poiDotPrimary: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: Colors.primary,
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-    ...Shadows.pinDrop,
-  },
-  poiDotSecondary: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: Colors.textSecondary,
-    borderWidth: 1.5,
-    borderColor: '#FFFFFF',
-    ...Shadows.pinDrop,
+  poiMarkerWrapSelected: {
+    // Selected marker uses a larger MapPinIcon (24px); the wrap scales
+    // naturally but we add subtle elevation to lift it above neighbours.
+    zIndex: 1,
   },
   poiDotOffline: {
     opacity: 0.65,
@@ -743,7 +801,7 @@ const styles = StyleSheet.create({
     maxWidth: 100,
   },
   poiLabelText: {
-    fontSize: 9,
+    fontSize: 11,
     color: Colors.text,
   },
   poiCallout: {
@@ -764,7 +822,7 @@ const styles = StyleSheet.create({
     ...Type.chip,
     color: Colors.text,
   },
-  // ── End new dot marker styles ───────────────────────────────────────────
+  // ── End pin marker styles ───────────────────────────────────────────────
   fab: {
     position: 'absolute',
     right: 16,
@@ -863,6 +921,17 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: Radii.sm,
     marginLeft: Spacing.sm,
+  },
+  poiChatBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
   },
   timelineIcon: {
     width: 28,
