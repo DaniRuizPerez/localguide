@@ -25,7 +25,6 @@ import { breadcrumbTrail } from './src/services/BreadcrumbTrail';
 import { visitedStore } from './src/services/VisitedStore';
 import { speechBackgroundKeeper } from './src/services/SpeechBackgroundKeeper';
 import { WelcomeTour } from './src/components/WelcomeTour';
-import { ModeStripe } from './src/components/ModeStripe';
 import { OfflineDimOverlay } from './src/components/OfflineDimOverlay';
 
 type AppState = 'checking' | 'needs_download' | 'warming_up' | 'ready';
@@ -168,16 +167,13 @@ export default function App() {
       {/* Warm-brown tint that fades in over the whole app when effective
           mode is 'offline' — gives the cream UI a dim, dark-mode-adjacent
           feel without migrating every StyleSheet.create to a hook.
-          z-index 998 (below ModeStripe at 1000), pointerEvents="none". */}
+          pointerEvents="none". */}
       <OfflineDimOverlay />
       {/* One-time welcome tour — rendered as an absolute overlay above the nav.
           WelcomeTour manages its own AsyncStorage check internally and returns
           null when the tour has already been seen, so no extra state is needed. */}
       <WelcomeTour onDismiss={() => {}} />
       <StatusBar style="dark" />
-      {/* Persistent labeled "OFFLINE" bar at the very top edge when offline.
-          Sits above OfflineDimOverlay so the amber stays bright. */}
-      <ModeStripe />
     </SafeAreaProvider>
   );
 }

@@ -16,10 +16,9 @@ import { useAppMode } from '../hooks/useAppMode';
  *     visually as "color scheme shifted" (cream → dim-cafe) and costs zero
  *     plumbing changes.
  *
- * Z-order: 998 — below ModeStripe (1000) so the amber bar at top stays
- * bright and unmistakable, but above the navigator so the tint covers
- * the whole app surface. Modals rendered later in the tree sit above
- * this tint, which is fine — modal backdrops already darken on their own.
+ * Z-order: 998 — above the navigator so the tint covers the whole app
+ * surface. Modals rendered later in the tree sit above this tint, which
+ * is fine — modal backdrops already darken on their own.
  *
  * Color: `rgba(40, 25, 8, 0.18)` — warm brown at 18% alpha. Picked so the
  * cream `#F5EBDF` background reads as a dim warm tan; dark text keeps

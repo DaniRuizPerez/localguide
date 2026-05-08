@@ -29,7 +29,8 @@ import { ChatInputBar } from '../components/ChatInputBar';
 import { OfflineNotice } from '../components/OfflineNotice';
 import { ModeChangeToast } from '../components/ModeChangeToast';
 import { useEdgeSwipeBack } from '../components/EdgeSwipeBack';
-import { MyLocationIcon, TrashIcon, ChatBubbleIcon, MapPinIcon } from '../components/icons/MapIcons';
+import { MyLocationIcon, TrashIcon, ChatBubbleIcon } from '../components/icons/MapIcons';
+import { poiEmojiFor } from '../services/poiTopic';
 import { breadcrumbTrail } from '../services/BreadcrumbTrail';
 import { useBreadcrumbTrail } from '../hooks/useBreadcrumbTrail';
 import { t } from '../i18n';
@@ -502,7 +503,9 @@ export default function MapScreen({ navigation }: Props) {
               tracksViewChanges={isSelected}
             >
               <View style={[styles.poiMarkerWrap, isSelected && styles.poiMarkerWrapSelected, offline && styles.poiDotOffline]}>
-                <MapPinIcon size={isSelected ? 24 : 20} color={Colors.primary} selected={isSelected} />
+                <View style={[styles.poiEmojiBubble, isSelected && styles.poiEmojiBubbleSelected]}>
+                  <Text style={[styles.poiEmoji, isSelected && styles.poiEmojiSelected]}>{poiEmojiFor(p)}</Text>
+                </View>
                 {isSelected ? (
                   <View style={styles.poiCallout}>
                     <Text style={styles.poiCalloutText} numberOfLines={1}>{p.title}</Text>
@@ -780,12 +783,37 @@ const styles = StyleSheet.create({
   // react-native-maps measures a non-zero bitmap on first render.
   poiMarkerWrap: {
     alignItems: 'center',
-    minWidth: 20,
+    minWidth: 28,
   },
   poiMarkerWrapSelected: {
-    // Selected marker uses a larger MapPinIcon (24px); the wrap scales
-    // naturally but we add subtle elevation to lift it above neighbours.
+    // Selected marker uses a larger emoji bubble; subtle elevation lifts
+    // it above neighbours.
     zIndex: 1,
+  },
+  // Emoji bubble matches the home-screen PoiRow icon style — a soft round
+  // disc with the category emoji centered. Same visual vocabulary on both
+  // surfaces so the user recognizes "this is a museum" at a glance.
+  poiEmojiBubble: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: Colors.surface,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  poiEmojiBubbleSelected: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+  },
+  poiEmoji: {
+    fontSize: 14,
+  },
+  poiEmojiSelected: {
+    fontSize: 18,
   },
   poiDotOffline: {
     opacity: 0.65,
