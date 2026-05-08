@@ -235,7 +235,10 @@ describe('ItineraryModal', () => {
 
     // Header should show "min walking · km".
     expect(queryAllByText(/min walking/).length).toBeGreaterThan(0);
-    expect(queryAllByText(/km/).length).toBeGreaterThan(0);
+    // Accept any distance unit the new shared formatDistance can produce
+    // (km / mi / m / ft) — the offline matrix is null so routeTotalM may be 0,
+    // which renders as "0 ft" (miles default in en-US) or "0 m" (km).
+    expect(queryAllByText(/km|mi|\d ?m\b|\d ?ft\b/).length).toBeGreaterThan(0);
   });
 
   it('shows distance-only header strip in offline mode (no OSRM)', async () => {
@@ -266,7 +269,10 @@ describe('ItineraryModal', () => {
     // Should NOT show "min walking" (no OSRM in offline mode).
     expect(queryByText(/min walking/)).toBeNull();
     // Should show km distance.
-    expect(queryAllByText(/km/).length).toBeGreaterThan(0);
+    // Accept any distance unit the new shared formatDistance can produce
+    // (km / mi / m / ft) — the offline matrix is null so routeTotalM may be 0,
+    // which renders as "0 ft" (miles default in en-US) or "0 m" (km).
+    expect(queryAllByText(/km|mi|\d ?m\b|\d ?ft\b/).length).toBeGreaterThan(0);
   });
 
   it('does not show per-leg "min walk" labels in offline mode', async () => {
