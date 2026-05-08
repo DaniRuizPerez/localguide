@@ -15,7 +15,7 @@ import { Colors } from '../theme/colors';
 import { Type, Radii, Shadows, Sizing, Spacing } from '../theme/tokens';
 import { softTactileMapStyle } from '../theme/mapStyle';
 import { type Poi, distanceMeters } from '../services/PoiService';
-import { wikipediaService } from '../services/WikipediaService';
+import { wikipediaService, WikipediaNetworkError } from '../services/WikipediaService';
 import { guidePrefs } from '../services/GuidePrefs';
 import { chatStore } from '../services/ChatStore';
 import { SoftButton } from '../components/SoftButton';
@@ -217,18 +217,38 @@ export default function MapScreen({ navigation }: Props) {
     // Enrich with Wikipedia. Try exact title first; on miss, fuzzy-match via
     // opensearch (e.g. "Cantor Arts Center" → "Cantor Center for Visual
     // Arts"). Generation guard drops stale resolutions.
-    let summary = await wikipediaService.summary(name).catch(() => null);
+    // WikipediaNetworkError (timeout / 5xx / no connectivity) is shown inline
+    // so the user knows to retry; 404 (no article) stays silent (null).
+    let summary: Awaited<ReturnType<typeof wikipediaService.summaryStrict>> = null;
+    let networkFailed = false;
+    try {
+      summary = await wikipediaService.summaryStrict(name);
+    } catch (err) {
+      if (err instanceof WikipediaNetworkError) {
+        networkFailed = true;
+      }
+    }
     if (myGen !== tapGenRef.current) return;
-    if (!summary) {
-      summary = await wikipediaService.searchByName(name).catch(() => null);
+    if (!summary && !networkFailed) {
+      try {
+        summary = await wikipediaService.searchByNameStrict(name);
+      } catch (err) {
+        if (err instanceof WikipediaNetworkError) {
+          networkFailed = true;
+        }
+      }
       if (myGen !== tapGenRef.current) return;
     }
-    if (summary) {
-      setCompassTarget((prev) =>
-        prev?.pageId === stub.pageId
-          ? { ...stub, description: summary!.description ?? summary!.extract }
-          : prev
-      );
+    if (summary || networkFailed) {
+      setCompassTarget((prev) => {
+        if (prev?.pageId !== stub.pageId) return prev;
+        return {
+          ...stub,
+          description: networkFailed
+            ? '(network — try again)'
+            : (summary!.description ?? summary!.extract),
+        };
+      });
     }
   };
 
@@ -544,6 +564,11 @@ export default function MapScreen({ navigation }: Props) {
               {ranked.map((p) => {
                 const isTarget = compassTarget?.pageId === p.pageId;
                 const canGuide = p.source !== 'llm';
+                const distanceM = p.walkingMeters ?? p.distanceMeters;
+                const distanceLabel =
+                  distanceM < 1000
+                    ? `${Math.round(distanceM)} m`
+                    : `${(distanceM / 1000).toFixed(1)} km`;
                 return (
                   <TouchableOpacity
                     key={`row-${p.source}-${p.pageId}`}
@@ -563,31 +588,10 @@ export default function MapScreen({ navigation }: Props) {
                       <Text style={[Type.poi, { color: Colors.text }]} numberOfLines={1}>
                         {p.title}
                       </Text>
-                      <Text style={[Type.hint, { color: Colors.textTertiary }]} numberOfLines={1}>
-                        {p.source === 'llm' ? t('map.aiSuggested') : t('map.wikipedia')}
-                      </Text>
                     </View>
                     <View style={styles.poiBadge}>
-                      <Text style={[Type.chip, { color: Colors.primary }]}>
-                        {(() => {
-                          const m = p.walkingMeters ?? p.distanceMeters;
-                          return m < 1000
-                            ? `${Math.round(m)} m`
-                            : `${(m / 1000).toFixed(1)} km`;
-                        })()}
-                      </Text>
+                      <Text style={[Type.chip, { color: Colors.primary }]}>{distanceLabel}</Text>
                     </View>
-                    <TouchableOpacity
-                      style={styles.timelineIcon}
-                      onPress={(e) => {
-                        e.stopPropagation?.();
-                        askAboutPoi(p);
-                      }}
-                      accessibilityLabel="Ask about this place"
-                      testID={`ask-${p.pageId}`}
-                    >
-                      <Text style={{ fontSize: 14 }}>💬</Text>
-                    </TouchableOpacity>
                   </TouchableOpacity>
                 );
               })}

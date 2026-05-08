@@ -3,6 +3,7 @@ import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   StyleSheet,
   Text,
@@ -73,6 +74,8 @@ export default function ChatScreen(props: Props) {
   const [quizOpen, setQuizOpen] = useState(false);
   const [howShouldIOpen, setHowShouldIOpen] = useState(false);
   const [noticeDismissed, setNoticeDismissed] = useState(false);
+  // 'undetermined' | 'granted' | 'denied'
+  const [cameraPermission, setCameraPermission] = useState<'undetermined' | 'granted' | 'denied'>('undetermined');
   const { features } = useFeatureTier();
   const [hiddenGems, setHiddenGems] = useState<boolean>(guidePrefs.get().hiddenGems);
 
@@ -262,15 +265,26 @@ export default function ChatScreen(props: Props) {
 
   const takePicture = useCallback(async () => {
     if (inferring) return;
+
+    // If permission was previously denied, tapping the camera opens Settings
+    // so the user can grant it manually — the button is rendered dimmed to
+    // hint at this state (see ChatInputBar props below).
+    if (cameraPermission === 'denied') {
+      Linking.openSettings();
+      return;
+    }
+
     if (!effectiveLocation) {
       Alert.alert('No Location', 'Location not available yet. Please enter a location above.');
       return;
     }
     const { status: camStatus } = await ImagePicker.requestCameraPermissionsAsync();
     if (camStatus !== 'granted') {
+      setCameraPermission('denied');
       Alert.alert('Camera Permission', 'Camera access is required to take photos.');
       return;
     }
+    setCameraPermission('granted');
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.7,
@@ -283,7 +297,7 @@ export default function ChatScreen(props: Props) {
     setInput('');
     scrollToEnd();
     await stream({ intent: 'image', query: userQuery, location: effectiveLocation, imageUri });
-  }, [inferring, effectiveLocation, input, messages, stream, scrollToEnd]);
+  }, [inferring, cameraPermission, effectiveLocation, input, messages, stream, scrollToEnd]);
 
   const lastMsg = messages.messages[messages.messages.length - 1];
   const showTyping = inferring && (lastMsg?.role !== 'guide' || !lastMsg.text);
@@ -374,6 +388,7 @@ export default function ChatScreen(props: Props) {
           loading={poisLoading || rankLoading}
           awaitingLocation={!gps && !manualLocation && (status === 'idle' || status === 'requesting')}
           locationDenied={!gps && !manualLocation && (status === 'denied' || status === 'error')}
+          locationAvailable={!!(gps ?? manualLocation)}
         />
       )}
 
@@ -394,6 +409,7 @@ export default function ChatScreen(props: Props) {
         onMicToggle={voice.isListening ? voice.stopListening : voice.startListening}
         inferring={inferring}
         isListening={voice.isListening}
+        cameraPermissionDenied={cameraPermission === 'denied'}
       />
 
       <VoiceRateControls

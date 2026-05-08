@@ -4,7 +4,7 @@
  * then through the existing `summary()` for the rich payload.
  */
 
-import { wikipediaService } from '../services/WikipediaService';
+import { wikipediaService, WikipediaNetworkError } from '../services/WikipediaService';
 
 const mockFetch = jest.fn();
 global.fetch = mockFetch as unknown as typeof fetch;
@@ -79,12 +79,18 @@ describe('WikipediaService.searchByName', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
-  it('returns null on opensearch HTTP error', async () => {
+  it('returns null on opensearch HTTP error (safe variant)', async () => {
     mockFetch.mockResolvedValueOnce(opensearchError());
 
     const result = await wikipediaService.searchByName('Palo Alto');
-
     expect(result).toBeNull();
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('searchByNameStrict: throws WikipediaNetworkError on HTTP error', async () => {
+    mockFetch.mockResolvedValueOnce(opensearchError());
+
+    await expect(wikipediaService.searchByNameStrict('Palo Alto')).rejects.toBeInstanceOf(WikipediaNetworkError);
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 

@@ -10,6 +10,8 @@ export const EN = {
     warmupError: 'Warmup error: {message}',
     hallucinationWarning:
       '⚠  Heads up: this runs on a tiny on-device model. Like any LLM it can hallucinate — double-check anything you rely on.',
+    warmupRetry: 'Try again',
+    warmupRedownload: 'Re-download model',
   },
   mode: {
     online: 'Online',
@@ -145,6 +147,7 @@ export const EN = {
     quizMeSub: 'Test what you know',
     openMap: 'Map',
     openMapSub: 'See what\'s nearby',
+    needsLocation: 'Needs your location',
     aroundYou: 'Around you',
     aroundYouEmpty: 'Walk around a bit and I\'ll find places nearby.',
     aroundYouLoading: 'Looking around you…',

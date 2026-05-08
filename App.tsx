@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFonts, Fraunces_500Medium } from '@expo-google-fonts/fraunces';
@@ -31,6 +31,7 @@ type AppState = 'checking' | 'needs_download' | 'warming_up' | 'ready';
 export default function App() {
   const [appState, setAppState] = useState<AppState>('checking');
   const [warmupError, setWarmupError] = useState<string | null>(null);
+  const [warmupRetryCount, setWarmupRetryCount] = useState(0);
   // Multi-select topic bias; 'everything' is a meta-topic that implies all
   // others and dims them in the picker. Seed with just 'everything' so the
   // warmup screen picker shows the default "no bias" state.
@@ -98,7 +99,10 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [appState]);
+    // warmupRetryCount is added so that retrying (which bumps the counter
+    // while keeping appState === 'warming_up') re-runs this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appState, warmupRetryCount]);
 
   if (!fontsLoaded || appState === 'checking') {
     return null; // splash screen covers this briefly
@@ -128,7 +132,35 @@ export default function App() {
           <TopicChips selected={topics} onChange={setTopics} />
 
           {warmupError && (
-            <Text style={styles.errorText}>{t('app.warmupError', { message: warmupError })}</Text>
+            <>
+              <Text style={styles.errorText}>{t('app.warmupError', { message: warmupError })}</Text>
+              <TouchableOpacity
+                style={styles.retryBtn}
+                onPress={() => {
+                  setWarmupError(null);
+                  setWarmupRetryCount((c) => c + 1);
+                }}
+                accessibilityRole="button"
+              >
+                <Text style={styles.retryBtnText}>{t('app.warmupRetry')}</Text>
+              </TouchableOpacity>
+              {warmupRetryCount >= 3 && (
+                <TouchableOpacity
+                  style={[styles.retryBtn, styles.redownloadBtn]}
+                  onPress={async () => {
+                    await modelDownloadService.deleteModel().catch(() => {});
+                    setWarmupError(null);
+                    setWarmupRetryCount(0);
+                    setAppState('needs_download');
+                  }}
+                  accessibilityRole="button"
+                >
+                  <Text style={[styles.retryBtnText, styles.redownloadBtnText]}>
+                    {t('app.warmupRedownload')}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </>
           )}
         </View>
         <StatusBar style="dark" />
@@ -188,5 +220,26 @@ const styles = StyleSheet.create({
     marginTop: 20,
     color: Colors.error,
     textAlign: 'center',
+  },
+  retryBtn: {
+    marginTop: 14,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+  },
+  retryBtnText: {
+    ...Type.title,
+    color: '#FFFFFF',
+  },
+  redownloadBtn: {
+    marginTop: 8,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+  },
+  redownloadBtnText: {
+    color: Colors.text,
   },
 });

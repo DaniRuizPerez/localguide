@@ -2,6 +2,20 @@
 // historical timelines. No API key needed; Wikipedia is free + public.
 // Matches the abort + timeout pattern from PoiService.
 
+/**
+ * Thrown by summary() and searchByName() when the failure is a network
+ * problem (timeout, no connectivity, 5xx) rather than a 404 "no article".
+ * Callers that want to show feedback for transient failures should catch this
+ * explicitly; callers that are happy treating all misses as null can keep
+ * their existing `.catch(() => null)`.
+ */
+export class WikipediaNetworkError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WikipediaNetworkError';
+  }
+}
+
 export interface TimelineEvent {
   year: string;
   event: string;
@@ -99,7 +113,13 @@ function makeSignal(callerSignal?: AbortSignal): {
 
 // ─── summary() ──────────────────────────────────────────────────────────────
 
-async function summary(
+/**
+ * Internal core fetch — returns null on 404, throws WikipediaNetworkError on
+ * transient failures (network, timeout, 5xx). Not exported directly; callers
+ * use either summary() (safe, null on all failures) or summaryStrict()
+ * (throws on network errors).
+ */
+async function summaryCore(
   title: string,
   opts?: { signal?: AbortSignal }
 ): Promise<WikipediaSummary | null> {
@@ -122,14 +142,26 @@ async function summary(
   const { signal, cleanup } = makeSignal(opts?.signal);
 
   try {
-    const response = await fetch(url, { signal, headers: REQUEST_HEADERS });
+    let response: Response;
+    try {
+      response = await fetch(url, { signal, headers: REQUEST_HEADERS });
+    } catch (fetchErr) {
+      // fetch() itself threw — network unavailable, timeout abort, etc.
+      // Do NOT cache the negative (it's transient); throw so callers can
+      // distinguish "no article" from "no connectivity".
+      throw new WikipediaNetworkError(
+        fetchErr instanceof Error ? fetchErr.message : 'Network error'
+      );
+    }
+
     if (response.status === 404) {
+      // Definitive miss — article does not exist. Cache the negative.
       lruSet(summaryCache, cacheKey, { ok: false, cachedAt: Date.now() });
       return null;
     }
     if (!response.ok) {
-      lruSet(summaryCache, cacheKey, { ok: false, cachedAt: Date.now() });
-      return null;
+      // 5xx / unexpected HTTP error — treat as transient network problem.
+      throw new WikipediaNetworkError(`HTTP ${response.status}`);
     }
 
     const data = (await response.json()) as {
@@ -152,12 +184,39 @@ async function summary(
 
     lruSet(summaryCache, cacheKey, { ok: true, data: result, cachedAt: Date.now() });
     return result;
-  } catch {
-    lruSet(summaryCache, cacheKey, { ok: false, cachedAt: Date.now() });
-    return null;
+  } catch (err) {
+    // Re-throw WikipediaNetworkError so callers can surface it.
+    if (err instanceof WikipediaNetworkError) throw err;
+    // Anything else (JSON parse error, etc.) — treat as transient.
+    throw new WikipediaNetworkError(err instanceof Error ? err.message : 'Unknown error');
   } finally {
     cleanup();
   }
+}
+
+/**
+ * Fetch a Wikipedia summary. Returns null for both 404 (no article) and all
+ * network errors. Safe to use in fire-and-forget or `.catch(() => null)`
+ * patterns — existing callers (LocalGuideService, OnlineGuideService) rely on
+ * this behavior.
+ */
+async function summary(
+  title: string,
+  opts?: { signal?: AbortSignal }
+): Promise<WikipediaSummary | null> {
+  return summaryCore(title, opts).catch(() => null);
+}
+
+/**
+ * Strict variant: returns null for 404, throws WikipediaNetworkError for
+ * transient failures (timeout, no connectivity, 5xx). Use this when the
+ * caller wants to surface a "network — try again" message to the user.
+ */
+async function summaryStrict(
+  title: string,
+  opts?: { signal?: AbortSignal }
+): Promise<WikipediaSummary | null> {
+  return summaryCore(title, opts);
 }
 
 // ─── historySection() ────────────────────────────────────────────────────────
@@ -335,12 +394,8 @@ async function summarize(
 
 // ─── searchByName() ─────────────────────────────────────────────────────────
 
-// Fuzzy title resolution via Wikipedia's free `opensearch` endpoint. Used as
-// a fallback when summary() returns null because the caller had a colloquial
-// name that doesn't exactly match an article title — e.g. "Cantor Arts
-// Center" is not a Wikipedia title, but opensearch maps it to "Cantor
-// Center for Visual Arts" which is. One extra HTTP call only on miss.
-async function searchByName(
+// Internal core — throws WikipediaNetworkError on transient failures.
+async function searchByNameCore(
   query: string,
   opts?: { signal?: AbortSignal }
 ): Promise<WikipediaSummary | null> {
@@ -355,8 +410,18 @@ async function searchByName(
   const { signal, cleanup } = makeSignal(opts?.signal);
 
   try {
-    const response = await fetch(url, { signal, headers: REQUEST_HEADERS });
-    if (!response.ok) return null;
+    let response: Response;
+    try {
+      response = await fetch(url, { signal, headers: REQUEST_HEADERS });
+    } catch (fetchErr) {
+      throw new WikipediaNetworkError(
+        fetchErr instanceof Error ? fetchErr.message : 'Network error'
+      );
+    }
+
+    if (!response.ok) {
+      throw new WikipediaNetworkError(`HTTP ${response.status}`);
+    }
 
     // Opensearch shape: [query, [titles[]], [descriptions[]], [urls[]]]
     const data = (await response.json()) as unknown;
@@ -364,21 +429,48 @@ async function searchByName(
     const title = (data[1] as unknown[])[0];
     if (typeof title !== 'string' || !title) return null;
 
-    return await summary(title, opts);
-  } catch {
+    // Use summaryCore so network errors propagate to the caller.
+    return await summaryCore(title, opts);
+  } catch (err) {
+    if (err instanceof WikipediaNetworkError) throw err;
     return null;
   } finally {
     cleanup();
   }
 }
 
+/**
+ * Fuzzy title resolution via Wikipedia's opensearch endpoint, then fetches the
+ * rich summary. Returns null for no-match, no-article (404), or network errors.
+ * Safe for fire-and-forget / `.catch(() => null)` patterns.
+ */
+async function searchByName(
+  query: string,
+  opts?: { signal?: AbortSignal }
+): Promise<WikipediaSummary | null> {
+  return searchByNameCore(query, opts).catch(() => null);
+}
+
+/**
+ * Strict variant of searchByName: throws WikipediaNetworkError on transient
+ * network failures; returns null only for no-match or 404 (no article).
+ */
+async function searchByNameStrict(
+  query: string,
+  opts?: { signal?: AbortSignal }
+): Promise<WikipediaSummary | null> {
+  return searchByNameCore(query, opts);
+}
+
 // ─── Singleton ───────────────────────────────────────────────────────────────
 
 export const wikipediaService = {
   summary,
+  summaryStrict,
   historySection,
   summarize,
   searchByName,
+  searchByNameStrict,
 
   // Exposed for tests that need a clean slate between runs.
   clearCache(): void {

@@ -14,6 +14,10 @@ interface Props {
   onMicToggle: () => void;
   inferring: boolean;
   isListening: boolean;
+  /** When true, renders the camera icon at 50% opacity and announces the
+   *  denied state via accessibilityLabel so VoiceOver / TalkBack users
+   *  understand that tapping will open Settings, not the camera. */
+  cameraPermissionDenied?: boolean;
 }
 
 export function ChatInputBar({
@@ -25,6 +29,7 @@ export function ChatInputBar({
   onMicToggle,
   inferring,
   isListening,
+  cameraPermissionDenied = false,
 }: Props) {
   // On Android with gesture-nav the system bar overlays the View; without
   // adding the bottom inset to paddingBottom the mic / camera / send row
@@ -43,10 +48,14 @@ export function ChatInputBar({
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.iconBtn}
+          style={[styles.iconBtn, cameraPermissionDenied && styles.cameraBtnDenied]}
           onPress={onCameraPress}
           disabled={inferring}
-          accessibilityLabel={t('chat.identifyThis')}
+          accessibilityLabel={
+            cameraPermissionDenied
+              ? 'Camera permission denied — tap to open settings'
+              : t('chat.identifyThis')
+          }
           testID="camera-btn"
         >
           <Text style={styles.iconGlyph}>📷</Text>
@@ -119,6 +128,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  cameraBtnDenied: {
+    opacity: 0.5,
   },
   micBtnActive: {
     backgroundColor: Colors.error,

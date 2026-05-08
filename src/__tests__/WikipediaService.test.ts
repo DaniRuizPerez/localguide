@@ -5,7 +5,7 @@
  * abort propagation, and summarize() truncation.
  */
 
-import { wikipediaService, type WikipediaSummary } from '../services/WikipediaService';
+import { wikipediaService, WikipediaNetworkError, type WikipediaSummary } from '../services/WikipediaService';
 
 const mockFetch = jest.fn();
 global.fetch = mockFetch as unknown as typeof fetch;
@@ -86,24 +86,34 @@ describe('WikipediaService.summary', () => {
     expect(result).toBeNull();
   });
 
-  it('returns null on non-404 server error', async () => {
+  it('returns null on non-404 server error (safe variant)', async () => {
     mockFetch.mockResolvedValue(serverErrorResponse());
     const result = await wikipediaService.summary('Stanford University');
     expect(result).toBeNull();
   });
 
-  it('returns null on network error (fetch rejects)', async () => {
+  it('returns null on network error (fetch rejects) (safe variant)', async () => {
     mockFetch.mockRejectedValue(new Error('network failure'));
     const result = await wikipediaService.summary('Stanford University');
     expect(result).toBeNull();
   });
 
-  it('returns null on timeout (fetch rejects with AbortError)', async () => {
+  it('returns null on timeout (fetch rejects with AbortError) (safe variant)', async () => {
     const err = new Error('The operation was aborted');
     err.name = 'AbortError';
     mockFetch.mockRejectedValue(err);
     const result = await wikipediaService.summary('Stanford University');
     expect(result).toBeNull();
+  });
+
+  it('summaryStrict: throws WikipediaNetworkError on non-404 server error', async () => {
+    mockFetch.mockResolvedValue(serverErrorResponse());
+    await expect(wikipediaService.summaryStrict('Stanford University')).rejects.toBeInstanceOf(WikipediaNetworkError);
+  });
+
+  it('summaryStrict: throws WikipediaNetworkError on network error', async () => {
+    mockFetch.mockRejectedValue(new Error('network failure'));
+    await expect(wikipediaService.summaryStrict('Stanford University')).rejects.toBeInstanceOf(WikipediaNetworkError);
   });
 
   it('returns from cache without re-fetching on second call', async () => {
@@ -150,7 +160,7 @@ describe('WikipediaService.summary', () => {
     }
   });
 
-  it('propagates caller abort signal', async () => {
+  it('propagates caller abort signal (safe variant returns null)', async () => {
     const controller = new AbortController();
     // Fetch rejects when the internal signal aborts (mirrors what real fetch does).
     mockFetch.mockImplementation((_url: string, init?: { signal?: AbortSignal }) => {

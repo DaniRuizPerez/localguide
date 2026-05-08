@@ -38,6 +38,13 @@ interface Props {
    * state or an LLM-hallucinated list.
    */
   locationDenied?: boolean;
+  /**
+   * True when a GPS fix or manual location is available. When false the three
+   * action cards (Plan my day, Quiz me, Map) are rendered at 50% opacity and
+   * their onPress is suppressed — tapping them would immediately fail anyway
+   * and the greyed state signals to the user what needs to happen first.
+   */
+  locationAvailable?: boolean;
 }
 
 /**
@@ -64,6 +71,7 @@ export function HomeState({
   loading = false,
   awaitingLocation = false,
   locationDenied = false,
+  locationAvailable = true,
 }: Props) {
   const radiusLabel =
     radiusMeters >= 1000
@@ -92,26 +100,29 @@ export function HomeState({
         <CtaCard
           glyph="📅"
           label={t('home.planMyDay')}
-          sub={t('home.planMyDaySub')}
-          onPress={onPlanDay}
-          disabled={disabled}
+          sub={locationAvailable ? t('home.planMyDaySub') : t('home.needsLocation')}
+          onPress={locationAvailable ? onPlanDay : undefined}
+          disabled={disabled || !locationAvailable}
+          dimmed={!locationAvailable}
           primary
           testID="home-plan-day"
         />
         <CtaCard
           glyph="🎯"
           label={t('home.quizMe')}
-          sub={t('home.quizMeSub')}
-          onPress={onQuiz}
-          disabled={disabled}
+          sub={locationAvailable ? t('home.quizMeSub') : t('home.needsLocation')}
+          onPress={locationAvailable ? onQuiz : undefined}
+          disabled={disabled || !locationAvailable}
+          dimmed={!locationAvailable}
           testID="home-quiz"
         />
         <CtaCard
           glyph="🗺"
           label={t('home.openMap')}
-          sub={t('home.openMapSub')}
-          onPress={onOpenMap}
-          disabled={disabled}
+          sub={locationAvailable ? t('home.openMapSub') : t('home.needsLocation')}
+          onPress={locationAvailable ? onOpenMap : undefined}
+          disabled={disabled || !locationAvailable}
+          dimmed={!locationAvailable}
           testID="home-open-map"
         />
       </View>
@@ -159,9 +170,7 @@ export function HomeState({
                 {aiPois.length > 0 && (
                   <View style={styles.aiDivider}>
                     <View style={styles.aiDividerLine} />
-                    <Text style={styles.aiDividerText}>
-                      {t('home.aiHallucinationDivider')}
-                    </Text>
+                    <Text style={styles.aiDividerText}>{t('home.aiHallucinationDivider')}</Text>
                     <View style={styles.aiDividerLine} />
                   </View>
                 )}
@@ -173,7 +182,6 @@ export function HomeState({
           })()}
         </View>
       )}
-
     </ScrollView>
   );
 }
@@ -185,19 +193,21 @@ function CtaCard({
   onPress,
   disabled,
   primary,
+  dimmed,
   testID,
 }: {
   glyph: string;
   label: string;
   sub: string;
-  onPress: () => void;
+  onPress?: () => void;
   disabled?: boolean;
   primary?: boolean;
+  dimmed?: boolean;
   testID?: string;
 }) {
   return (
     <TouchableOpacity
-      style={[styles.cta, primary ? styles.ctaPrimary : styles.ctaSecondary]}
+      style={[styles.cta, primary ? styles.ctaPrimary : styles.ctaSecondary, dimmed && styles.ctaDimmed]}
       onPress={onPress}
       disabled={disabled}
       accessibilityLabel={label}
@@ -208,9 +218,7 @@ function CtaCard({
       <Text style={[styles.ctaLabel, primary ? styles.ctaLabelPrimary : styles.ctaLabelSecondary]}>
         {label}
       </Text>
-      <Text style={[styles.ctaSub, primary ? styles.ctaSubPrimary : styles.ctaSubSecondary]}>
-        {sub}
-      </Text>
+      <Text style={[styles.ctaSub, primary ? styles.ctaSubPrimary : styles.ctaSubSecondary]}>{sub}</Text>
     </TouchableOpacity>
   );
 }
@@ -300,6 +308,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.borderLight,
     ...Shadows.softOutset,
+  },
+  ctaDimmed: {
+    opacity: 0.5,
   },
   ctaGlyph: {
     fontSize: 20,
