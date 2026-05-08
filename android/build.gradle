@@ -24,9 +24,11 @@ allprojects {
 }
 
 ext {
-    buildToolsVersion = "35.0.0"
-    // 35 = stable Android 15 SDK. Bump to 36 only when a dependency requires it.
-    compileSdkVersion = 35
+    buildToolsVersion = "36.0.0"
+    // Reverted from 35 → 36: an Expo module in this stack requires API 36
+    // (the build fails with MissingValueException at :app:compileDebugJavaWithJavac
+    // when compileSdk=35). Re-evaluate once Expo SDK pins are bumped.
+    compileSdkVersion = 36
     targetSdkVersion = 34
     minSdkVersion = 24
     ndkVersion = "27.1.12297006"
