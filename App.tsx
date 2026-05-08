@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFonts, Fraunces_500Medium } from '@expo-google-fonts/fraunces';
@@ -14,7 +14,6 @@ import AppNavigator from './src/navigation/AppNavigator';
 import ModelDownloadScreen from './src/screens/ModelDownloadScreen';
 import { modelDownloadService, profileForTier } from './src/services/ModelDownloadService';
 import { inferenceService } from './src/services/InferenceService';
-import { GuideAvatar } from './src/components/GuideAvatar';
 import { Colors } from './src/theme/colors';
 import { Type } from './src/theme/tokens';
 import { t } from './src/i18n';
@@ -26,6 +25,8 @@ import { visitedStore } from './src/services/VisitedStore';
 import { speechBackgroundKeeper } from './src/services/SpeechBackgroundKeeper';
 import { WelcomeTour } from './src/components/WelcomeTour';
 import { OfflineDimOverlay } from './src/components/OfflineDimOverlay';
+
+const CANYON_MARK = require('./assets/canyon/canyon-180.png');
 
 type AppState = 'checking' | 'needs_download' | 'warming_up' | 'ready';
 
@@ -117,7 +118,7 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <View style={styles.loadingContainer}>
-          <GuideAvatar size={64} />
+          <Image source={CANYON_MARK} style={styles.warmupMark} resizeMode="contain" />
           <ActivityIndicator size="large" color={Colors.primary} style={styles.spinner} />
           <Text style={styles.title}>{t('app.warmupTitle')}</Text>
           <Text style={styles.subtitle}>{t('app.warmupSubtitle')}</Text>
@@ -186,6 +187,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 32,
   },
+  warmupMark: { width: 96, height: 96, borderRadius: 22 },
   spinner: { marginTop: 24, marginBottom: 20 },
   title: {
     ...Type.title,

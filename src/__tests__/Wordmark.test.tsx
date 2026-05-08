@@ -1,8 +1,8 @@
 /**
  * Wordmark smoke tests.
  *
- * Asserts that the component renders the "AI Offline Tour Guide" label and that
- * the canyon topo-ring glyph (inline SVG) is present in the tree.
+ * Asserts that the component renders the "AI Offline Tour Guide" label and the
+ * Canyon brand-mark image glyph.
  */
 
 import React from 'react';
@@ -15,26 +15,19 @@ describe('Wordmark', () => {
     expect(getByText('AI Offline Tour Guide')).toBeTruthy();
   });
 
-  it('renders the SVG canyon glyph (svg-root present)', () => {
+  it('renders the Canyon brand-mark image', () => {
     const { getByTestId } = render(<Wordmark />);
-    expect(getByTestId('svg-root')).toBeTruthy();
+    expect(getByTestId('wordmark-glyph')).toBeTruthy();
   });
 
-  it('renders 4 SVG circles (3 topo rings + center dot)', () => {
-    const { getAllByTestId } = render(<Wordmark />);
-    const circles = getAllByTestId('svg-circle');
-    expect(circles).toHaveLength(4);
-  });
-
-  it('renders 2 SVG lines (N and S ticks)', () => {
-    const { getAllByTestId } = render(<Wordmark />);
-    const lines = getAllByTestId('svg-line');
-    expect(lines).toHaveLength(2);
-  });
-
-  it('accepts a custom size prop without throwing', () => {
-    const { getByText } = render(<Wordmark size={24} />);
-    expect(getByText('AI Offline Tour Guide')).toBeTruthy();
+  it('scales the glyph with the size prop', () => {
+    const { getByTestId } = render(<Wordmark size={40} />);
+    const glyph = getByTestId('wordmark-glyph');
+    const flat = Array.isArray(glyph.props.style)
+      ? Object.assign({}, ...glyph.props.style.filter(Boolean))
+      : glyph.props.style;
+    expect(flat.width).toBeCloseTo(36); // 40 * 0.9
+    expect(flat.height).toBeCloseTo(36);
   });
 
   it('accepts a style prop without throwing', () => {
