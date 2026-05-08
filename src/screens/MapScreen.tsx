@@ -28,6 +28,7 @@ import { MessageList } from '../components/MessageList';
 import { ChatInputBar } from '../components/ChatInputBar';
 import { OfflineNotice } from '../components/OfflineNotice';
 import { ModeChangeToast } from '../components/ModeChangeToast';
+import { OfflineMapCanvas } from '../components/OfflineMapCanvas';
 import { useEdgeSwipeBack } from '../components/EdgeSwipeBack';
 import { MyLocationIcon, TrashIcon, ChatBubbleIcon } from '../components/icons/MapIcons';
 import { poiEmojiFor } from '../services/poiTopic';
@@ -437,6 +438,17 @@ export default function MapScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container} {...swipeBackHandlers}>
+      {effective === 'offline' && gps ? (
+        <OfflineMapCanvas
+          gps={gps}
+          pois={visibleMarkers}
+          breadcrumb={trail}
+          compassTarget={compassTarget}
+          radiusMeters={radiusMeters}
+          onMarkerPress={(p) => setCompassTarget(p)}
+          onPoiAsk={askAboutPoi}
+        />
+      ) : (
       <MapView
         ref={mapRef}
         provider={PROVIDER_GOOGLE}
@@ -531,6 +543,7 @@ export default function MapScreen({ navigation }: Props) {
           );
         })}
       </MapView>
+      )}
 
       <View style={styles.overlayTop} pointerEvents="box-none">
         <OfflineNotice />

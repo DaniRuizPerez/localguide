@@ -81,13 +81,17 @@ jest.mock('expo-device', () => ({
 // or null so React-Testing-Library can inspect the tree.
 jest.mock('react-native-svg', () => {
   const React = require('react');
-  const { View } = require('react-native');
+  const { View, Text } = require('react-native');
   const Svg = ({ children, ...props }) =>
     React.createElement(View, { testID: 'svg-root', ...props }, children);
   const Circle = (props) => React.createElement(View, { testID: 'svg-circle', ...props });
   const Line = (props) => React.createElement(View, { testID: 'svg-line', ...props });
   const Path = (props) => React.createElement(View, { testID: 'svg-path', ...props });
+  const Polyline = ({ children, ...props }) =>
+    React.createElement(View, { testID: 'svg-polyline', ...props }, children);
   const Rect = (props) => React.createElement(View, { testID: 'svg-rect', ...props });
+  const SvgText = ({ children, ...props }) =>
+    React.createElement(Text, { testID: 'svg-text', ...props }, children);
   const G = ({ children, ...props }) =>
     React.createElement(View, { testID: 'svg-g', ...props }, children);
   return {
@@ -97,7 +101,9 @@ jest.mock('react-native-svg', () => {
     Circle,
     Line,
     Path,
+    Polyline,
     Rect,
+    Text: SvgText,
     G,
   };
 });
