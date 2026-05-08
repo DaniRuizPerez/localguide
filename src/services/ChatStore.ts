@@ -1,8 +1,10 @@
 // Shared chat singleton — mirrors the publisher pattern in RadiusPrefs /
 // GuidePrefs so multiple screens (ChatScreen and the Map pullup's Chat tab)
 // can render the same Message[] + inferring flag without lifting state via
-// React Context. In-memory only — chat is intentionally session-scoped.
+// React Context. Messages are persisted to AsyncStorage with a debounced
+// write so conversations survive full app restarts.
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { GPSContext } from './InferenceService';
 import type { Message } from '../types/chat';
 import type { Source } from '../components/SourceBadge';
@@ -11,6 +13,10 @@ export interface ChatStoreSnapshot {
   messages: Message[];
   inferring: boolean;
 }
+
+const STORAGE_KEY = 'chat-messages-v1';
+const MAX_MESSAGES = 200;
+const DEBOUNCE_MS = 500;
 
 let idSeq = 0;
 function nextId(prefix: string): string {
@@ -31,6 +37,40 @@ function notify(): void {
   for (const cb of subscribers) cb(snap);
 }
 
+// ── AsyncStorage persistence ──────────────────────────────────────────────
+
+let _persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function schedulePersist(): void {
+  if (_persistTimer !== null) clearTimeout(_persistTimer);
+  _persistTimer = setTimeout(() => {
+    _persistTimer = null;
+    const toSave = messages.slice(-MAX_MESSAGES);
+    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(toSave)).catch(() => {
+      // Best-effort — swallow silently.
+    });
+  }, DEBOUNCE_MS);
+}
+
+// Hydrate on module import. Skip if messages already populated (a mutation
+// fired between import and hydration completing — in-memory state wins).
+(async () => {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    if (raw == null) return;
+    const loaded: Message[] = JSON.parse(raw);
+    if (!Array.isArray(loaded)) return;
+    // Skip hydration if a mutation has already pushed messages into the store.
+    if (messages.length > 0) return;
+    messages = loaded.slice(-MAX_MESSAGES);
+    notify();
+  } catch (e) {
+    if (__DEV__) {
+      console.warn('[ChatStore] hydration failed:', e);
+    }
+  }
+})();
+
 export const chatStore = {
   get(): ChatStoreSnapshot {
     return snapshot();
@@ -38,8 +78,10 @@ export const chatStore = {
 
   addUserMessage(text: string, imageUri?: string): string {
     const id = nextId('u');
-    messages = [...messages, { id, role: 'user', text, imageUri }];
+    const next = [...messages, { id, role: 'user' as const, text, imageUri }];
+    messages = next.length > MAX_MESSAGES ? next.slice(-MAX_MESSAGES) : next;
     notify();
+    schedulePersist();
     return id;
   },
 
@@ -50,15 +92,19 @@ export const chatStore = {
     source?: Source
   ): string {
     const id = nextId('g');
-    messages = [...messages, { id, role: 'guide', text, locationUsed, durationMs, source }];
+    const next = [...messages, { id, role: 'guide' as const, text, locationUsed, durationMs, source }];
+    messages = next.length > MAX_MESSAGES ? next.slice(-MAX_MESSAGES) : next;
     notify();
+    schedulePersist();
     return id;
   },
 
   addGuidePlaceholder(locationUsed: GPSContext | string, source?: Source): string {
     const id = nextId('gp');
-    messages = [...messages, { id, role: 'guide', text: '', locationUsed, source }];
+    const next = [...messages, { id, role: 'guide' as const, text: '', locationUsed, source }];
+    messages = next.length > MAX_MESSAGES ? next.slice(-MAX_MESSAGES) : next;
     notify();
+    schedulePersist();
     return id;
   },
 
@@ -69,7 +115,7 @@ export const chatStore = {
       changed = true;
       return { ...m, text: m.text + delta };
     });
-    if (changed) notify();
+    if (changed) { notify(); schedulePersist(); }
   },
 
   finalizeGuideMessage(id: string, durationMs?: number): void {
@@ -79,7 +125,7 @@ export const chatStore = {
       changed = true;
       return { ...m, text: m.text.trim(), durationMs };
     });
-    if (changed) notify();
+    if (changed) { notify(); schedulePersist(); }
   },
 
   // Replaces a streaming bubble's text with an error string only if it's still
@@ -95,7 +141,7 @@ export const chatStore = {
         text: m.text || `Sorry, something went wrong. (${message})`,
       };
     });
-    if (changed) notify();
+    if (changed) { notify(); schedulePersist(); }
   },
 
   setGuideSource(id: string, source: Source): void {
@@ -105,19 +151,26 @@ export const chatStore = {
       changed = true;
       return { ...m, source };
     });
-    if (changed) notify();
+    if (changed) { notify(); schedulePersist(); }
   },
 
   setInferring(value: boolean): void {
     if (inferring === value) return;
     inferring = value;
     notify();
+    // inferring is transient session state — not persisted.
   },
 
   clear(): void {
     messages = [];
     inferring = false;
     notify();
+    schedulePersist();
+  },
+
+  /** Convenience accessor for tests and components that just need the array. */
+  getMessages(): Message[] {
+    return messages;
   },
 
   subscribe(cb: (snap: ChatStoreSnapshot) => void): () => void {

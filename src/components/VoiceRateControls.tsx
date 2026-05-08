@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Linking,
   Modal,
   Pressable,
@@ -18,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../theme/colors';
 import { Radii, Shadows, Sizing, Spacing, Type } from '../theme/tokens';
 import { guidePrefs, type ModeChoice } from '../services/GuidePrefs';
+import { chatStore } from '../services/ChatStore';
 import {
   narrationPrefs,
   NARRATION_LENGTH_VALUES,
@@ -364,6 +366,30 @@ export function VoiceRateControls({
                 )}
               </View>
             </SettingsGroup>
+            {/* CLEAR CONVERSATION */}
+            <TouchableOpacity
+              style={styles.reportRow}
+              onPress={() =>
+                Alert.alert(
+                  'Clear conversation?',
+                  'Your current chat history will be deleted.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Clear',
+                      style: 'destructive',
+                      onPress: () => chatStore.clear(),
+                    },
+                  ]
+                )
+              }
+              accessibilityRole="button"
+              accessibilityLabel="Clear conversation"
+              testID="settings-clear-conversation"
+            >
+              <Text style={[styles.reportLabel, styles.clearLabel]}>Clear conversation</Text>
+            </TouchableOpacity>
+
             {/* REPORT */}
             <TouchableOpacity
               style={styles.reportRow}
@@ -696,6 +722,9 @@ const styles = StyleSheet.create({
     ...Type.bodySm,
     color: Colors.textTertiary,
     textDecorationLine: 'underline',
+  },
+  clearLabel: {
+    color: Colors.error,
   },
   doneBtn: {
     marginTop: Spacing.md,

@@ -306,8 +306,7 @@ export default function ChatScreen(props: Props) {
   const backToHome = useCallback(() => {
     if (inferring) stop();
     speechService.stop();
-    messages.clear();
-  }, [inferring, stop, messages]);
+  }, [inferring, stop]);
 
   const swipeBackHandlers = useEdgeSwipeBack(backToHome);
 

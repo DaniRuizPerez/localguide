@@ -337,3 +337,33 @@ describe('Characterization: ChatScreen — message rendering', () => {
     expect(guideBubbles.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe('Characterization: ChatScreen — back nav preserves messages', () => {
+  beforeEach(() => {
+    const { useLocation } = require('../hooks/useLocation');
+    useLocation.mockReturnValue(defaultLocationState);
+    mockAsk.mockClear();
+    nextStreamResponse = 'Guide reply.';
+  });
+
+  it('messages remain in chatStore after the back button is pressed', async () => {
+    const { getByPlaceholderText, getByText, getByTestId, findByText } = render(
+      <ChatScreen navigation={mockNavigation} route={chatRoute} />
+    );
+
+    // Send a message so there is conversation history.
+    const input = getByPlaceholderText("Ask about what's near you…");
+    fireEvent.changeText(input, 'Surviving message');
+    await act(async () => { fireEvent.press(getByText('↑')); });
+    // Wait for the guide reply so the stream has completed.
+    await findByText('Guide reply.');
+
+    // Press the back button (rendered by ChatHeader when hasMessages is true).
+    await act(async () => { fireEvent.press(getByTestId('chat-back-btn')); });
+
+    // chatStore should still have the conversation — no wipe on back-nav.
+    const remaining = chatStore.getMessages();
+    expect(remaining.length).toBeGreaterThanOrEqual(1);
+    expect(remaining.some((m) => m.text === 'Surviving message')).toBe(true);
+  });
+});
