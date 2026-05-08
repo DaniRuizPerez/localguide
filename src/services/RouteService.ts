@@ -24,7 +24,10 @@ import { distanceMeters } from './PoiService';
 const OSRM_BASE = 'https://router.project-osrm.org/table/v1/foot';
 const USER_AGENT = 'LocalGuide/1.0 (https://github.com/DaniRuizPerez/localguide)';
 const FETCH_TIMEOUT_MS = 6000;
-const COORD_CAP = 12;
+// 16 = user position + 15 ranked POIs (AROUND_YOU_CAP). OSRM's table demo
+// allows up to 100 sources, so 16 is well within fair-use; ItineraryModal's
+// caller still tops out at ~8 stops.
+const COORD_CAP = 16;
 const STORAGE_PREFIX = 'route-matrix:';
 const STORAGE_TTL_MS = 24 * 60 * 60 * 1000; // 24 h
 const LRU_MAX = 32;

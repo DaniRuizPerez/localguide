@@ -48,6 +48,16 @@ export interface Poi {
    * ranker to boost genuine landmarks even when their article is short.
    */
   coordType?: string;
+  /**
+   * OSRM-routed walking distance in metres from the user's current GPS.
+   * Filled asynchronously by `useWalkingDistances` after the ranked list
+   * lands. UI displays this in preference to the (always-present) Haversine
+   * `distanceMeters`. Absent when OSRM hasn't responded yet, the matrix
+   * call failed, or this is an LLM-source POI (no real coords).
+   */
+  walkingMeters?: number;
+  /** OSRM-routed walking minutes from the user's current GPS. See above. */
+  walkingMinutes?: number;
 }
 
 export interface FetchOptions {

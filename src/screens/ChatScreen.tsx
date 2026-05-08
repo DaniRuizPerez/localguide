@@ -28,6 +28,7 @@ import { guidePrefs } from '../services/GuidePrefs';
 import type { Poi } from '../services/PoiService';
 import { useRankedPois } from '../hooks/useRankedPois';
 import { useRadiusPref } from '../hooks/useRadiusPref';
+import { useWalkingDistances } from '../hooks/useWalkingDistances';
 import type { Message } from '../types/chat';
 import { Colors } from '../theme/colors';
 import { Radii, Type } from '../theme/tokens';
@@ -153,7 +154,11 @@ export default function ChatScreen(props: Props) {
     radiusMeters: poiRadiusMeters,
   });
 
-  const visiblePois = ranked;
+  // Async OSRM walking-distance enrichment. Falls back to Haversine
+  // distanceMeters when the matrix call is in flight or fails — the UI
+  // formatter handles both transparently.
+  const { enriched: rankedWithWalking } = useWalkingDistances(ranked, gps);
+  const visiblePois = rankedWithWalking;
 
   // Background quiz prefetch. Fires once nearby places have settled and the
   // location label is known; the prefetch itself uses priority='low' and

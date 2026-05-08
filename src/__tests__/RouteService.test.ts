@@ -178,8 +178,8 @@ describe('walkingTimeMatrix — failure returns null', () => {
 // ─── 6. Coord cap ────────────────────────────────────────────────────────────
 
 describe('walkingTimeMatrix — coord cap', () => {
-  it('returns null immediately for >12 coords without calling fetch', async () => {
-    const tooMany = Array.from({ length: 13 }, (_, i) => ({
+  it('returns null immediately for >16 coords without calling fetch', async () => {
+    const tooMany = Array.from({ length: 17 }, (_, i) => ({
       lat: 37.4 + i * 0.01,
       lon: -122.1,
     }));

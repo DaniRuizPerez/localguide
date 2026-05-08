@@ -49,7 +49,7 @@ export function AttractionsChips({
             key={`${p.source}-${p.pageId}`}
             label={p.title}
             icon={isLlm ? '🧠' : '📍'}
-            meta={!isLlm ? formatDistance(p.distanceMeters) : undefined}
+            meta={!isLlm ? formatDistance(p.walkingMeters ?? p.distanceMeters) : undefined}
             variant="sage"
             onPress={() => onSelect(p)}
             disabled={disabled}

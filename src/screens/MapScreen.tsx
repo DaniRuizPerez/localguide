@@ -23,6 +23,7 @@ import { MessageList } from '../components/MessageList';
 import { ChatInputBar } from '../components/ChatInputBar';
 import { OfflineNotice } from '../components/OfflineNotice';
 import { useEdgeSwipeBack } from '../components/EdgeSwipeBack';
+import { MyLocationIcon, TrashIcon } from '../components/icons/MapIcons';
 import { breadcrumbTrail } from '../services/BreadcrumbTrail';
 import { useBreadcrumbTrail } from '../hooks/useBreadcrumbTrail';
 import { t } from '../i18n';

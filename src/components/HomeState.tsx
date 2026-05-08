@@ -256,7 +256,7 @@ function PoiRow({ poi, onPress, disabled }: { poi: Poi; onPress: () => void; dis
         </View>
       ) : (
         <View style={styles.poiDistanceBadge}>
-          <Text style={styles.poiDistanceText}>{formatDistance(poi.distanceMeters)}</Text>
+          <Text style={styles.poiDistanceText}>{formatDistance(poi.walkingMeters ?? poi.distanceMeters)}</Text>
         </View>
       )}
     </TouchableOpacity>
