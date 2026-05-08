@@ -6,7 +6,6 @@ export const EN = {
     warmupTitle: 'Getting your guide ready…',
     warmupSubtitle:
       'Loading the on-device model and warming up so your first question is fast.\nThis happens once per app launch.',
-    pickTopic: 'WHILE YOU WAIT, PICK A TOPIC',
     warmupError: 'Warmup error: {message}',
     hallucinationWarning:
       '⚠  On-device AI — double-check important facts.',

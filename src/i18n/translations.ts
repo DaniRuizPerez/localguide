@@ -42,7 +42,6 @@ const ES: Partials = {
     warmupTitle: 'Preparando tu guía…',
     warmupSubtitle:
       'Cargando el modelo en el dispositivo para que tu primera pregunta sea rápida.\nEsto ocurre una vez por arranque.',
-    pickTopic: 'MIENTRAS ESPERAS, ELIGE UN TEMA',
     warmupError: 'Error al preparar: {message}',
     hallucinationWarning:
       '⚠  IA en el dispositivo — verifica los datos importantes.',
@@ -154,7 +153,6 @@ const FR: Partials = {
     warmupTitle: 'Préparation de ton guide…',
     warmupSubtitle:
       'Chargement du modèle local pour que ta première question soit rapide.\nCela arrive une fois par lancement.',
-    pickTopic: 'EN ATTENDANT, CHOISIS UN THÈME',
     warmupError: 'Erreur de préparation : {message}',
     hallucinationWarning:
       '⚠  IA locale — vérifie les informations importantes.',
