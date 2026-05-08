@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as Sentry from '@sentry/react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFonts, Fraunces_500Medium } from '@expo-google-fonts/fraunces';
 import {
@@ -28,9 +29,20 @@ import { OfflineDimOverlay } from './src/components/OfflineDimOverlay';
 
 const CANYON_MARK = require('./assets/canyon/canyon-180.png');
 
+Sentry.init({
+  dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
+  enabled: !__DEV__ && !!process.env.EXPO_PUBLIC_SENTRY_DSN,
+  // Errors only — no performance tracing (saves quota and adds no signal for our use case).
+  tracesSampleRate: 0,
+  // Limit captured events when DSN is misconfigured so we don't spam the dashboard.
+  beforeSend(event) {
+    return event;
+  },
+});
+
 type AppState = 'checking' | 'needs_download' | 'warming_up' | 'ready';
 
-export default function App() {
+function App() {
   const [appState, setAppState] = useState<AppState>('checking');
   const [warmupError, setWarmupError] = useState<string | null>(null);
   const [warmupRetryCount, setWarmupRetryCount] = useState(0);
@@ -90,6 +102,7 @@ export default function App() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
+        Sentry.captureException(err, { tags: { phase: 'warmup' } });
         const msg = err instanceof Error ? err.message : String(err);
         setWarmupError(msg);
       });
@@ -178,6 +191,8 @@ export default function App() {
     </SafeAreaProvider>
   );
 }
+
+export default Sentry.wrap(App);
 
 const styles = StyleSheet.create({
   loadingContainer: {

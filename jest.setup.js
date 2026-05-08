@@ -115,6 +115,20 @@ jest.mock('expo-speech-recognition', () => ({
   useSpeechRecognitionEvent: jest.fn(),
 }));
 
+// @sentry/react-native — stub so tests never hit the native Sentry bridge.
+// All capture methods are no-ops; Sentry.wrap passes the component through.
+jest.mock('@sentry/react-native', () => ({
+  init: jest.fn(),
+  wrap: (component) => component,
+  captureException: jest.fn(),
+  captureMessage: jest.fn(),
+  addBreadcrumb: jest.fn(),
+  setUser: jest.fn(),
+  setTag: jest.fn(),
+  setExtra: jest.fn(),
+  withScope: jest.fn((cb) => cb({ setTag: jest.fn(), setExtra: jest.fn() })),
+}));
+
 // expo-image-picker — stub so tests never hit the camera native bridge.
 jest.mock('expo-image-picker', () => ({
   requestCameraPermissionsAsync: jest.fn().mockResolvedValue({ status: 'granted' }),

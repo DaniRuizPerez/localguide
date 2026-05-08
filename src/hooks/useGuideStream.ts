@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import * as Sentry from '@sentry/react-native';
 import { localGuideService, type ChatTurn, type GuideTopic } from '../services/LocalGuideService';
 import { speechService } from '../services/SpeechService';
 import { SpeechChunker } from '../services/SpeechChunker';
@@ -134,6 +135,12 @@ export function useGuideStream({ speakResponsesRef, topicRef, onScroll }: GuideS
         streamRef.current = null;
         chunker.cancel();
         speechService.stop();
+        Sentry.captureMessage(`postfilter ${reason}`, {
+          level: 'warning',
+          extra: {
+            cleanedText: postfilter.getCleanedText().slice(0, 2000),
+          },
+        });
         const trailer = trailerFor(reason);
         const cleaned = postfilter.getCleanedText();
         const body = trailer ? `${cleaned}\n\n${trailer}` : cleaned;

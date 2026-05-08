@@ -11,7 +11,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#E8845C"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "icon": "./assets/canyon/canyon-1024.png",
       "supportsTablet": true,
@@ -45,6 +47,9 @@
     },
     "extra": {
       "googleMapsApiKey": ""
-    }
+    },
+    "plugins": [
+      "@sentry/react-native"
+    ]
   }
 }
