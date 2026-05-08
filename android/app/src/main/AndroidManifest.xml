@@ -1,17 +1,26 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
-  <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+  <!-- ACCESS_BACKGROUND_LOCATION removed for v1.0. Play Store requires a
+       written/video justification for this permission (2024 policy). Re-add
+       in v1.1 together with the Play submission narrative and the
+       startLocationUpdatesAsync call in AutoGuideService.ts. -->
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
   <uses-permission android:name="android.permission.INTERNET"/>
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" tools:replace="android:maxSdkVersion"/>
-  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="replace"/>
+  <!-- RECEIVE_BOOT_COMPLETED removed: not referenced in src/. No Expo module
+       in this project requires boot-completion broadcasts. -->
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+  <!-- SYSTEM_ALERT_WINDOW removed: not referenced in src/. Overlay permission
+       is not required by any feature in this app. -->
   <uses-permission android:name="android.permission.VIBRATE"/>
-  <uses-permission android:name="android.permission.WAKE_LOCK"/>
+  <!-- WAKE_LOCK removed: not referenced in src/. No background work in v1.0
+       requires holding a wakelock directly. -->
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" tools:replace="android:maxSdkVersion"/>
+  <!-- Foreground location service is provided by expo-location's background-location-service.
+       The persistent notification + foregroundServiceType are configured by expo-location's
+       own merged manifest at runtime. No <service> declaration is needed here. -->
   <queries>
     <intent>
       <action android:name="android.intent.action.VIEW"/>

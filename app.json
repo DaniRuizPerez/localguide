@@ -32,13 +32,12 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION",
         "RECORD_AUDIO",
         "INTERNET",
-        "RECEIVE_BOOT_COMPLETED",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_LOCATION"
-      ]
+      ],
+      "newArchEnabled": false
     },
     "web": {
       "favicon": "./assets/favicon.png"
