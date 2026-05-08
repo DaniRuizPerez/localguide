@@ -23,6 +23,7 @@ import { CompassArrow } from '../components/CompassArrow';
 import { MessageList } from '../components/MessageList';
 import { ChatInputBar } from '../components/ChatInputBar';
 import { OfflineNotice } from '../components/OfflineNotice';
+import { ModeChangeToast } from '../components/ModeChangeToast';
 import { useEdgeSwipeBack } from '../components/EdgeSwipeBack';
 import { MyLocationIcon, TrashIcon } from '../components/icons/MapIcons';
 import { breadcrumbTrail } from '../services/BreadcrumbTrail';
@@ -69,6 +70,14 @@ export default function MapScreen({ navigation }: Props) {
   const [chatInput, setChatInput] = useState('');
   const { effective } = useAppMode();
   const trail = useBreadcrumbTrail();
+
+  // ── Midnight trail-clear toast ────────────────────────────────────────────
+  const [midnightToastId, setMidnightToastId] = useState<number | null>(null);
+  useEffect(() => {
+    return breadcrumbTrail.onClearedAtMidnight(() => {
+      setMidnightToastId(Date.now());
+    });
+  }, []);
 
   // ── Chat hooks for the pullup Chat tab ───────────────────────────────────
   const messages = useChatMessages();
@@ -490,6 +499,14 @@ export default function MapScreen({ navigation }: Props) {
         >
           <TrashIcon size={20} color={Colors.primary} />
         </TouchableOpacity>
+      )}
+
+      {midnightToastId !== null && (
+        <ModeChangeToast
+          key={midnightToastId}
+          text={t('map.trailClearedToast')}
+          onDismiss={() => setMidnightToastId(null)}
+        />
       )}
 
       <Animated.View

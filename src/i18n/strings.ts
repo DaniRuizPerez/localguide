@@ -80,6 +80,7 @@ export const EN = {
     locationUnavailable: 'Location unavailable',
     retry: 'Retry',
     clearTrail: 'Clear trail',
+    trailClearedToast: 'Your trail was cleared at midnight.',
     unavailableTitle: 'Map unavailable',
     unavailableBody: 'Add a Google Maps API key to enable the map view. Other features still work.',
   },

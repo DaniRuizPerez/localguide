@@ -69,6 +69,11 @@ const store = createPersistedStore<TrailState>({
 // the dateKey). Re-registered after __resetForTest so tests that reset
 // between beforeEach blocks keep a working notification path.
 const pointsListeners = new Set<(points: BreadcrumbPoint[]) => void>();
+
+// Midnight-reset notification listeners. Fired when record() detects that
+// the day has rolled over and wipes yesterday's trail.
+const midnightListeners = new Set<() => void>();
+
 function wireStoreForward(): void {
   store.subscribe((s) => {
     for (const l of pointsListeners) l(s.points);
@@ -96,6 +101,9 @@ export const breadcrumbTrail = {
     const state = store.get();
     if (today !== state.dateKey) {
       store.set({ dateKey: today, points: [] });
+      // Notify midnight-reset subscribers before recursing so listeners see
+      // the cleared state (points=[]) when they call getPoints().
+      for (const cb of midnightListeners) cb();
       return this.record(latitude, longitude, timestamp);
     }
     const last = state.points[state.points.length - 1];
@@ -123,9 +131,22 @@ export const breadcrumbTrail = {
     };
   },
 
+  /**
+   * Subscribe to the midnight trail-clear event. The callback fires once per
+   * day rollover (when the first GPS fix after midnight triggers the reset).
+   * Returns an unsubscribe function.
+   */
+  onClearedAtMidnight(cb: () => void): () => void {
+    midnightListeners.add(cb);
+    return () => {
+      midnightListeners.delete(cb);
+    };
+  },
+
   __resetForTest(): void {
     store.__resetForTest();
     pointsListeners.clear();
+    midnightListeners.clear();
     wireStoreForward();
   },
 };

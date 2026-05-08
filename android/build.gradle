@@ -25,7 +25,8 @@ allprojects {
 
 ext {
     buildToolsVersion = "35.0.0"
-    compileSdkVersion = 36
+    // 35 = stable Android 15 SDK. Bump to 36 only when a dependency requires it.
+    compileSdkVersion = 35
     targetSdkVersion = 34
     minSdkVersion = 24
     ndkVersion = "27.1.12297006"
