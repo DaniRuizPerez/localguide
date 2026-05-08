@@ -1,0 +1,35 @@
+name: Claude triage
+on:
+  issues:
+    types: [labeled]
+jobs:
+  triage:
+    if: github.event.label.name == 'sentry'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Triage Sentry-reported issue #${{ github.event.issue.number }}.
+            The issue body has a stack trace, breadcrumbs, and device info.
+
+            1. From the stack trace, identify the file(s) under src/ involved.
+            2. If the fix is small (one file, ≤ 30 lines) and obvious from the
+               trace, open a PR titled "fix: <one-line>" that includes a
+               regression test that fails before the fix. Run `npm test` and
+               `npx tsc --noEmit` before opening the PR. Close the issue with
+               "Closes #<n>".
+            3. Otherwise comment with:
+               - Root-cause hypothesis
+               - The file/line you would start at
+               - What additional repro info would unblock the fix
+               Then apply the label `needs-human`.
+
+            Never include the full chat content from the issue body in commit
+            messages or PR titles — keep that data in the issue body only.
