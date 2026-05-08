@@ -156,7 +156,7 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
         </View>
 
         <View style={styles.chipsRow}>
-          <PillowChip label={modelDownloadService.profile.displayName.split(' ')[0] + ' ' + modelDownloadService.profile.displayName.split(' ')[1]} />
+          <PillowChip label={modelDownloadService.profile.displayName.split(' ').slice(0, 2).join(' ')} />
           <PillowChip label="INT4" />
           <PillowChip label={t('download.wifiOnly')} />
         </View>

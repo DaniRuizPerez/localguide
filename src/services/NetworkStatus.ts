@@ -63,7 +63,7 @@ async function runProbe(): Promise<void> {
     const res = await fetch(PROBE_URL, {
       signal: controller.signal,
       cache: 'no-store',
-      headers: { 'User-Agent': 'LocalGuide/1.0 (https://github.com/DaniRuizPerez/localguide)' },
+      headers: { 'User-Agent': 'LocalGuide/1.0 (contact: daniruizperez93@gmail.com; https://github.com/DaniRuizPerez/localguide)' },
     });
     if (res.ok) {
       consecutiveFailures = 0;

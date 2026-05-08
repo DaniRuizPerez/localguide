@@ -3,6 +3,7 @@ node_modules/
 dist/
 web-build/
 *.orig.*
+*.bak
 *.jks
 *.p8
 *.p12

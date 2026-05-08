@@ -1186,16 +1186,22 @@ export const localGuideService = {
       try {
         for (let i = 0; i < count; i++) {
           if (aborted) break;
-          // eslint-disable-next-line no-console
-          console.log(`[Quiz] slot ${i}: starting (${emitted.length} emitted so far)`);
+          if (__DEV__) {
+            // eslint-disable-next-line no-console
+            console.log(`[Quiz] slot ${i}: starting (${emitted.length} emitted so far)`);
+          }
           let accepted: QuizQuestion | null = null;
           for (let attempt = 0; attempt <= MAX_DEDUPE_RETRIES; attempt++) {
             if (aborted) break;
-            // eslint-disable-next-line no-console
-            console.log(`[Quiz] slot ${i} attempt ${attempt}: calling runOne`);
+            if (__DEV__) {
+              // eslint-disable-next-line no-console
+              console.log(`[Quiz] slot ${i} attempt ${attempt}: calling runOne`);
+            }
             const candidate = await runOne(i, attempt);
-            // eslint-disable-next-line no-console
-            console.log(`[Quiz] slot ${i} attempt ${attempt}: runOne returned ${candidate ? `q="${candidate.question.slice(0, 40)}"` : 'null'}`);
+            if (__DEV__) {
+              // eslint-disable-next-line no-console
+              console.log(`[Quiz] slot ${i} attempt ${attempt}: runOne returned ${candidate ? `q="${candidate.question.slice(0, 40)}"` : 'null'}`);
+            }
             // Parse failure: small on-device models drop format roughly 1 in
             // 5 tries. Keep retrying within this slot's budget rather than
             // aborting the whole run.
@@ -1206,8 +1212,10 @@ export const localGuideService = {
               fingerprints.add(fp);
               break;
             }
-            // eslint-disable-next-line no-console
-            console.log(`[Quiz] slot ${i} attempt ${attempt}: duplicate detected, fingerprint="${fp}"`);
+            if (__DEV__) {
+              // eslint-disable-next-line no-console
+              console.log(`[Quiz] slot ${i} attempt ${attempt}: duplicate detected, fingerprint="${fp}"`);
+            }
             // Duplicate: loop and retry. The next prompt will include the
             // already-emitted question texts as the avoid list.
           }
@@ -1216,13 +1224,17 @@ export const localGuideService = {
             // Three consecutive failures (parse or dupe) for this slot.
             // Skip it but keep trying the rest — partial results are still
             // useful.
-            // eslint-disable-next-line no-console
-            console.warn(`[Quiz] slot ${i}: all attempts exhausted, skipping slot`);
+            if (__DEV__) {
+              // eslint-disable-next-line no-console
+              console.warn(`[Quiz] slot ${i}: all attempts exhausted, skipping slot`);
+            }
             continue;
           }
           emitted.push(accepted);
-          // eslint-disable-next-line no-console
-          console.log(`[Quiz] slot ${i}: accepted, emitting q="${accepted.question.slice(0, 40)}"`);
+          if (__DEV__) {
+            // eslint-disable-next-line no-console
+            console.log(`[Quiz] slot ${i}: accepted, emitting q="${accepted.question.slice(0, 40)}"`);
+          }
           handlers.onQuestion(accepted, emitted.length - 1);
           // Explicit handoff log: confirms the preload pipeline. The next
           // slot's runOne will be entered on the very next iteration of this
@@ -1230,13 +1242,15 @@ export const localGuideService = {
           // the question we just emitted. If you're trying to verify
           // preload behavior in logcat, look for this line followed
           // shortly by "[Quiz] slot N+1 attempt 0: calling runOne".
-          if (i + 1 < count) {
+          if (i + 1 < count && __DEV__) {
             // eslint-disable-next-line no-console
             console.log(`[Quiz] PRELOAD slot ${i + 1} starting NOW while user reviews Q${i + 1}`);
           }
         }
-        // eslint-disable-next-line no-console
-        console.log(`[Quiz] driver loop done: emitted=${emitted.length}`);
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.log(`[Quiz] driver loop done: emitted=${emitted.length}`);
+        }
         if (!aborted) handlers.onDone(emitted);
       } catch (err) {
         if (aborted) return;
