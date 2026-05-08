@@ -1,4 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Network from 'expo-network';
 
 // Each device tier gets its own model. Small phones (<4 GB RAM) get Gemma 3 1B
 // (~580 MB, text-only) so inference is actually usable; bigger phones get the
@@ -47,7 +48,7 @@ export function profileForTier(tier: DeviceTier): ModelProfile {
 
 export const MODEL_DIR = `${FileSystem.documentDirectory}models/`;
 
-export type DownloadStatus = 'idle' | 'checking' | 'downloading' | 'paused' | 'done' | 'error';
+export type DownloadStatus = 'idle' | 'checking' | 'downloading' | 'paused' | 'done' | 'error' | 'cellular-warning';
 
 export interface DownloadProgress {
   bytesDownloaded: number;
@@ -122,6 +123,30 @@ export class ModelDownloadService {
     }
   }
 
+  /**
+   * Checks whether the device is on cellular. If so, emits 'cellular-warning'
+   * status and returns true (the caller should prompt the user). Returns false
+   * when it is safe to proceed immediately (Wi-Fi, Ethernet, or unknown).
+   */
+  async checkCellular(): Promise<boolean> {
+    try {
+      const state = await Network.getNetworkStateAsync();
+      if (state.type === Network.NetworkStateType.CELLULAR) {
+        this._status = 'cellular-warning';
+        return true;
+      }
+      if (state.type === Network.NetworkStateType.NONE) {
+        this._status = 'error';
+        this._error = 'No internet connection. Connect to Wi-Fi or cellular and try again.';
+        throw new Error(this._error);
+      }
+    } catch (err) {
+      // If we can't determine network type, proceed anyway — don't block on it.
+      if (this._status === 'error') throw err;
+    }
+    return false;
+  }
+
   async startDownload(onProgress: ProgressCallback): Promise<void> {
     this._error = null;
     this._status = 'downloading';
@@ -194,7 +219,9 @@ export class ModelDownloadService {
 
         if (actualSize > MIN_SIZE) {
           this._status = 'done';
-          console.log(`[ModelDownloadService] Download successful: ${actualSize} bytes`);
+          if (__DEV__) {
+            console.log(`[ModelDownloadService] Download successful: ${actualSize} bytes`);
+          }
         } else {
           throw new Error(`Downloaded file is too small (${actualSize} bytes).`);
         }

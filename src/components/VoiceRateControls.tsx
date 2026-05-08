@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -363,6 +364,19 @@ export function VoiceRateControls({
                 )}
               </View>
             </SettingsGroup>
+            {/* REPORT */}
+            <TouchableOpacity
+              style={styles.reportRow}
+              onPress={() =>
+                Linking.openURL(
+                  'mailto:daniruizperez93@gmail.com?subject=AI%20Offline%20Tour%20Guide%20-%20Report'
+                )
+              }
+              accessibilityRole="link"
+              accessibilityLabel={t('settings.reportProblem')}
+            >
+              <Text style={styles.reportLabel}>{t('settings.reportProblem')}</Text>
+            </TouchableOpacity>
           </ScrollView>
 
           <TouchableOpacity style={styles.doneBtn} onPress={onClose}>
@@ -673,6 +687,15 @@ const styles = StyleSheet.create({
   emptyHint: {
     ...Type.bodySm,
     color: Colors.textTertiary,
+  },
+  reportRow: {
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  reportLabel: {
+    ...Type.bodySm,
+    color: Colors.textTertiary,
+    textDecorationLine: 'underline',
   },
   doneBtn: {
     marginTop: Spacing.md,

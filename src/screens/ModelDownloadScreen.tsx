@@ -1,6 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { Alert, BackHandler, Linking, View, Text, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Network from 'expo-network';
 import {
   modelDownloadService,
   DownloadProgress,
@@ -29,19 +30,25 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
     fraction: 0,
   });
   const [downloadStatus, setDownloadStatus] = useState<
-    'idle' | 'downloading' | 'paused' | 'done' | 'error'
+    'idle' | 'downloading' | 'paused' | 'done' | 'error' | 'cellular-warning'
   >('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Subscription ref so we can cancel the Wi-Fi listener if the user navigates away.
+  const networkListenerRef = useRef<ReturnType<typeof Network.addNetworkStateListener> | null>(null);
 
   useEffect(() => {
     modelDownloadService.getRemoteFileSize().then((size) => setRemoteSize(size));
+    return () => {
+      networkListenerRef.current?.remove();
+    };
   }, []);
 
   const handleProgress = useCallback((p: DownloadProgress) => {
     setProgress(p);
   }, []);
 
-  const handleStart = useCallback(async () => {
+  /** Actually run the download (called after any cellular gate is cleared). */
+  const runDownload = useCallback(async () => {
     setErrorMessage(null);
     setDownloadStatus('downloading');
     try {
@@ -55,6 +62,54 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
       );
     }
   }, [handleProgress, onDownloadComplete]);
+
+  /** Subscribe to network changes and resume when Wi-Fi is back. */
+  const waitForWifi = useCallback(() => {
+    setDownloadStatus('idle');
+    networkListenerRef.current?.remove();
+    networkListenerRef.current = Network.addNetworkStateListener((state) => {
+      if (
+        state.type === Network.NetworkStateType.WIFI ||
+        state.type === Network.NetworkStateType.ETHERNET
+      ) {
+        networkListenerRef.current?.remove();
+        networkListenerRef.current = null;
+        runDownload();
+      }
+    });
+  }, [runDownload]);
+
+  const handleStart = useCallback(async () => {
+    setErrorMessage(null);
+    try {
+      const isCellular = await modelDownloadService.checkCellular();
+      if (isCellular) {
+        setDownloadStatus('cellular-warning');
+        Alert.alert(
+          'Mobile data',
+          t('download.cellularWarning'),
+          [
+            {
+              text: t('download.cellularWait'),
+              onPress: waitForWifi,
+            },
+            {
+              text: t('download.cellularContinue'),
+              style: 'default',
+              onPress: runDownload,
+            },
+          ]
+        );
+        return;
+      }
+    } catch {
+      // checkCellular already set status=error if no connection
+      setDownloadStatus('error');
+      setErrorMessage(modelDownloadService.error ?? 'No internet connection.');
+      return;
+    }
+    await runDownload();
+  }, [runDownload, waitForWifi]);
 
   const handlePause = useCallback(async () => {
     await modelDownloadService.pauseDownload();
@@ -92,6 +147,17 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
     }
   }, [handleProgress, onDownloadComplete]);
 
+  const handleCancelAndExit = useCallback(() => {
+    Alert.alert(
+      t('download.cancel') ?? 'Cancel download',
+      'Quit the app? You can come back later.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Quit', onPress: () => BackHandler.exitApp() },
+      ]
+    );
+  }, []);
+
   const percent = Math.round(progress.fraction * 100);
   const downloadedMb = formatMb(progress.bytesDownloaded);
   const totalMb = remoteSize != null
@@ -103,7 +169,7 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
   const isActive = downloadStatus === 'downloading';
   const isPaused = downloadStatus === 'paused';
   const isError = downloadStatus === 'error';
-  const isIdle = downloadStatus === 'idle';
+  const isIdle = downloadStatus === 'idle' || downloadStatus === 'cellular-warning';
   const isDone = downloadStatus === 'done';
 
   const orbState: 'downloading' | 'paused' | 'complete' | 'error' | 'idle' = isError
@@ -135,6 +201,9 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
     ? handleResume
     : handleStart;
 
+  // Show the Cancel & exit button when paused or idle (not yet started or paused mid-way).
+  const showCancelExit = isPaused || isIdle;
+
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={styles.container} bounces={false}>
@@ -143,7 +212,7 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
         <View style={styles.headingBlock}>
           <Text style={[Type.h1, { color: Colors.text }]}>{t('download.heading')}</Text>
           <Text style={[Type.body, { color: Colors.textSecondary, marginTop: 10 }]}>
-            {t('download.subtitle', { mb: totalMb })}
+            {t('download.subtitle')}
           </Text>
         </View>
 
@@ -157,8 +226,8 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
 
         <View style={styles.chipsRow}>
           <PillowChip label={modelDownloadService.profile.displayName.split(' ').slice(0, 2).join(' ')} />
-          <PillowChip label="INT4" />
-          <PillowChip label={t('download.wifiOnly')} />
+          <PillowChip label={t('download.optimizedChip')} />
+          <PillowChip label={t('download.wifiOnlyChip')} />
         </View>
 
         {isError && errorMessage ? (
@@ -174,6 +243,14 @@ export default function ModelDownloadScreen({ onDownloadComplete }: Props) {
             variant="primary"
             size="lg"
           />
+          {showCancelExit ? (
+            <SoftButton
+              label={t('download.cancel')}
+              onPress={handleCancelAndExit}
+              variant="secondary"
+              size="lg"
+            />
+          ) : null}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -218,5 +295,6 @@ const styles = StyleSheet.create({
   ctaWrap: {
     marginTop: 'auto',
     paddingTop: Spacing.lg,
+    gap: Spacing.sm,
   },
 });

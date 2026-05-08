@@ -15,7 +15,7 @@ const GLYPH: Record<Source, string> = {
   maps: '🗺',
   geonames: '📍',
   'ai-online': '🧠',
-  'ai-offline': '⚠',
+  'ai-offline': '🧠',
 };
 
 // i18n key suffix per source variant.
