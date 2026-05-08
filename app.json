@@ -4,15 +4,16 @@
     "slug": "ai-offline-tourguide",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/canyon/canyon-1024.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./assets/canyon/canyon-1024.png",
       "resizeMode": "contain",
-      "backgroundColor": "#F8F5F0"
+      "backgroundColor": "#E8845C"
     },
     "assetBundlePatterns": ["**/*"],
     "ios": {
+      "icon": "./assets/canyon/canyon-1024.png",
       "supportsTablet": true,
       "bundleIdentifier": "com.ai_offline_tourguide",
       "infoPlist": {
@@ -25,8 +26,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#F8F5F0"
+        "foregroundImage": "./assets/canyon/canyon-android-foreground-432.png",
+        "backgroundColor": "#E8845C"
       },
       "package": "com.ai_offline_tourguide",
       "permissions": [
