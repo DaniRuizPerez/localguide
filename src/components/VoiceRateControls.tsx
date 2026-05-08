@@ -31,6 +31,8 @@ import { currentSpeechTag, getLocale, t } from '../i18n';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useAppMode } from '../hooks/useAppMode';
 import { appMode } from '../services/AppMode';
+import { useUnitPref } from '../hooks/useUnitPref';
+import { formatRadius } from '../utils/formatDistance';
 import type * as SpeechModule from 'expo-speech';
 
 type Voice = SpeechModule.Voice;
@@ -60,14 +62,17 @@ const RATE_MIN = 0.6;
 const RATE_MAX = 1.6;
 const RATE_STEP = 0.05;
 
-// The radii the UI exposes as segmented options. Keep in sync with the
-// inner clamp in poiService.fetchNearby (10..10000).
-const RADIUS_OPTIONS: Array<{ label: string; meters: number }> = [
-  { label: '1km', meters: 1000 },
-  { label: '2km', meters: 2000 },
-  { label: '5km', meters: 5000 },
-  { label: '10km', meters: 10000 },
-];
+// Radii in km mode: clean 2/5/10/20 km numbers.
+const VALID_RADII_KM = [2000, 5000, 10000, 20000] as const;
+// Radii in miles mode: clean 2/5/10/20 mi numbers (converted to meters).
+const VALID_RADII_MI = [3219, 8047, 16093, 32187] as const; // 2/5/10/20 mi → m
+
+/** Return the nearest radius in the new valid set when units switch. */
+function snapToNearestRadius(meters: number, options: readonly number[]): number {
+  return options.reduce((best, c) =>
+    Math.abs(c - meters) < Math.abs(best - meters) ? c : best
+  );
+}
 
 function formatRate(rate: number): string {
   return `${rate.toFixed(2)}×`;
@@ -142,6 +147,17 @@ export function VoiceRateControls({
   const availableVoices = useVoicesForLocale(visible);
   const networkState = useNetworkStatus();
   const { effective, choice: appModeChoice } = useAppMode();
+  const { units, setUnits } = useUnitPref();
+
+  // Dynamic radius options depend on current unit. When unit changes, snap the
+  // current radius to the nearest value in the new valid set.
+  const radiusOptions = units === 'miles' ? VALID_RADII_MI : VALID_RADII_KM;
+  const handleUnitChange = (nextUnits: 'km' | 'miles') => {
+    const nextOptions = nextUnits === 'miles' ? VALID_RADII_MI : VALID_RADII_KM;
+    const snapped = snapToNearestRadius(radiusMeters, nextOptions);
+    setUnits(nextUnits);
+    onRadiusChange(snapped);
+  };
 
   useEffect(() => {
     return narrationPrefs.subscribe((p) => {
@@ -291,13 +307,22 @@ export function VoiceRateControls({
               </View>
             </SettingsGroup>
 
-            {/* SEARCH AREA — radius only; length moved into NARRATION. */}
+            {/* SEARCH AREA — radius + distance units. */}
             <SettingsGroup label={t('settings.groupSearch')}>
               <SegmentedRow
                 label={t('settings.radiusLabel')}
-                options={RADIUS_OPTIONS.map((o) => o.label)}
-                activeIdx={RADIUS_OPTIONS.findIndex((o) => o.meters === radiusMeters)}
-                onSelect={(i) => onRadiusChange(RADIUS_OPTIONS[i].meters)}
+                options={Array.from(radiusOptions).map((m) => formatRadius(m, units))}
+                activeIdx={(() => {
+                  const snapped = snapToNearestRadius(radiusMeters, radiusOptions);
+                  return Array.from<number>(radiusOptions).indexOf(snapped);
+                })()}
+                onSelect={(i) => onRadiusChange(radiusOptions[i])}
+              />
+              <SegmentedRow
+                label={t('settings.unitsLabel')}
+                options={['km', 'mi']}
+                activeIdx={units === 'km' ? 0 : 1}
+                onSelect={(i) => handleUnitChange(i === 0 ? 'km' : 'miles')}
               />
             </SettingsGroup>
 

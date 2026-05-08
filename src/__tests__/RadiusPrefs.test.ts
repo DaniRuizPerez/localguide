@@ -36,11 +36,11 @@ describe('radiusPrefs', () => {
     const listener = jest.fn();
     const unsub = radiusPrefs.subscribe(listener);
 
-    radiusPrefs.set(1000);
+    radiusPrefs.set(2000);
     expect(listener).toHaveBeenCalledTimes(1);
 
     unsub();
-    radiusPrefs.set(2000);
+    radiusPrefs.set(20000);
     expect(listener).toHaveBeenCalledTimes(1); // still 1 — no extra call after unsub
   });
 
@@ -53,8 +53,17 @@ describe('radiusPrefs', () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
+  it('rejects old 1000 m value (removed from valid set)', () => {
+    const listener = jest.fn();
+    radiusPrefs.subscribe(listener);
+
+    radiusPrefs.set(1000 as number); // was valid in old version, now removed
+    expect(radiusPrefs.get().radiusMeters).toBe(5000); // unchanged default
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   it('all valid values round-trip through AsyncStorage', async () => {
-    for (const valid of [1000, 2000, 5000, 10000]) {
+    for (const valid of [2000, 5000, 10000, 20000]) {
       radiusPrefs.__resetForTest();
       await AsyncStorage.clear();
 
@@ -76,6 +85,17 @@ describe('radiusPrefs', () => {
     await AsyncStorage.setItem(
       '@localguide/radius-prefs-v1',
       JSON.stringify({ radiusMeters: 9999 })
+    );
+    radiusPrefs.__resetForTest();
+    await radiusPrefs.hydrate();
+    expect(radiusPrefs.get().radiusMeters).toBe(5000);
+  });
+
+  it('hydrate() migrates old 1000 m value to default 5000 m', async () => {
+    // Simulate a user who had 1 km saved from the old valid set {1,2,5,10} km.
+    await AsyncStorage.setItem(
+      '@localguide/radius-prefs-v1',
+      JSON.stringify({ radiusMeters: 1000 })
     );
     radiusPrefs.__resetForTest();
     await radiusPrefs.hydrate();

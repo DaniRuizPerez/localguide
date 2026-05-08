@@ -159,7 +159,7 @@ export const EN = {
     aroundYouLoading: 'Looking around you…',
     aroundYouWaitingGps: 'Waiting for your location…',
     aroundYouNoPermission: 'Grant location permission (or enter a place above) to see what\'s nearby.',
-    changeRadius: '{km} · change',
+    changeRadius: '{label} · change',
     offlineDisclaimer: 'You\'re offline — these places come from on-device data.',
   },
   settings: {
@@ -179,6 +179,7 @@ export const EN = {
     topicLabel: 'Topic',
     topicSub: 'What should your guide focus on?',
     radiusLabel: 'Radius',
+    unitsLabel: 'Distance units',
     lengthLabel: 'Length',
     groupConnection: 'CONNECTION',
     modeLabel: 'Mode',

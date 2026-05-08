@@ -126,6 +126,12 @@ jest.mock('./src/services/VoiceRecognitionService', () => ({
   },
 }));
 
+// useUnitPref — always return 'km' in tests so distance-formatting assertions
+// are locale-independent (tests use metric expectations like "4.X km", "m").
+jest.mock('./src/hooks/useUnitPref', () => ({
+  useUnitPref: () => ({ units: 'km', setUnits: jest.fn() }),
+}));
+
 // react-native-maps calls TurboModuleRegistry.getEnforcing at import time.
 // Stub MapView/Marker/Polyline so tests can render them as plain Views.
 jest.mock('react-native-maps', () => {

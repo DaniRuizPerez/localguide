@@ -7,6 +7,8 @@ import { t } from '../i18n';
 import type { GPSContext } from '../services/InferenceService';
 import type { Poi } from '../services/PoiService';
 import { poiEmojiFor } from '../services/poiTopic';
+import { useUnitPref } from '../hooks/useUnitPref';
+import { formatDistance as fmtDist, formatRadius } from '../utils/formatDistance';
 
 interface Props {
   /** Human-readable place name ("Midtown, NYC"). Falls back to "here". */
@@ -73,10 +75,8 @@ export function HomeState({
   locationDenied = false,
   locationAvailable = true,
 }: Props) {
-  const radiusLabel =
-    radiusMeters >= 1000
-      ? `${(radiusMeters / 1000).toFixed(radiusMeters % 1000 === 0 ? 0 : 1)} km`
-      : `${radiusMeters} m`;
+  const { units } = useUnitPref();
+  const radiusLabel = formatRadius(radiusMeters, units);
 
   // Keep both wikipedia + llm sources; llm is the only flavor we get in
   // offline mode and filtering it out would leave the section permanently
@@ -130,7 +130,7 @@ export function HomeState({
       <View style={styles.aroundHeader}>
         <Text style={styles.aroundTitle}>{t('home.aroundYou')}</Text>
         <TouchableOpacity onPress={onChangeRadius}>
-          <Text style={styles.radiusLink}>{t('home.changeRadius', { km: radiusLabel })}</Text>
+          <Text style={styles.radiusLink}>{t('home.changeRadius', { label: radiusLabel })}</Text>
         </TouchableOpacity>
       </View>
 
@@ -165,7 +165,7 @@ export function HomeState({
             return (
               <>
                 {realPois.map((p) => (
-                  <PoiRow key={p.pageId} poi={p} onPress={() => onNarratePoi(p)} disabled={disabled} />
+                  <PoiRow key={p.pageId} poi={p} onPress={() => onNarratePoi(p)} disabled={disabled} units={units} />
                 ))}
                 {aiPois.length > 0 && (
                   <View style={styles.aiDivider}>
@@ -175,7 +175,7 @@ export function HomeState({
                   </View>
                 )}
                 {aiPois.map((p) => (
-                  <PoiRow key={p.pageId} poi={p} onPress={() => onNarratePoi(p)} disabled={disabled} />
+                  <PoiRow key={p.pageId} poi={p} onPress={() => onNarratePoi(p)} disabled={disabled} units={units} />
                 ))}
               </>
             );
@@ -223,13 +223,7 @@ function CtaCard({
   );
 }
 
-function formatDistance(meters: number): string {
-  if (meters < 1000) return `${Math.round(meters)} m`;
-  if (meters < 10000) return `${(meters / 1000).toFixed(1)} km`;
-  return `${Math.round(meters / 1000)} km`;
-}
-
-function PoiRow({ poi, onPress, disabled }: { poi: Poi; onPress: () => void; disabled?: boolean }) {
+function PoiRow({ poi, onPress, disabled, units }: { poi: Poi; onPress: () => void; disabled?: boolean; units: 'km' | 'miles' }) {
   const isLlm = poi.source === 'llm';
   // Infer from the title for every source. LLM picks don't carry a Wikipedia
   // description, but "Notre Dame Cathedral" / "Golden Gate Bridge" / "Stanford
@@ -264,7 +258,7 @@ function PoiRow({ poi, onPress, disabled }: { poi: Poi; onPress: () => void; dis
         </View>
       ) : (
         <View style={styles.poiDistanceBadge}>
-          <Text style={styles.poiDistanceText}>{formatDistance(poi.walkingMeters ?? poi.distanceMeters)}</Text>
+          <Text style={styles.poiDistanceText}>{fmtDist(poi.walkingMeters ?? poi.distanceMeters, units)}</Text>
         </View>
       )}
     </TouchableOpacity>

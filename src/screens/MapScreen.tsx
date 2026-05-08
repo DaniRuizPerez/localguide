@@ -9,6 +9,8 @@ import { useAppMode } from '../hooks/useAppMode';
 import { useNearbyPois } from '../hooks/useNearbyPois';
 import { useRankedPois } from '../hooks/useRankedPois';
 import { useRadiusPref } from '../hooks/useRadiusPref';
+import { useUnitPref } from '../hooks/useUnitPref';
+import { formatDistance } from '../utils/formatDistance';
 import { useWalkingDistances } from '../hooks/useWalkingDistances';
 import { useChatMessages } from '../hooks/useChatMessages';
 import { useGuideStream } from '../hooks/useGuideStream';
@@ -161,6 +163,7 @@ export default function MapScreen({ navigation }: Props) {
 
   // ── Radius + hiddenGems prefs ─────────────────────────────────────────────
   const { radiusMeters } = useRadiusPref();
+  const { units } = useUnitPref();
   const [hiddenGems, setHiddenGems] = useState<boolean>(guidePrefs.get().hiddenGems);
   useEffect(() => guidePrefs.subscribe((p) => setHiddenGems(p.hiddenGems)), []);
 
@@ -643,10 +646,7 @@ export default function MapScreen({ navigation }: Props) {
                 const isTarget = compassTarget?.pageId === p.pageId;
                 const canGuide = p.source !== 'llm';
                 const distanceM = p.walkingMeters ?? p.distanceMeters;
-                const distanceLabel =
-                  distanceM < 1000
-                    ? `${Math.round(distanceM)} m`
-                    : `${(distanceM / 1000).toFixed(1)} km`;
+                const distanceLabel = formatDistance(distanceM, units);
                 return (
                   <TouchableOpacity
                     key={`row-${p.source}-${p.pageId}`}

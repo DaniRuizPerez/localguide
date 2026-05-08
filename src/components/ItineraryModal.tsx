@@ -28,6 +28,8 @@ import { distanceMeters, type Poi } from '../services/PoiService';
 import { visitedStore } from '../services/VisitedStore';
 import { appMode } from '../services/AppMode';
 import { routeService, type WalkingMatrix } from '../services/RouteService';
+import { useUnitPref } from '../hooks/useUnitPref';
+import { formatDistance } from '../utils/formatDistance';
 
 interface Props {
   visible: boolean;
@@ -215,6 +217,7 @@ export function ItineraryModal({
   onChatAboutStop,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const { units } = useUnitPref();
 
   // Subscribe to the visited-titles store so the checkmarks rerender when
   // the user toggles one. We hydrate at app boot in App.tsx; here we just
@@ -598,8 +601,8 @@ export function ItineraryModal({
               ) : routeLegs !== null ? (
                 <Text style={styles.routeStripText}>
                   {hasOsrmLeg
-                    ? `≈ ${routeTotalMin} min walking · ${(routeTotalM / 1000).toFixed(1)} km`
-                    : `≈ ${(routeTotalM / 1000).toFixed(1)} km`}
+                    ? `≈ ${routeTotalMin} min walking · ${formatDistance(routeTotalM, units)}`
+                    : `≈ ${formatDistance(routeTotalM, units)}`}
                 </Text>
               ) : null}
             </View>

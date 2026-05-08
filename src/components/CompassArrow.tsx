@@ -4,6 +4,8 @@ import { Colors } from '../theme/colors';
 import { Radii, Shadows, Type } from '../theme/tokens';
 import { useHeading } from '../hooks/useHeading';
 import { t } from '../i18n';
+import { useUnitPref } from '../hooks/useUnitPref';
+import { formatDistance } from '../utils/formatDistance';
 
 interface Props {
   /** Target latitude/longitude. */
@@ -52,11 +54,6 @@ export function haversineMeters(
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-function formatDistance(meters: number): string {
-  if (meters < 1000) return `${Math.round(meters)} m`;
-  return `${(meters / 1000).toFixed(1)} km`;
-}
-
 export function CompassArrow({
   targetLat,
   targetLon,
@@ -65,6 +62,7 @@ export function CompassArrow({
   label,
   enabled = true,
 }: Props) {
+  const { units } = useUnitPref();
   const heading = useHeading(enabled);
   const bearing = bearingDegrees(userLat, userLon, targetLat, targetLon);
   // What we rotate the arrow by: target bearing MINUS device heading gives
@@ -104,7 +102,7 @@ export function CompassArrow({
       </View>
       <View style={styles.meta}>
         <Text style={styles.label} numberOfLines={1}>{label}</Text>
-        <Text style={styles.distance}>{formatDistance(distance)}</Text>
+        <Text style={styles.distance}>{formatDistance(distance, units)}</Text>
         {heading == null && (
           <Text style={styles.hint}>{t('compass.noSensor')}</Text>
         )}

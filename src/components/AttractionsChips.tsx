@@ -11,6 +11,8 @@ import {
 import { PillowChip } from './PillowChip';
 import { Colors } from '../theme/colors';
 import type { Poi } from '../services/PoiService';
+import { useUnitPref } from '../hooks/useUnitPref';
+import { formatDistance } from '../utils/formatDistance';
 
 export function AttractionsChips({
   pois,
@@ -25,6 +27,8 @@ export function AttractionsChips({
   disabled?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
+  const { units } = useUnitPref();
+
   if (!loading && pois.length === 0) {
     return null;
   }
@@ -49,7 +53,7 @@ export function AttractionsChips({
             key={`${p.source}-${p.pageId}`}
             label={p.title}
             icon={isLlm ? '🧠' : '📍'}
-            meta={!isLlm ? formatDistance(p.walkingMeters ?? p.distanceMeters) : undefined}
+            meta={!isLlm ? formatDistance(p.walkingMeters ?? p.distanceMeters, units) : undefined}
             variant="sage"
             onPress={() => onSelect(p)}
             disabled={disabled}
@@ -61,11 +65,6 @@ export function AttractionsChips({
       })}
     </ScrollView>
   );
-}
-
-function formatDistance(meters: number): string {
-  if (meters < 1000) return `${Math.round(meters)} m`;
-  return `${(meters / 1000).toFixed(1)} km`;
 }
 
 const styles = StyleSheet.create({

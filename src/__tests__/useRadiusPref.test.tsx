@@ -26,10 +26,10 @@ describe('useRadiusPref', () => {
     const { result } = renderHook(() => useRadiusPref());
 
     act(() => {
-      radiusPrefs.set(1000);
+      radiusPrefs.set(20000);
     });
 
-    expect(result.current.radiusMeters).toBe(1000);
+    expect(result.current.radiusMeters).toBe(20000);
   });
 
   it('ignores invalid values — state stays at current value', () => {
