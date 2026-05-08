@@ -29,25 +29,41 @@ export function ConnectionPill({ onPress }: Props) {
 
   let dotColor: string;
   let label: string;
+  let pillBg: string;
+  let emoji: string;
+  let a11yLabel: string;
 
   if (isProbing) {
     dotColor = Colors.textTertiary;
     label = t('mode.unknownProbing');
+    pillBg = Colors.surface;
+    emoji = '';
+    a11yLabel = label;
   } else if (effective === 'online') {
     dotColor = Colors.success; // #4ea374
     label = t('mode.online');
+    // Sage/mint background: successLight (#DDE8DF light / #172A1F dark).
+    pillBg = Colors.successLight;
+    // Emoji kept in a separate sibling Text so tests can still do getByText('Online').
+    emoji = '🌐 ';
+    a11yLabel = 'Online mode';
   } else {
     dotColor = Colors.warning; // amber
     label = t('mode.offline');
+    // Amber background: warningLight (#FBEBD0 light / #2E2210 dark).
+    pillBg = Colors.warningLight;
+    // Emoji kept in a separate sibling Text so tests can still do getByText('Offline').
+    emoji = '📴 ';
+    a11yLabel = 'Offline mode';
   }
 
   const pillBody = (
-    <View style={styles.pill} testID="connection-pill-body">
+    <View style={[styles.pill, { backgroundColor: pillBg }]} testID="connection-pill-body">
       <View style={[styles.dot, { backgroundColor: dotColor }]} />
-      <Text
-        style={[Type.metaUpper, styles.label]}
-        numberOfLines={1}
-      >
+      <Text style={[Type.metaUpper, styles.label]} numberOfLines={1} aria-hidden>
+        {emoji}
+      </Text>
+      <Text style={[Type.metaUpper, styles.label]} numberOfLines={1}>
         {label}
       </Text>
     </View>
@@ -58,7 +74,7 @@ export function ConnectionPill({ onPress }: Props) {
       <Pressable
         onPress={onPress}
         accessibilityRole="button"
-        accessibilityLabel={label}
+        accessibilityLabel={a11yLabel}
         testID="connection-pill"
       >
         {pillBody}
@@ -69,7 +85,7 @@ export function ConnectionPill({ onPress }: Props) {
   return (
     <View
       accessibilityRole="text"
-      accessibilityLabel={label}
+      accessibilityLabel={a11yLabel}
       testID="connection-pill"
     >
       {pillBody}
@@ -81,7 +97,6 @@ const styles = StyleSheet.create({
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.surface,
     paddingHorizontal: 11,
     paddingVertical: 5,
     borderRadius: 14,

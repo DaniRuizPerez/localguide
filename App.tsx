@@ -26,6 +26,7 @@ import { breadcrumbTrail } from './src/services/BreadcrumbTrail';
 import { visitedStore } from './src/services/VisitedStore';
 import { speechBackgroundKeeper } from './src/services/SpeechBackgroundKeeper';
 import { WelcomeTour } from './src/components/WelcomeTour';
+import { ModeStripe } from './src/components/ModeStripe';
 
 type AppState = 'checking' | 'needs_download' | 'warming_up' | 'ready';
 
@@ -177,6 +178,9 @@ export default function App() {
           null when the tour has already been seen, so no extra state is needed. */}
       <WelcomeTour onDismiss={() => {}} />
       <StatusBar style="dark" />
+      {/* Persistent 8 px amber stripe at the very top edge when offline.
+          Absolute-positioned + pointerEvents="none" — decorative only. */}
+      <ModeStripe />
     </SafeAreaProvider>
   );
 }
