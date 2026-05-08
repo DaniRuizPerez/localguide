@@ -8,6 +8,7 @@ import { useAppMode } from '../hooks/useAppMode';
 import { useNearbyPois } from '../hooks/useNearbyPois';
 import { useRankedPois } from '../hooks/useRankedPois';
 import { useRadiusPref } from '../hooks/useRadiusPref';
+import { useWalkingDistances } from '../hooks/useWalkingDistances';
 import { useChatMessages } from '../hooks/useChatMessages';
 import { useGuideStream } from '../hooks/useGuideStream';
 import { Colors } from '../theme/colors';
@@ -114,7 +115,9 @@ export default function MapScreen({ navigation }: Props) {
     offline,
     skipLlmFill: !offline,
   });
-  const { ranked } = useRankedPois(rawPois, gps, { hiddenGems, offline, radiusMeters });
+  const { ranked: rankedRaw } = useRankedPois(rawPois, gps, { hiddenGems, offline, radiusMeters });
+  // OSRM walking-distance overlay. Falls back to Haversine while in flight.
+  const { enriched: ranked } = useWalkingDistances(rankedRaw, gps);
   // LLM POIs have placeholder coords (= user GPS); never show as map markers.
   const visibleMarkers = ranked.filter((p) => p.source !== 'llm');
 
@@ -566,9 +569,12 @@ export default function MapScreen({ navigation }: Props) {
                     </View>
                     <View style={styles.poiBadge}>
                       <Text style={[Type.chip, { color: Colors.primary }]}>
-                        {p.distanceMeters < 1000
-                          ? `${Math.round(p.distanceMeters)} m`
-                          : `${(p.distanceMeters / 1000).toFixed(1)} km`}
+                        {(() => {
+                          const m = p.walkingMeters ?? p.distanceMeters;
+                          return m < 1000
+                            ? `${Math.round(m)} m`
+                            : `${(m / 1000).toFixed(1)} km`;
+                        })()}
                       </Text>
                     </View>
                     <TouchableOpacity
