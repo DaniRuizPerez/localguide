@@ -450,9 +450,11 @@ export default function MapScreen({ navigation }: Props) {
         style={styles.fab}
         onPress={recenter}
         disabled={!gps}
-        accessibilityLabel="Recenter"
+        accessibilityLabel="Recenter on my location"
+        accessibilityRole="button"
+        testID="map-recenter-btn"
       >
-        <Text style={styles.fabGlyph}>◎</Text>
+        <MyLocationIcon size={24} color={Colors.primary} />
       </TouchableOpacity>
 
       {trail.length > 0 && (
@@ -460,8 +462,10 @@ export default function MapScreen({ navigation }: Props) {
           style={[styles.fab, styles.trailFab]}
           onPress={() => breadcrumbTrail.clear()}
           accessibilityLabel={t('map.clearTrail')}
+          accessibilityRole="button"
+          testID="map-clear-trail-btn"
         >
-          <Text style={styles.fabGlyph}>⌀</Text>
+          <TrashIcon size={20} color={Colors.primary} />
         </TouchableOpacity>
       )}
 
@@ -763,10 +767,6 @@ const styles = StyleSheet.create({
     lineHeight: 26,
     color: Colors.textSecondary,
     marginTop: -2,
-  },
-  fabGlyph: {
-    fontSize: 20,
-    color: Colors.primary,
   },
   trailFab: {
     bottom: 292,
