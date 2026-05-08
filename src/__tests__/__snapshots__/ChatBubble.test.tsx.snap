@@ -168,9 +168,9 @@ exports[`AnimatedChatBubble — guide messages renders source badge for guide me
             ]
           }
         >
-          ⚠
+          🧠
            
-          Offline AI · may be inaccurate
+          On-device AI — double-check important facts
         </Text>
       </View>
     </View>
@@ -526,7 +526,7 @@ exports[`AnimatedChatBubble — guide messages renders source badge for guide me
         >
           🗺
            
-          Maps
+          Google Maps
         </Text>
       </View>
     </View>
@@ -746,9 +746,9 @@ exports[`SourceBadge renders ai-offline variant 1`] = `
       ]
     }
   >
-    ⚠
+    🧠
      
-    Offline AI · may be inaccurate
+    On-device AI — double-check important facts
   </Text>
 </View>
 `;
@@ -830,7 +830,7 @@ exports[`SourceBadge renders maps variant 1`] = `
   >
     🗺
      
-    Maps
+    Google Maps
   </Text>
 </View>
 `;

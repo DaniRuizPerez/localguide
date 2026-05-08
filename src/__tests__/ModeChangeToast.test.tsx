@@ -32,9 +32,9 @@ describe('ModeChangeToast', () => {
   it('renders the text prop', () => {
     const onDismiss = jest.fn();
     const { getByText } = render(
-      <ModeChangeToast text="Switched to offline. Some answers may be inaccurate." onDismiss={onDismiss} />
+      <ModeChangeToast text="Switched to offline. Some answers may be wrong about specific facts." onDismiss={onDismiss} />
     );
-    expect(getByText('Switched to offline. Some answers may be inaccurate.')).toBeTruthy();
+    expect(getByText('Switched to offline. Some answers may be wrong about specific facts.')).toBeTruthy();
   });
 
   it('calls onDismiss after 4 s auto-dismiss', () => {
@@ -224,7 +224,7 @@ describe('ChatScreen — mode-change toast integration', () => {
     );
 
     expect(
-      queryByText('Switched to offline. Some answers may be inaccurate.')
+      queryByText('Switched to offline. Some answers may be wrong about specific facts.')
     ).toBeNull();
     expect(queryByText('Back online. Pulling fresh sources.')).toBeNull();
   });
@@ -251,7 +251,7 @@ describe('ChatScreen — mode-change toast integration', () => {
       rerender(<ChatScreen navigation={mockNavigation} route={chatRoute} />);
     });
 
-    expect(getByText('Switched to offline. Some answers may be inaccurate.')).toBeTruthy();
+    expect(getByText('Switched to offline. Some answers may be wrong about specific facts.')).toBeTruthy();
   });
 
   it('shows toastBackOnline text when effective flips offline→online', () => {
@@ -300,12 +300,12 @@ describe('ChatScreen — mode-change toast integration', () => {
       rerender(<ChatScreen navigation={mockNavigation} route={chatRoute} />);
     });
 
-    expect(queryByText('Switched to offline. Some answers may be inaccurate.')).toBeTruthy();
+    expect(queryByText('Switched to offline. Some answers may be wrong about specific facts.')).toBeTruthy();
 
     act(() => {
       jest.runAllTimers();
     });
 
-    expect(queryByText('Switched to offline. Some answers may be inaccurate.')).toBeNull();
+    expect(queryByText('Switched to offline. Some answers may be wrong about specific facts.')).toBeNull();
   });
 });

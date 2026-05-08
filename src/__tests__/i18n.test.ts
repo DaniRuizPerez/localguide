@@ -95,18 +95,18 @@ describe('i18n — online/offline mode strings (B4)', () => {
     expect(t('mode.offline')).toBe('Offline');
     expect(t('mode.auto')).toBe('Auto');
     expect(t('mode.unknownProbing')).toBe('Checking…');
-    expect(t('mode.toastSwitchedOffline')).toBe('Switched to offline. Some answers may be inaccurate.');
+    expect(t('mode.toastSwitchedOffline')).toBe('Switched to offline. Some answers may be wrong about specific facts.');
     expect(t('mode.toastBackOnline')).toBe('Back online. Pulling fresh sources.');
-    expect(t('mode.offlineCaveat')).toBe('⚠  Offline mode: answers come from a tiny on-device model and may be inaccurate.');
+    expect(t('mode.offlineCaveat')).toBe('⚠  Offline mode: answers come from the on-device AI — double-check important facts.');
     expect(t('mode.onlineCaveat')).toBe('🌐  Online: grounded with real sources where possible.');
   });
 
   it('resolves all source.* keys in English', () => {
     const { t } = load('en-US');
     expect(t('source.wikipedia')).toBe('Wikipedia');
-    expect(t('source.maps')).toBe('Maps');
+    expect(t('source.maps')).toBe('Google Maps');
     expect(t('source.aiOnline')).toBe('AI');
-    expect(t('source.aiOffline')).toBe('Offline AI · may be inaccurate');
+    expect(t('source.aiOffline')).toBe('On-device AI — double-check important facts');
   });
 
   it('resolves new settings.* connection keys in English', () => {

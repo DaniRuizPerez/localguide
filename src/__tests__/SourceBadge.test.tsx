@@ -9,10 +9,10 @@ import { SourceBadge, type Source } from '../components/SourceBadge';
 
 const cases: Array<{ source: Source; expectedLabel: RegExp }> = [
   { source: 'wikipedia', expectedLabel: /Wikipedia/ },
-  { source: 'maps', expectedLabel: /Maps/ },
-  { source: 'geonames', expectedLabel: /GeoNames/ },
+  { source: 'maps', expectedLabel: /Google Maps/ },
+  { source: 'geonames', expectedLabel: /Local database/ },
   { source: 'ai-online', expectedLabel: /AI/ },
-  { source: 'ai-offline', expectedLabel: /Offline AI/ },
+  { source: 'ai-offline', expectedLabel: /On-device AI/ },
 ];
 
 describe('SourceBadge', () => {
