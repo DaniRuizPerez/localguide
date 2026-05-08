@@ -15,7 +15,16 @@ const sharp = require('sharp');
 const ROOT = path.resolve(__dirname, '..');
 const RES = path.join(ROOT, 'android', 'app', 'src', 'main', 'res');
 const SRC_LAUNCHER = path.join(ROOT, 'assets', 'canyon', 'canyon-1024.png');
-const SRC_FOREGROUND = path.join(ROOT, 'assets', 'canyon', 'canyon-android-foreground-432.png');
+// We deliberately use canyon-1024 (full-bleed design, opaque to the canvas
+// edges) as the adaptive *foreground* instead of canyon-android-foreground-432.
+// The shipped foreground-432 has the design centered in only the inner 64% of
+// its canvas, with the rest transparent — under Pixel's circular launcher mask
+// that reveals the solid #E8845C background as a thick ring around a small
+// embedded design, making the compass look off-center and the icon look
+// "shrunk inside an orange disc". canyon-1024 places the compass at canvas
+// center (0.499, 0.499) AND extends the gradient sky + mountains to all four
+// edges, so under any launcher mask the design fills the full visible area.
+const SRC_FOREGROUND = path.join(ROOT, 'assets', 'canyon', 'canyon-1024.png');
 
 // Android density buckets:
 //   ic_launcher / ic_launcher_round: 48dp baseline (mdpi=48, hdpi=72, xhdpi=96,
