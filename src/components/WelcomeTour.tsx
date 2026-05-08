@@ -91,6 +91,13 @@ export function WelcomeTour({ onDismiss }: WelcomeTourProps): React.ReactElement
   }, []);
 
   const handleDone = async () => {
+    // Optimistic update — set local seen=true so the tour unmounts
+    // immediately, regardless of what onDismiss does. If the AsyncStorage
+    // write fails AND the user uninstalls before retry they lose the seen
+    // flag and the tour shows once more next launch — acceptable for a
+    // one-time tour. Don't "fix" this optimism without first thinking
+    // through the trade-off.
+    setSeen(true);
     try {
       await AsyncStorage.setItem(WELCOME_SEEN_KEY, 'true');
     } catch {

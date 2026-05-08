@@ -167,4 +167,23 @@ describe('WelcomeTour', () => {
     // Should still show "Next", not "Got it"
     expect(getByTestId('welcome-next')).toBeTruthy();
   });
+
+  it('returns null after Got it (defense against parent no-op onDismiss)', async () => {
+    // Simulate the bug scenario: parent passes a no-op callback.
+    // The tour should still disappear because the component manages its
+    // own seen state.
+    mockStorage.setItem.mockResolvedValueOnce(undefined as any);
+    const onDismiss = jest.fn();
+    const { queryByTestId, getByTestId } = await renderTour(onDismiss, false);
+
+    // Wait for the AsyncStorage check to complete and the tour to render.
+    await waitFor(() => expect(queryByTestId('welcome-skip')).toBeTruthy());
+
+    // Skip is on every slide; tap it to fire handleDone.
+    fireEvent.press(getByTestId('welcome-skip'));
+
+    // Tour must unmount itself.
+    await waitFor(() => expect(queryByTestId('welcome-skip')).toBeNull());
+    expect(onDismiss).toHaveBeenCalled(); // signal still fires
+  });
 });
