@@ -355,7 +355,12 @@ export const poiService = {
             coordType: coord.type,
           };
         });
-      if (__DEV__) {
+      // Suppress under Jest — this fetch sometimes resolves after the test
+      // that triggered it has torn down, and `--ci` treats post-teardown
+      // logs as hard failures (BufferedConsole). JEST_WORKER_ID is set by
+      // every Jest worker. In dev/runtime the env var is undefined, so the
+      // log behaves as before.
+      if (__DEV__ && typeof process !== 'undefined' && !process.env.JEST_WORKER_ID) {
         // eslint-disable-next-line no-console
         console.log(
           `[PoiService] fetchNearby r=${radiusMeters}m wikipedia raw=${beforeFilter} → kept=${pois.length} (after isTouristic + coords filter)`
