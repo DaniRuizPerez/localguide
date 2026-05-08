@@ -429,6 +429,7 @@ export default function MapScreen({ navigation }: Props) {
         {visibleMarkers.map((p, idx) => {
           const isPrimary = idx < 3;
           const isSelected = compassTarget?.pageId === p.pageId;
+          const offline = effective === 'offline';
           return (
             <Marker
               key={`${p.source}-${p.pageId}`}
@@ -438,8 +439,8 @@ export default function MapScreen({ navigation }: Props) {
               tracksViewChanges={isSelected}
             >
               <View style={styles.poiMarkerWrap}>
-                <View style={isPrimary ? styles.poiDotPrimary : styles.poiDotSecondary} />
-                <View style={styles.poiLabelPill}>
+                <View style={[isPrimary ? styles.poiDotPrimary : styles.poiDotSecondary, offline && styles.poiDotOffline]} />
+                <View style={[styles.poiLabelPill, offline && styles.poiDotOffline]}>
                   <Text style={styles.poiLabelText} numberOfLines={1}>{p.title}</Text>
                 </View>
                 {isSelected && (
@@ -727,6 +728,9 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#FFFFFF',
     ...Shadows.pinDrop,
+  },
+  poiDotOffline: {
+    opacity: 0.65,
   },
   poiLabelPill: {
     marginTop: 2,
