@@ -201,7 +201,7 @@ export const EN = {
     aiOffline: 'On-device AI — double-check important facts',
   },
   offlineNotice: {
-    banner: '⚠ Offline — double-check important facts.',
+    banner: '⚠ Offline · LLM-generated — double-check facts.',
     pillSubtitle: 'Some content is from the on-device AI — double-check important facts.',
   },
   topics: {

@@ -663,7 +663,7 @@ export default function MapScreen({ navigation }: Props) {
                     activeOpacity={canGuide ? 0.7 : 1}
                   >
                     <View style={styles.poiIcon}>
-                      <Text style={{ fontSize: 14 }}>{p.source === 'llm' ? '🧠' : '📍'}</Text>
+                      <Text style={{ fontSize: 14 }}>{p.source === 'llm' ? '🧠' : poiEmojiFor(p)}</Text>
                     </View>
                     <View style={{ flex: 1, marginLeft: 10 }}>
                       <Text style={[Type.poi, { color: Colors.text }]} numberOfLines={1}>
