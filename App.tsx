@@ -14,7 +14,6 @@ import AppNavigator from './src/navigation/AppNavigator';
 import ModelDownloadScreen from './src/screens/ModelDownloadScreen';
 import { modelDownloadService, profileForTier } from './src/services/ModelDownloadService';
 import { inferenceService } from './src/services/InferenceService';
-import { TopicChips, type GuideTopic } from './src/components/TopicChips';
 import { GuideAvatar } from './src/components/GuideAvatar';
 import { Colors } from './src/theme/colors';
 import { Type } from './src/theme/tokens';
@@ -27,6 +26,7 @@ import { visitedStore } from './src/services/VisitedStore';
 import { speechBackgroundKeeper } from './src/services/SpeechBackgroundKeeper';
 import { WelcomeTour } from './src/components/WelcomeTour';
 import { ModeStripe } from './src/components/ModeStripe';
+import { OfflineDimOverlay } from './src/components/OfflineDimOverlay';
 
 type AppState = 'checking' | 'needs_download' | 'warming_up' | 'ready';
 
@@ -34,11 +34,6 @@ export default function App() {
   const [appState, setAppState] = useState<AppState>('checking');
   const [warmupError, setWarmupError] = useState<string | null>(null);
   const [warmupRetryCount, setWarmupRetryCount] = useState(0);
-  // Multi-select topic bias; 'everything' is a meta-topic that implies all
-  // others and dims them in the picker. Seed with just 'everything' so the
-  // warmup screen picker shows the default "no bias" state.
-  const [topics, setTopics] = useState<readonly GuideTopic[]>(['everything']);
-
   const [fontsLoaded] = useFonts({
     Fraunces_500Medium,
     Nunito_400Regular,
@@ -130,9 +125,6 @@ export default function App() {
 
           <Text style={styles.hallucinationWarning}>{t('app.hallucinationWarning')}</Text>
 
-          <Text style={styles.topicsHeading}>{t('app.pickTopic')}</Text>
-          <TopicChips selected={topics} onChange={setTopics} />
-
           {warmupError && (
             <>
               <Text style={styles.errorText}>{t('app.warmupError', { message: warmupError })}</Text>
@@ -172,14 +164,19 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <AppNavigator initialTopic={topics.find((t) => t !== 'everything')} />
+      <AppNavigator initialTopic={undefined} />
+      {/* Warm-brown tint that fades in over the whole app when effective
+          mode is 'offline' — gives the cream UI a dim, dark-mode-adjacent
+          feel without migrating every StyleSheet.create to a hook.
+          z-index 998 (below ModeStripe at 1000), pointerEvents="none". */}
+      <OfflineDimOverlay />
       {/* One-time welcome tour — rendered as an absolute overlay above the nav.
           WelcomeTour manages its own AsyncStorage check internally and returns
           null when the tour has already been seen, so no extra state is needed. */}
       <WelcomeTour onDismiss={() => {}} />
       <StatusBar style="dark" />
-      {/* Persistent 8 px amber stripe at the very top edge when offline.
-          Absolute-positioned + pointerEvents="none" — decorative only. */}
+      {/* Persistent labeled "OFFLINE" bar at the very top edge when offline.
+          Sits above OfflineDimOverlay so the amber stays bright. */}
       <ModeStripe />
     </SafeAreaProvider>
   );
@@ -215,13 +212,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     marginTop: 20,
-    textAlign: 'center',
-  },
-  topicsHeading: {
-    ...Type.metaUpper,
-    marginTop: 32,
-    marginBottom: 8,
-    color: Colors.textTertiary,
     textAlign: 'center',
   },
   errorText: {
