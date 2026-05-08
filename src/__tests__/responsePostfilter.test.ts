@@ -4,6 +4,8 @@
  * time so we exercise the streaming codepath, not just whole-string match.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import { StreamPostfilter, trailerFor } from '../services/responsePostfilter';
 
 function feed(pf: StreamPostfilter, s: string): { reason: string; at: number } {
@@ -117,15 +119,14 @@ describe('StreamPostfilter — format spew', () => {
 describe('StreamPostfilter — finalize() trim-only behaviour', () => {
   it('trims a single trailing duplicate sentence on natural finish', () => {
     const pf = new StreamPostfilter();
-    const text =
-      'The Memorial Church sits at the head of the Stanford Quad and is open to ' +
-      'visitors most weekday afternoons. ' +
-      'The Memorial Church sits at the head of the Stanford Quad and is open to ' +
-      'visitors most weekday afternoons. ';
+    // Period < 64 chars so the mid-stream path still requires 3 matches;
+    // finalize() applies the 2-match trim and catches it after natural end.
+    const sentence = 'Stanford Quad is open weekday afternoons. ';
+    const text = sentence + sentence;
     feed(pf, text);
     const result = pf.finalize();
     expect(result.trimmedReason).toBe('abort_repetition');
-    expect(result.cleanedText).toMatch(/Stanford Quad and is open to visitors most weekday afternoons\.$/);
+    expect(result.cleanedText).toMatch(/Stanford Quad is open weekday afternoons\.$/);
     // Should be ~half the length.
     expect(result.cleanedText.length).toBeLessThan(text.length * 0.6);
   });
@@ -181,5 +182,42 @@ describe('trailerFor', () => {
   it('returns empty for silent reasons', () => {
     expect(trailerFor('abort_token')).toBe('');
     expect(trailerFor('ok')).toBe('');
+  });
+});
+
+describe('long-period sentence loop (Kee House regression)', () => {
+  const fixture = fs.readFileSync(
+    path.join(__dirname, 'fixtures', 'loop_kee_house.txt'),
+    'utf8',
+  );
+
+  it('aborts the captured Kee House loop with default settings', () => {
+    const filter = new StreamPostfilter();
+    let aborted: string | null = null;
+    let abortedAt = -1;
+    for (let i = 0; i < fixture.length; i++) {
+      const reason = filter.pushDelta(fixture[i]);
+      if (reason !== 'ok') {
+        aborted = reason;
+        abortedAt = i;
+        break;
+      }
+    }
+    expect(aborted).toBe('abort_repetition');
+    // Should fire well before the end of the fixture (~1.2 kB); detection fires
+    // around char 709 (2 × 182-char period within the 512-char tail window).
+    expect(abortedAt).toBeLessThan(750);
+    // Cleaned text should not be empty (we strip the partial trailing block, not everything).
+    expect(filter.getCleanedText().length).toBeGreaterThan(50);
+  });
+
+  it('would NOT abort with the buggy tailCap=256 — proves the fix is what unblocks it', () => {
+    const filter = new StreamPostfilter({ tailCap: 256 });
+    let aborted: string | null = null;
+    for (let i = 0; i < fixture.length; i++) {
+      const reason = filter.pushDelta(fixture[i]);
+      if (reason !== 'ok') { aborted = reason; break; }
+    }
+    expect(aborted).toBeNull();
   });
 });

@@ -32,7 +32,7 @@ export interface PostfilterOpts {
 }
 
 const DEFAULTS: Required<PostfilterOpts> = {
-  tailCap: 256,
+  tailCap: 512,
   minRepeatPeriod: 8,
   matchesBeforeAbort: 3,
   floodRunLen: 40,
@@ -120,25 +120,43 @@ export class StreamPostfilter {
     }
 
     // 4. Periodic-repetition detector. For each candidate period P, check
-    //    whether the last 3 blocks of length P at the tail are identical.
-    //    Early-exit when the last char doesn't match the char 2P back, which
+    //    whether the last N blocks of length P at the tail are identical.
+    //    Short periods (P < 64) require 3 matching blocks to guard against
+    //    false-positives like "yes yes yes"; long periods (P ≥ 64) are
+    //    unambiguous after 2 matches, and only need tail ≥ 2P.
+    //    Early-exit when the last char doesn't match the char 1P back, which
     //    rules out most P values in one comparison.
     const n = this.tail.length;
-    const maxP = Math.floor(n / 3);
-    for (let p = this.opts.minRepeatPeriod; p <= maxP; p += 1) {
+    const maxP3 = Math.floor(n / 3); // upper bound when 3 blocks are required
+    const maxP2 = Math.floor(n / 2); // upper bound when 2 blocks suffice (P ≥ 64)
+    const matchesBeforeAbort = this.opts.matchesBeforeAbort;
+    for (let p = this.opts.minRepeatPeriod; p <= maxP2; p += 1) {
       if (this.tail.charCodeAt(n - 1) !== this.tail.charCodeAt(n - 1 - p)) continue;
-      if (this.tail.charCodeAt(n - 1) !== this.tail.charCodeAt(n - 1 - 2 * p)) continue;
+      // Long-period sentence loops are unambiguous after 2 matches; short P keeps the
+      // 3-match guard against false-positives like "yes yes yes".
+      const matchesNeeded = p >= 64 ? 2 : matchesBeforeAbort;
+      // For short periods that need 3 blocks: skip if tail is too short for 3
+      // blocks, and apply the cheap 3rd-block early-exit char check.
+      if (matchesNeeded > 2) {
+        if (p > maxP3) continue; // tail too short for 3 blocks at this period
+        if (this.tail.charCodeAt(n - 1) !== this.tail.charCodeAt(n - 1 - 2 * p)) continue;
+      }
       // Cheap prefix mismatch check before full slice equality.
       if (this.tail.charCodeAt(n - p) !== this.tail.charCodeAt(n - 2 * p)) continue;
       const block = this.tail.slice(n - p);
       // Single-char blocks (e.g. "xxxxxxxx") are floods, not phrase
       // repetition — let the flood detector handle them at its threshold.
       if (isSingleCharBlock(block)) continue;
-      if (
-        this.tail.slice(n - 2 * p, n - p) === block &&
-        this.tail.slice(n - 3 * p, n - 2 * p) === block
-      ) {
-        if (this.opts.matchesBeforeAbort <= 3) {
+      if (matchesNeeded <= 2) {
+        if (this.tail.slice(n - 2 * p, n - p) === block) {
+          this.abortPeriod = p;
+          return (this.aborted = 'abort_repetition');
+        }
+      } else {
+        if (
+          this.tail.slice(n - 2 * p, n - p) === block &&
+          this.tail.slice(n - 3 * p, n - 2 * p) === block
+        ) {
           this.abortPeriod = p;
           return (this.aborted = 'abort_repetition');
         }
