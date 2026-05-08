@@ -30,6 +30,7 @@ import { humanizeVoices, pickDiverseVoices } from '../services/voiceLabels';
 import { currentSpeechTag, getLocale, t } from '../i18n';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { useAppMode } from '../hooks/useAppMode';
+import { appMode } from '../services/AppMode';
 import type * as SpeechModule from 'expo-speech';
 
 type Voice = SpeechModule.Voice;
@@ -134,14 +135,13 @@ export function VoiceRateControls({
   const [rate, setRate] = useState<number>(narrationPrefs.get().rate);
   const [voice, setVoice] = useState<string | undefined>(narrationPrefs.get().voice);
   const [length, setLength] = useState<NarrationLength>(narrationPrefs.get().length);
-  const [modeChoice, setModeChoice] = useState<ModeChoice>(guidePrefs.get().modeChoice);
   const [useOfflineGeocoder, setUseOfflineGeocoder] = useState<boolean>(
     guidePrefs.get().useOfflineGeocoder
   );
   const [packPickerOpen, setPackPickerOpen] = useState(false);
   const availableVoices = useVoicesForLocale(visible);
   const networkState = useNetworkStatus();
-  const { effective } = useAppMode();
+  const { effective, choice: appModeChoice } = useAppMode();
 
   useEffect(() => {
     return narrationPrefs.subscribe((p) => {
@@ -153,7 +153,6 @@ export function VoiceRateControls({
 
   useEffect(() => {
     return guidePrefs.subscribe((p) => {
-      setModeChoice(p.modeChoice);
       setUseOfflineGeocoder(p.useOfflineGeocoder);
     });
   }, []);
@@ -233,22 +232,7 @@ export function VoiceRateControls({
               {effective === 'offline' && (
                 <Text style={styles.offlineSubtitle}>{t('offlineNotice.pillSubtitle')}</Text>
               )}
-              <SegmentedRow
-                label={t('settings.modeLabel')}
-                sub={t('settings.modeSub')}
-                options={[
-                  t('settings.modeAuto'),
-                  t('settings.modeOnline'),
-                  t('settings.modeOffline'),
-                ]}
-                activeIdx={
-                  modeChoice === 'force-online' ? 1 : modeChoice === 'force-offline' ? 2 : 0
-                }
-                onSelect={(i) => {
-                  const choices: ModeChoice[] = ['auto', 'force-online', 'force-offline'];
-                  guidePrefs.setModeChoice(choices[i]);
-                }}
-              />
+              <ModePicker active={appModeChoice} />
               <NetworkStatusRow networkState={networkState} />
               <ToggleRow
                 label="Offline geocoder"
@@ -395,7 +379,7 @@ export function VoiceRateControls({
               style={styles.reportRow}
               onPress={() =>
                 Linking.openURL(
-                  'mailto:daniruizperez93@gmail.com?subject=AI%20Offline%20Tour%20Guide%20-%20Report'
+                  'mailto:buhnenollc@gmail.com?subject=AI%20Offline%20Tour%20Guide%20-%20Report'
                 )
               }
               accessibilityRole="link"
@@ -412,6 +396,54 @@ export function VoiceRateControls({
       </View>
       <CountryPackPicker visible={packPickerOpen} onClose={() => setPackPickerOpen(false)} />
     </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ModePicker — inline three-option mode selector for the CONNECTION section.
+// Mirrors the cards in HowShouldIAnswerSheet without extracting a shared component.
+// ---------------------------------------------------------------------------
+
+interface ModeOption {
+  value: ModeChoice;
+  label: string;
+  sub: string;
+}
+
+const MODE_OPTIONS: ModeOption[] = [
+  { value: 'auto',          label: t('mode.optAuto'),    sub: t('mode.optAutoSub')    },
+  { value: 'force-online',  label: t('mode.optOnline'),  sub: t('mode.optOnlineSub')  },
+  { value: 'force-offline', label: t('mode.optOffline'), sub: t('mode.optOfflineSub') },
+];
+
+function ModePicker({ active }: { active: ModeChoice }) {
+  return (
+    <View style={styles.modePickerContainer}>
+      {MODE_OPTIONS.map((opt) => {
+        const isActive = active === opt.value;
+        return (
+          <TouchableOpacity
+            key={opt.value}
+            testID={`settings-mode-opt-${opt.value}`}
+            accessibilityRole="button"
+            accessibilityState={{ selected: isActive }}
+            style={[styles.modeOption, isActive && styles.modeOptionActive]}
+            onPress={() => appMode.setMode(opt.value)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.modeOptionBody}>
+              <Text style={[styles.modeOptionLabel, isActive && styles.modeOptionLabelActive]}>
+                {opt.label}
+              </Text>
+              <Text style={styles.modeOptionSub}>{opt.sub}</Text>
+            </View>
+            <View style={[styles.modeRadio, isActive && styles.modeRadioActive]}>
+              {isActive && <View style={styles.modeRadioDot} />}
+            </View>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
   );
 }
 
@@ -737,5 +769,60 @@ const styles = StyleSheet.create({
   doneBtnText: {
     ...Type.button,
     color: '#FFFFFF',
+  },
+  modePickerContainer: {
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+  },
+  modeOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: Colors.background,
+    padding: 12,
+    borderRadius: Radii.md,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+  },
+  modeOptionActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.surface,
+  },
+  modeOptionBody: {
+    flex: 1,
+  },
+  modeOptionLabel: {
+    ...Type.body,
+    fontFamily: 'Nunito_700Bold',
+    color: Colors.text,
+  },
+  modeOptionLabelActive: {
+    color: Colors.primary,
+  },
+  modeOptionSub: {
+    ...Type.hint,
+    color: Colors.textTertiary,
+    marginTop: 2,
+  },
+  modeRadio: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.background,
+    flexShrink: 0,
+  },
+  modeRadioActive: {
+    borderColor: Colors.primary,
+  },
+  modeRadioDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+    backgroundColor: Colors.primary,
   },
 });

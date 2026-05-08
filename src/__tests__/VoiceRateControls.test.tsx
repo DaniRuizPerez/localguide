@@ -155,47 +155,49 @@ describe('VoiceRateControls', () => {
   });
 
   // CONNECTION group tests
-  it('shows the CONNECTION group with mode segmented control', async () => {
+  it('shows the CONNECTION group with mode picker', async () => {
     mockGetAvailableVoices.mockResolvedValue([]);
-    const { getByText } = render(<VoiceRateControls {...defaultProps} />);
+    const { getByText, getByTestId } = render(<VoiceRateControls {...defaultProps} />);
     await waitFor(() => {
       expect(getByText('CONNECTION')).toBeTruthy();
-      expect(getByText('Mode')).toBeTruthy();
-      // Three mode options
-      expect(getByText('Auto')).toBeTruthy();
-      expect(getByText('Online')).toBeTruthy();
-      expect(getByText('Offline')).toBeTruthy();
+      // Three mode option cards
+      expect(getByTestId('settings-mode-opt-auto')).toBeTruthy();
+      expect(getByTestId('settings-mode-opt-force-online')).toBeTruthy();
+      expect(getByTestId('settings-mode-opt-force-offline')).toBeTruthy();
+      expect(getByText('Automatic')).toBeTruthy();
+      expect(getByText('Online — grounded')).toBeTruthy();
+      expect(getByText('Offline — on-device')).toBeTruthy();
     });
   });
 
-  it('selecting Online in segmented control writes force-online to guidePrefs', async () => {
+  it('selecting Online in mode picker writes force-online to guidePrefs', async () => {
     mockGetAvailableVoices.mockResolvedValue([]);
-    const { getByText } = render(<VoiceRateControls {...defaultProps} />);
-    await waitFor(() => getByText('Online'));
+    const { getByTestId } = render(<VoiceRateControls {...defaultProps} />);
+    await waitFor(() => getByTestId('settings-mode-opt-force-online'));
     await act(async () => {
-      fireEvent.press(getByText('Online'));
+      fireEvent.press(getByTestId('settings-mode-opt-force-online'));
     });
     expect(guidePrefs.get().modeChoice).toBe('force-online');
   });
 
-  it('selecting Offline in segmented control writes force-offline to guidePrefs', async () => {
+  it('selecting Offline in mode picker writes force-offline to guidePrefs', async () => {
     mockGetAvailableVoices.mockResolvedValue([]);
-    const { getByText } = render(<VoiceRateControls {...defaultProps} />);
-    await waitFor(() => getByText('Offline'));
+    const { getByTestId } = render(<VoiceRateControls {...defaultProps} />);
+    await waitFor(() => getByTestId('settings-mode-opt-force-offline'));
     await act(async () => {
-      fireEvent.press(getByText('Offline'));
+      fireEvent.press(getByTestId('settings-mode-opt-force-offline'));
     });
     expect(guidePrefs.get().modeChoice).toBe('force-offline');
   });
 
-  it('selecting Auto in segmented control writes auto to guidePrefs', async () => {
+  it('selecting Auto in mode picker writes auto to guidePrefs', async () => {
     mockGetAvailableVoices.mockResolvedValue([]);
     // Start from force-offline so we can test switching back to auto.
     guidePrefs.setModeChoice('force-offline');
-    const { getByText } = render(<VoiceRateControls {...defaultProps} />);
-    await waitFor(() => getByText('Auto'));
+    const { getByTestId } = render(<VoiceRateControls {...defaultProps} />);
+    await waitFor(() => getByTestId('settings-mode-opt-auto'));
     await act(async () => {
-      fireEvent.press(getByText('Auto'));
+      fireEvent.press(getByTestId('settings-mode-opt-auto'));
     });
     expect(guidePrefs.get().modeChoice).toBe('auto');
   });
