@@ -500,7 +500,13 @@ export default function MapScreen({ navigation }: Props) {
                   Animated.spring(sheetY, { toValue: SNAP_HALF, useNativeDriver: false, tension: 80, friction: 12 }).start();
                 }
               }}
-              tracksViewChanges={isSelected}
+              // tracksViewChanges=true ensures the bitmap is captured with
+              // current emoji + label, even if Android's first layout pass
+              // happens before the children measure. Safe because our
+              // dimensions don't change across renders (so onLayoutChange
+              // never fires with a dimension delta — which is what would
+              // trigger the Fabric MapMarker cast crash).
+              tracksViewChanges={true}
             >
               {/*
                 IMPORTANT: marker child dimensions must stay CONSTANT across
@@ -786,12 +792,18 @@ const styles = StyleSheet.create({
   // ── Pin marker styles ────────────────────────────────────────────────────
   // alignItems: 'center' centres pin + label. minWidth ensures Android
   // react-native-maps measures a non-zero bitmap on first render.
-  // Marker dimensions stay CONSTANT across selected/unselected — see the
-  // long comment at the marker JSX. Fabric's MarkerManager.onLayoutChange
-  // crashes if the wrap size changes between renders.
+  // Marker dimensions: minWidth + minHeight ensure the View has measurable
+  // bounds when react-native-maps captures the bitmap (Android's bitmap
+  // capture happens once for non-tracking markers, and a 0×0 capture
+  // = invisible marker). minWidth lets the wrap grow horizontally with
+  // the label so longer titles aren't clipped.
+  // Also: do NOT change these dimensions across selected/unselected —
+  // Fabric's MarkerManager.onLayoutChange crashes when the wrap size
+  // changes mid-flight (ReactViewGroup → MapMarker cast fails).
   poiMarkerWrap: {
     alignItems: 'center',
-    width: 32,
+    minWidth: 28,
+    minHeight: 48,
   },
   // Emoji bubble matches the home-screen PoiRow icon style — a soft round
   // disc with the category emoji centered. Same visual vocabulary on both
