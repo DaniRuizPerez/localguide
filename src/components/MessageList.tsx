@@ -1,4 +1,4 @@
-import React, { forwardRef, useCallback } from 'react';
+import React, { forwardRef, useCallback, useMemo } from 'react';
 import { FlatList, type ListRenderItem, StyleSheet, Text, View } from 'react-native';
 import { Colors } from '../theme/colors';
 import { Type } from '../theme/tokens';
@@ -105,14 +105,22 @@ export const MessageList = forwardRef<FlatList<Message>, Props>(function Message
   { messages, autoGuideEnabled, onSendChip },
   ref
 ) {
+  // Empty guide placeholders are filtered out of the FlatList data (not just
+  // returned-null in renderItem). FlatList still reserves cell space + the
+  // `gap: 12` between items for null-rendered cells; with scrollToEnd that
+  // leaves a blank viewport — the user sees an empty-but-scrollable surface
+  // until tokens land. ChatScreen's <TypingIndicator /> already covers the
+  // streaming state visually.
+  const visibleMessages = useMemo(
+    () =>
+      messages.filter(
+        (m) => !(m.role === 'guide' && m.text.trim().length === 0 && !m.imageUri)
+      ),
+    [messages]
+  );
+
   const renderItem: ListRenderItem<Message> = useCallback(
     ({ item }) => {
-      // Don't render empty guide placeholders — ChatScreen's <TypingIndicator />
-      // covers the streaming state. Rendering both produces a stacked
-      // avatar + empty pill on top of the dots bubble.
-      if (item.role === 'guide' && item.text.trim().length === 0 && !item.imageUri) {
-        return null;
-      }
       const isGuideBubbleWithText = item.role === 'guide' && item.text.trim().length > 0;
       return (
         <>
@@ -129,7 +137,7 @@ export const MessageList = forwardRef<FlatList<Message>, Props>(function Message
   return (
     <FlatList
       ref={ref}
-      data={messages}
+      data={visibleMessages}
       keyExtractor={(m) => m.id}
       renderItem={renderItem}
       style={styles.list}
