@@ -5,7 +5,7 @@ export interface RadiusPrefsState {
 }
 
 export const VALID_RADII = [2000, 5000, 10000, 20000] as const;
-export const DEFAULT_RADIUS = 5000;
+export const DEFAULT_RADIUS = 10000;
 type ValidRadius = (typeof VALID_RADII)[number];
 
 const DEFAULTS: RadiusPrefsState = {

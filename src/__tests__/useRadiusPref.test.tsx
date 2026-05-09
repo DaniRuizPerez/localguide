@@ -7,19 +7,19 @@ beforeEach(() => {
 });
 
 describe('useRadiusPref', () => {
-  it('returns default radiusMeters of 5000 on initial render', () => {
+  it('returns default radiusMeters of 10000 on initial render', () => {
     const { result } = renderHook(() => useRadiusPref());
-    expect(result.current.radiusMeters).toBe(5000);
+    expect(result.current.radiusMeters).toBe(10000);
   });
 
   it('setRadiusMeters updates the returned state', () => {
     const { result } = renderHook(() => useRadiusPref());
 
     act(() => {
-      result.current.setRadiusMeters(10000);
+      result.current.setRadiusMeters(5000);
     });
 
-    expect(result.current.radiusMeters).toBe(10000);
+    expect(result.current.radiusMeters).toBe(5000);
   });
 
   it('reflects changes pushed via radiusPrefs.set() directly', () => {
@@ -39,7 +39,7 @@ describe('useRadiusPref', () => {
       result.current.setRadiusMeters(3000); // not valid
     });
 
-    expect(result.current.radiusMeters).toBe(5000);
+    expect(result.current.radiusMeters).toBe(10000);
   });
 
   it('unsubscribes from radiusPrefs on unmount', () => {

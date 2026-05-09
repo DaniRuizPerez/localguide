@@ -7,28 +7,28 @@ describe('radiusPrefs', () => {
     await AsyncStorage.clear();
   });
 
-  it('defaults radiusMeters to 5000', () => {
-    expect(radiusPrefs.get().radiusMeters).toBe(5000);
+  it('defaults radiusMeters to 10000', () => {
+    expect(radiusPrefs.get().radiusMeters).toBe(10000);
   });
 
-  it('set(10000) persists + notifies subscriber', async () => {
+  it('set(5000) persists + notifies subscriber', async () => {
     const listener = jest.fn();
     radiusPrefs.subscribe(listener);
-    radiusPrefs.set(10000);
+    radiusPrefs.set(5000);
 
-    expect(radiusPrefs.get().radiusMeters).toBe(10000);
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ radiusMeters: 10000 }));
+    expect(radiusPrefs.get().radiusMeters).toBe(5000);
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ radiusMeters: 5000 }));
 
     // Persistence round-trip: reset and re-hydrate from storage.
     radiusPrefs.__resetForTest();
     await radiusPrefs.hydrate();
-    expect(radiusPrefs.get().radiusMeters).toBe(10000);
+    expect(radiusPrefs.get().radiusMeters).toBe(5000);
   });
 
   it('does not notify when value is unchanged', () => {
     const listener = jest.fn();
     radiusPrefs.subscribe(listener);
-    radiusPrefs.set(5000); // already 5000 (default)
+    radiusPrefs.set(10000); // already 10000 (default)
     expect(listener).not.toHaveBeenCalled();
   });
 
@@ -49,7 +49,7 @@ describe('radiusPrefs', () => {
     radiusPrefs.subscribe(listener);
 
     radiusPrefs.set(3000 as number); // not in valid set
-    expect(radiusPrefs.get().radiusMeters).toBe(5000); // unchanged default
+    expect(radiusPrefs.get().radiusMeters).toBe(10000); // unchanged default
     expect(listener).not.toHaveBeenCalled();
   });
 
@@ -58,7 +58,7 @@ describe('radiusPrefs', () => {
     radiusPrefs.subscribe(listener);
 
     radiusPrefs.set(1000 as number); // was valid in old version, now removed
-    expect(radiusPrefs.get().radiusMeters).toBe(5000); // unchanged default
+    expect(radiusPrefs.get().radiusMeters).toBe(10000); // unchanged default
     expect(listener).not.toHaveBeenCalled();
   });
 
@@ -78,7 +78,7 @@ describe('radiusPrefs', () => {
     await AsyncStorage.setItem('@localguide/radius-prefs-v1', 'not-json{{');
     radiusPrefs.__resetForTest();
     await radiusPrefs.hydrate();
-    expect(radiusPrefs.get().radiusMeters).toBe(5000);
+    expect(radiusPrefs.get().radiusMeters).toBe(10000);
   });
 
   it('hydrate() falls back to defaults when stored radius is invalid', async () => {
@@ -88,10 +88,10 @@ describe('radiusPrefs', () => {
     );
     radiusPrefs.__resetForTest();
     await radiusPrefs.hydrate();
-    expect(radiusPrefs.get().radiusMeters).toBe(5000);
+    expect(radiusPrefs.get().radiusMeters).toBe(10000);
   });
 
-  it('hydrate() migrates old 1000 m value to default 5000 m', async () => {
+  it('hydrate() migrates old 1000 m value to default 10000 m', async () => {
     // Simulate a user who had 1 km saved from the old valid set {1,2,5,10} km.
     await AsyncStorage.setItem(
       '@localguide/radius-prefs-v1',
@@ -99,6 +99,6 @@ describe('radiusPrefs', () => {
     );
     radiusPrefs.__resetForTest();
     await radiusPrefs.hydrate();
-    expect(radiusPrefs.get().radiusMeters).toBe(5000);
+    expect(radiusPrefs.get().radiusMeters).toBe(10000);
   });
 });

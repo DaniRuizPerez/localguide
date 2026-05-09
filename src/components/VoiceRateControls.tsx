@@ -146,7 +146,7 @@ export function VoiceRateControls({
   const [packPickerOpen, setPackPickerOpen] = useState(false);
   const availableVoices = useVoicesForLocale(visible);
   const networkState = useNetworkStatus();
-  const { effective, choice: appModeChoice } = useAppMode();
+  const { choice: appModeChoice } = useAppMode();
   const { units, setUnits } = useUnitPref();
 
   // Dynamic radius options depend on current unit. When unit changes, snap the
@@ -243,11 +243,12 @@ export function VoiceRateControls({
             nestedScrollEnabled
             removeClippedSubviews={false}
           >
-            {/* CONNECTION — mode choice, live network status, geocoding. */}
+            {/* CONNECTION — mode choice, live network status, geocoding.
+                The offline warning that used to live at the top of this group
+                was removed: the same banner already shows on the main screen
+                via OfflineNotice, so duplicating it inside the settings sheet
+                was redundant. */}
             <SettingsGroup label={t('settings.groupConnection')}>
-              {effective === 'offline' && (
-                <Text style={styles.offlineSubtitle}>{t('offlineNotice.pillSubtitle')}</Text>
-              )}
               <ModePicker active={appModeChoice} />
               <NetworkStatusRow networkState={networkState} />
               <ToggleRow
@@ -665,17 +666,6 @@ const styles = StyleSheet.create({
     ...Type.hint,
     color: Colors.textTertiary,
     marginTop: 1,
-  },
-  offlineSubtitle: {
-    ...Type.bodySm,
-    color: '#8A4B00',
-    backgroundColor: Colors.warningLight,
-    borderColor: Colors.warning,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginBottom: 8,
   },
   disclosure: {
     ...Type.h1,
