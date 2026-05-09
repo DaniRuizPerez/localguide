@@ -33,6 +33,12 @@ const LLM_CACHE_TTL_MS = 10 * 60 * 1000;
 // Wikipedia) results we got and only top up with LLM-sourced suggestions
 // to reach this count. 6 matches the quiz + listNearbyPlaces conventions.
 const TARGET_COUNT = 6;
+// Offline mode floor: the GeoNames bundle returns mostly nearby towns
+// (Palo Alto, Mountain View, Menlo Park, …) which fills TARGET_COUNT but
+// crowds out the famous landmarks the LLM can name. Always reserve at
+// least this many slots for verified LLM picks when offline so users
+// see Stanford / Hoover Tower / etc. alongside the town list.
+const OFFLINE_LLM_MIN_FILL = 3;
 
 /**
  * Append `extras` to `base` skipping anything whose title (case-insensitive)
@@ -194,7 +200,8 @@ export function useNearbyPois(
         // top it up with LLM-sourced suggestions (clearly labeled). When
         // geo returned 0 we skip straight to the LLM.
         if (sorted.length > 0) setPois(sorted);
-        const llmFillCount = TARGET_COUNT - sorted.length;
+        const baseFill = TARGET_COUNT - sorted.length;
+        const llmFillCount = offline ? Math.max(baseFill, OFFLINE_LLM_MIN_FILL) : baseFill;
         if (llmFillCount <= 0) return;
         if (skipLlmFill) {
           if (__DEV__) {

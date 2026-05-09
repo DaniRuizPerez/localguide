@@ -193,7 +193,10 @@ function buildNearbyPlacesPrompt(
       // than answer for the target city — Palo Alto came back as
       // "Mont Saint-Michel, Swiss Alps". A short, plain ask works
       // better in practice on this 1B model.
-      `Name 6 famous, real landmarks in ${targetCity} (or, if you don't know any specific to ${targetCity}, in its metro area or state). ` +
+      // 8 (not 6): the verifier prompt rejects ~half the candidates as
+      // "not really near here", so asking for more leaves us with a
+      // healthier accepted pool (the user reported only 1–2 surviving).
+      `Name 8 famous, real landmarks in ${targetCity} (or, if you don't know any specific to ${targetCity}, in its metro area, region, or state). ` +
       `Output the names ONE PER LINE with NOTHING ELSE — no greetings, no descriptions, no colons, no addresses, no numbers, no markdown.`,
   });
 }
@@ -787,8 +790,16 @@ export const localGuideService = {
     const prompt = buildNarratorPrompt({
       system: 'You are a knowledgeable local guide.',
       extraContext:
-        `For each candidate place below, answer YES if it is genuinely in or very close to ${locationLabel}, ` +
-        `or NO if it is not (e.g. it is in a different city, region, or country, or it doesn't really exist).\n\n` +
+        // "Same metro area / region (within ~50 km)" is intentional — the
+        // strict "in or very close to" version rejected almost everything
+        // for cities like Palo Alto, leaving only Stanford. The user wants
+        // a few more confident picks even if they're a short drive away;
+        // the row is already labelled "AI Generated" so the trust burden
+        // is honest. We still drop pure hallucinations and other-country
+        // results.
+        `For each candidate place below, answer YES if it is a real, well-known place ` +
+        `in ${locationLabel} OR in the same metro area / region (within roughly 50 km). ` +
+        `Answer NO only if it is in a clearly different region or country, or if it does not really exist.\n\n` +
         `Candidates:\n${numbered}\n\n` +
         `Output exactly ${candidates.length} lines, one per candidate, in the same order. ` +
         `Each line is just "YES" or "NO" — no explanations, no extra text.`,
@@ -822,7 +833,11 @@ export const localGuideService = {
       return accepted;
     };
     // Verifier output is tiny (one YES/NO per line); cap is forgiving.
-    return runParsedStream(prompt, parse, { maxTokens: 96, priority: 'low' });
+    // Priority: normal — gates the user-visible "Around You" list, so it
+    // must beat background work like Quiz prefetch (also priority='low').
+    // Without this, the verifier sits behind 5 quiz inferences (~80 s on
+    // Pixel 3) and the LLM POIs never arrive while the user is looking.
+    return runParsedStream(prompt, parse, { maxTokens: 96, priority: 'normal' });
   },
 
   async ask(

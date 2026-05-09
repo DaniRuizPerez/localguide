@@ -662,7 +662,8 @@ export default function MapScreen({ navigation }: Props) {
             >
               {ranked.map((p) => {
                 const isTarget = compassTarget?.pageId === p.pageId;
-                const canGuide = p.source !== 'llm';
+                const isLlm = p.source === 'llm';
+                const canGuide = !isLlm;
                 const distanceM = p.walkingMeters ?? p.distanceMeters;
                 const distanceLabel = formatDistance(distanceM, units);
                 return (
@@ -678,16 +679,25 @@ export default function MapScreen({ navigation }: Props) {
                     activeOpacity={canGuide ? 0.7 : 1}
                   >
                     <View style={styles.poiIcon}>
-                      <Text style={{ fontSize: 14 }}>{p.source === 'llm' ? '🧠' : poiEmojiFor(p)}</Text>
+                      <Text style={{ fontSize: 14 }}>{isLlm ? '🧠' : poiEmojiFor(p)}</Text>
                     </View>
                     <View style={{ flex: 1, marginLeft: 10 }}>
                       <Text style={[Type.poi, { color: Colors.text }]} numberOfLines={1}>
                         {p.title}
                       </Text>
                     </View>
-                    <View style={styles.poiBadge}>
-                      <Text style={[Type.chip, { color: Colors.primary }]}>{distanceLabel}</Text>
-                    </View>
+                    {/* LLM POIs have placeholder coords (= user GPS) so the
+                        distance reads "0 ft" — useless. Mirror HomeState and
+                        show an "AI Generated" warning badge instead. */}
+                    {isLlm ? (
+                      <View style={styles.poiWarnBadge}>
+                        <Text style={styles.poiWarnText}>{t('home.aiHallucinationBadge')}</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.poiBadge}>
+                        <Text style={[Type.chip, { color: Colors.primary }]}>{distanceLabel}</Text>
+                      </View>
+                    )}
                     <TouchableOpacity
                       style={styles.poiChatBtn}
                       onPress={(e) => { e?.stopPropagation?.(); askAboutPoi(p); }}
@@ -974,6 +984,22 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: Radii.sm,
     marginLeft: Spacing.sm,
+  },
+  // Mirror HomeState's "AI Generated" badge — same shape as the distance
+  // badge but in the error tint so the row is visibly flagged as
+  // possibly-hallucinated. Used only for source==='llm' rows whose
+  // distance would otherwise read "0 ft" because their coords are a
+  // placeholder copy of the user GPS.
+  poiWarnBadge: {
+    backgroundColor: Colors.errorLight,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: Radii.sm,
+    marginLeft: Spacing.sm,
+  },
+  poiWarnText: {
+    ...Type.chip,
+    color: Colors.error,
   },
   poiChatBtn: {
     width: 36,
