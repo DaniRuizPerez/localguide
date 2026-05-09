@@ -26,6 +26,7 @@ import { visitedStore } from './src/services/VisitedStore';
 import { speechBackgroundKeeper } from './src/services/SpeechBackgroundKeeper';
 import { WelcomeTour } from './src/components/WelcomeTour';
 import { OfflineDimOverlay } from './src/components/OfflineDimOverlay';
+import { NearbyPoisManager } from './src/components/NearbyPoisManager';
 
 const CANYON_MARK = require('./assets/canyon/canyon-180.png');
 
@@ -177,6 +178,12 @@ function App() {
 
   return (
     <SafeAreaProvider>
+      {/* Single owner of the POI pipeline (useNearbyPois → useRankedPois →
+          useWalkingDistances). Pushes the latest "Around You" snapshot into
+          nearbyPoisStore so HomeState (chat) and MapScreen's bottom-sheet
+          rows always render the same list. Without this, each screen ran its
+          own copy and could diverge under GPS-cell jitter. Renders nothing. */}
+      <NearbyPoisManager />
       <AppNavigator initialTopic={undefined} />
       {/* Warm-brown tint that fades in over the whole app when effective
           mode is 'offline' — gives the cream UI a dim, dark-mode-adjacent

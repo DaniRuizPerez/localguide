@@ -6,12 +6,10 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useLocation } from '../hooks/useLocation';
 import { useAppMode } from '../hooks/useAppMode';
-import { useNearbyPois } from '../hooks/useNearbyPois';
-import { useRankedPois } from '../hooks/useRankedPois';
+import { useVisiblePois } from '../hooks/useVisiblePois';
 import { useRadiusPref } from '../hooks/useRadiusPref';
 import { useUnitPref } from '../hooks/useUnitPref';
 import { formatDistance } from '../utils/formatDistance';
-import { useWalkingDistances } from '../hooks/useWalkingDistances';
 import { useChatMessages } from '../hooks/useChatMessages';
 import { useGuideStream } from '../hooks/useGuideStream';
 import { useVoiceInput } from '../hooks/useVoiceInput';
@@ -20,7 +18,6 @@ import { Type, Radii, Shadows, Sizing, Spacing } from '../theme/tokens';
 import { softTactileMapStyle } from '../theme/mapStyle';
 import { type Poi, distanceMeters } from '../services/PoiService';
 import { wikipediaService, WikipediaNetworkError } from '../services/WikipediaService';
-import { guidePrefs } from '../services/GuidePrefs';
 import { chatStore } from '../services/ChatStore';
 import { SoftButton } from '../components/SoftButton';
 import { CompassArrow } from '../components/CompassArrow';
@@ -163,25 +160,19 @@ export default function MapScreen({ navigation }: Props) {
     Animated.spring(sheetY, { toValue: SNAP_FULL, useNativeDriver: false, tension: 80, friction: 12 }).start();
   };
 
-  // ── Radius + hiddenGems prefs ─────────────────────────────────────────────
+  // ── Radius + units prefs ──────────────────────────────────────────────────
   const { radiusMeters } = useRadiusPref();
   const { units } = useUnitPref();
-  const [hiddenGems, setHiddenGems] = useState<boolean>(guidePrefs.get().hiddenGems);
-  useEffect(() => guidePrefs.subscribe((p) => setHiddenGems(p.hiddenGems)), []);
 
   const offline = effective === 'offline';
 
-  // ── POI pipeline: fetch → rank → filter LLM ──────────────────────────────
-  const { pois: rawPois } = useNearbyPois(gps, radiusMeters, {
-    hiddenGems,
-    offline,
-    skipLlmFill: !offline,
-  });
-  const { ranked: rankedRaw } = useRankedPois(rawPois, gps, { hiddenGems, offline, radiusMeters });
-  // Walking-distance overlay (haversine × 1.4). Falls back to Haversine while in flight.
-  const { enriched: ranked } = useWalkingDistances(rankedRaw, gps);
+  // ── Shared POI pipeline (subscriber) ──────────────────────────────────────
+  // Pipeline owner is NearbyPoisManager mounted at App root. Both this screen
+  // and ChatScreen's HomeState read the same store so the bottom-sheet rows
+  // and the chat "Around You" list stay byte-identical at all times.
+  const { pois: ranked } = useVisiblePois();
   // LLM POIs have placeholder coords (= user GPS); never show as map markers.
-  const visibleMarkers = ranked.filter((p) => p.source !== 'llm');
+  const visibleMarkers = ranked.filter((p: Poi) => p.source !== 'llm');
 
   // ── Auto-fit camera ───────────────────────────────────────────────────────
   const userPannedRef = useRef(false);

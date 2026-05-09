@@ -18,7 +18,7 @@ import { useAutoGuide } from '../hooks/useAutoGuide';
 import { useVoiceInput } from '../hooks/useVoiceInput';
 import { useChatMessages } from '../hooks/useChatMessages';
 import { useGuideStream } from '../hooks/useGuideStream';
-import { useNearbyPois } from '../hooks/useNearbyPois';
+import { useVisiblePois } from '../hooks/useVisiblePois';
 import { useAppMode } from '../hooks/useAppMode';
 import { useProximityNarration } from '../hooks/useProximityNarration';
 import { useFeatureTier } from '../hooks/useFeatureTier';
@@ -27,9 +27,7 @@ import { filterPoisByTopics } from '../services/poiTopic';
 import { speechService } from '../services/SpeechService';
 import { guidePrefs } from '../services/GuidePrefs';
 import type { Poi } from '../services/PoiService';
-import { useRankedPois } from '../hooks/useRankedPois';
 import { useRadiusPref } from '../hooks/useRadiusPref';
-import { useWalkingDistances } from '../hooks/useWalkingDistances';
 import type { Message } from '../types/chat';
 import { Colors } from '../theme/colors';
 import { Radii, Type } from '../theme/tokens';
@@ -134,34 +132,13 @@ export default function ChatScreen(props: Props) {
   }, [effective]);
   // ── End mode-change toast ─────────────────────────────────────────────────
 
-  const { pois, loading: poisLoading } = useNearbyPois(gps, poiRadiusMeters, {
-    hiddenGems,
-    offline: effective === 'offline',
-    skipLlmFill: effective === 'online',
-  });
-
-  // Topic filter is applied in-memory rather than re-issuing the fetch — the
-  // user's pick should affect already-rendered POIs immediately, and the
-  // upstream Wikipedia/LLM result set doesn't expose topic metadata. POIs
-  // whose category doesn't map to any of the 5 topics (hotels, transit,
-  // generic buildings) are kept regardless so the list isn't unexpectedly
-  // empty when none of the local places match the picked topic.
-  const filteredPois = useMemo(() => filterPoisByTopics(pois, topics), [pois, topics]);
-
-  // Two-stage ranking delegated to the shared hook. Online mode paints with
-  // the cheap sync ranker first, then re-ranks once Wikipedia signals land.
-  // Offline mode uses the GeoNames feature-code ranker, no network.
-  const { ranked, loading: rankLoading } = useRankedPois(filteredPois, gps, {
-    hiddenGems,
-    offline: effective === 'offline',
-    radiusMeters: poiRadiusMeters,
-  });
-
-  // Async OSRM walking-distance enrichment. Falls back to Haversine
-  // distanceMeters when the matrix call is in flight or fails — the UI
-  // formatter handles both transparently.
-  const { enriched: rankedWithWalking } = useWalkingDistances(ranked, gps);
-  const visiblePois = rankedWithWalking;
+  // Shared POI pipeline (subscriber). Pipeline owner is NearbyPoisManager
+  // mounted at App root — both this screen's HomeState and MapScreen's
+  // bottom-sheet rows read from the same store so they're byte-identical.
+  // Topic filter is applied locally because topics are a chat-only concept.
+  const { pois: sharedPois, loading: poisLoading } = useVisiblePois();
+  const visiblePois = useMemo(() => filterPoisByTopics(sharedPois, topics), [sharedPois, topics]);
+  const rankLoading = false;
 
   // Background quiz prefetch. Fires once nearby places have settled and the
   // location label is known; the prefetch itself uses priority='low' and
@@ -238,7 +215,7 @@ export default function ChatScreen(props: Props) {
   // Proximity narration (walking past a POI) — only while Auto-Guide is on.
   useProximityNarration({
     gps,
-    pois,
+    pois: visiblePois,
     onNarrate: narratePoi,
     enabled: autoGuide.enabled && !inferring,
   });

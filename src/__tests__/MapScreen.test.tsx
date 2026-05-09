@@ -72,6 +72,12 @@ jest.mock('../services/ChatStore', () => ({
 }));
 
 import MapScreen from '../screens/MapScreen';
+// MapScreen now reads POIs from a shared store (nearbyPoisStore). The pipeline
+// owner is NearbyPoisManager mounted at App root in production; in tests we
+// mount it alongside MapScreen so fetchNearbyStreaming still runs end-to-end
+// and the store gets populated.
+import { NearbyPoisManager } from '../components/NearbyPoisManager';
+import { nearbyPoisStore } from '../services/NearbyPoisStore';
 
 const mockRequestForegroundPermissionsAsync = jest.fn().mockResolvedValue({ status: 'granted' });
 const mockGetCurrentPositionAsync = jest.fn().mockResolvedValue({
@@ -122,11 +128,17 @@ describe('MapScreen', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+    // The nearbyPoisStore is module-level; reset it between tests so a stale
+    // POI snapshot from a prior test doesn't leak into the next render.
+    nearbyPoisStore.set({ pois: [], loading: false });
   });
 
   it('renders without crashing', async () => {
     const { toJSON } = render(
-      <MapScreen navigation={mockNavigation} route={mockRoute} />
+      <>
+        <NearbyPoisManager />
+        <MapScreen navigation={mockNavigation} route={mockRoute} />
+      </>
     );
     expect(toJSON()).toBeTruthy();
     // Flush all async effects to avoid act() warnings
@@ -134,7 +146,12 @@ describe('MapScreen', () => {
   });
 
   it('calls location APIs on mount', async () => {
-    render(<MapScreen navigation={mockNavigation} route={mockRoute} />);
+    render(
+      <>
+        <NearbyPoisManager />
+        <MapScreen navigation={mockNavigation} route={mockRoute} />
+      </>
+    );
     await waitFor(() => {
       expect(mockRequestForegroundPermissionsAsync).toHaveBeenCalled();
       expect(mockGetCurrentPositionAsync).toHaveBeenCalled();
@@ -149,7 +166,10 @@ describe('MapScreen', () => {
     );
 
     const { getByText } = render(
-      <MapScreen navigation={mockNavigation} route={mockRoute} />
+      <>
+        <NearbyPoisManager />
+        <MapScreen navigation={mockNavigation} route={mockRoute} />
+      </>
     );
 
     await waitFor(() => {
@@ -170,7 +190,12 @@ describe('MapScreen', () => {
     mockEffective = 'online';
     mockFetchNearbyStreaming.mockResolvedValue([onlinePoi]);
 
-    render(<MapScreen navigation={mockNavigation} route={mockRoute} />);
+    render(
+      <>
+        <NearbyPoisManager />
+        <MapScreen navigation={mockNavigation} route={mockRoute} />
+      </>
+    );
 
     await waitFor(() => {
       expect(mockFetchNearbyStreaming).toHaveBeenCalledWith(
@@ -191,7 +216,12 @@ describe('MapScreen', () => {
     mockEffective = 'offline';
     mockFetchNearbyStreaming.mockResolvedValue([offlinePoi]);
 
-    render(<MapScreen navigation={mockNavigation} route={mockRoute} />);
+    render(
+      <>
+        <NearbyPoisManager />
+        <MapScreen navigation={mockNavigation} route={mockRoute} />
+      </>
+    );
 
     await waitFor(() => {
       expect(mockFetchNearbyStreaming).toHaveBeenCalledWith(
@@ -209,7 +239,12 @@ describe('MapScreen', () => {
     mockEffective = 'offline';
     mockFetchNearbyStreaming.mockResolvedValue([]);
 
-    render(<MapScreen navigation={mockNavigation} route={mockRoute} />);
+    render(
+      <>
+        <NearbyPoisManager />
+        <MapScreen navigation={mockNavigation} route={mockRoute} />
+      </>
+    );
 
     await waitFor(() => {
       expect(mockFetchNearbyStreaming).toHaveBeenCalledWith(
@@ -229,7 +264,10 @@ describe('MapScreen', () => {
     mockFetchNearbyStreaming.mockResolvedValue(threePois);
 
     const { findByTestId } = render(
-      <MapScreen navigation={mockNavigation} route={mockRoute} />
+      <>
+        <NearbyPoisManager />
+        <MapScreen navigation={mockNavigation} route={mockRoute} />
+      </>
     );
 
     // Wait for all three chat buttons to appear in the list
@@ -242,7 +280,10 @@ describe('MapScreen', () => {
     mockFetchNearbyStreaming.mockResolvedValue(threePois);
 
     const { findByTestId } = render(
-      <MapScreen navigation={mockNavigation} route={mockRoute} />
+      <>
+        <NearbyPoisManager />
+        <MapScreen navigation={mockNavigation} route={mockRoute} />
+      </>
     );
 
     const btn = await findByTestId('poi-chat-10');
@@ -261,7 +302,10 @@ describe('MapScreen', () => {
     mockFetchNearbyStreaming.mockResolvedValue(threePois);
 
     const { findByTestId } = render(
-      <MapScreen navigation={mockNavigation} route={mockRoute} />
+      <>
+        <NearbyPoisManager />
+        <MapScreen navigation={mockNavigation} route={mockRoute} />
+      </>
     );
 
     const btn = await findByTestId('poi-chat-10');
@@ -284,7 +328,10 @@ describe('MapScreen', () => {
     mockFetchNearbyStreaming.mockResolvedValue(threePois);
 
     const { findAllByTestId } = render(
-      <MapScreen navigation={mockNavigation} route={mockRoute} />
+      <>
+        <NearbyPoisManager />
+        <MapScreen navigation={mockNavigation} route={mockRoute} />
+      </>
     );
 
     // User dot + 3 POI markers = 4 total. Both gps and POIs must have loaded.
@@ -301,7 +348,10 @@ describe('MapScreen', () => {
     mockFetchNearbyStreaming.mockResolvedValue([onlinePoi]);
 
     const { findByText } = render(
-      <MapScreen navigation={mockNavigation} route={mockRoute} />
+      <>
+        <NearbyPoisManager />
+        <MapScreen navigation={mockNavigation} route={mockRoute} />
+      </>
     );
 
     // Switch to the chat tab. If this succeeds, the map rendered fully
@@ -324,7 +374,10 @@ describe('MapScreen', () => {
     mockFetchNearbyStreaming.mockResolvedValue(threePois);
 
     const { findAllByTestId } = render(
-      <MapScreen navigation={mockNavigation} route={mockRoute} />
+      <>
+        <NearbyPoisManager />
+        <MapScreen navigation={mockNavigation} route={mockRoute} />
+      </>
     );
 
     // Wait for markers to appear
