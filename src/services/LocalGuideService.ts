@@ -94,6 +94,23 @@ function lengthDirective(length?: NarrationLength): string {
   return narrationLengthDirective(length ?? narrationPrefs.get().length);
 }
 
+// Two or more capitalized words = likely a named entity ("Stanford University",
+// "Los Altos", "Palo Alto Marina Village"). Mirrors OnlineGuideService so both
+// modes route the same way. Apostrophes allowed for "Fisherman's Wharf" etc.
+const CUE_NAMED_PLACE_RE = /[A-Z][a-z']+(?:\s+[A-Z][a-z']+)+/g;
+
+/**
+ * If the user's cue names a specific place (≥2 capitalized words), return it.
+ * Used to override the GPS-resolved Place line so a 1B model doesn't get
+ * dragged toward narrating the visitor's current city when they explicitly
+ * asked about somewhere else.
+ */
+function extractCueSubject(userQuery: string): string | null {
+  const matches = userQuery.match(CUE_NAMED_PLACE_RE);
+  if (!matches || matches.length === 0) return null;
+  return matches.reduce((a, b) => (b.length > a.length ? b : a));
+}
+
 function buildPrompt(
   location: GPSContext | string,
   userQuery: string,
@@ -102,11 +119,19 @@ function buildPrompt(
   history?: readonly ChatTurn[],
   reference?: string
 ): string {
+  // When the cue names a specific place, that place IS the subject — so use
+  // it as the Place line and drop the chat history (prior turns about other
+  // places contaminate the small on-device model, which started parroting
+  // verbatim opening sentences from previous Palo Alto narrations when the
+  // user then asked about Stanford or Los Altos).
+  const cueSubject = extractCueSubject(userQuery);
+  const effectivePlace = cueSubject ?? location;
+  const effectiveHistory = cueSubject ? undefined : history;
   return buildNarratorPrompt({
     system: SYSTEM_PROMPT,
     directives: [topicFocusDirective(topics), localePromptDirective(), lengthDirective(length)],
-    place: location,
-    extraContext: renderHistoryBlock(history),
+    place: effectivePlace,
+    extraContext: renderHistoryBlock(effectiveHistory),
     reference,
     // Online RAG uses a wider clamp (1500 chars) to preserve more Wikipedia content.
     referenceMaxChars: reference ? 1500 : undefined,
