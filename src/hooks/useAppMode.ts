@@ -23,10 +23,21 @@ export function useAppMode(): AppModeState {
   const [state, setState] = useState<AppModeState>(snapshot);
 
   useEffect(() => {
-    // A single appMode subscription captures both modeChoice and networkState
-    // changes since appMode listens to both. Sync the rest of the triple too.
+    // Subscribe to all three sources independently. appMode.subscribe alone
+    // is not enough because it only notifies when `effective` flips — a raw
+    // network transition (unknown → online) with effective unchanged would
+    // not propagate, leaving the ConnectionPill stuck in its "probing"
+    // appearance.
     setState(snapshot());
-    return appMode.subscribe(() => setState(snapshot()));
+    const resync = () => setState(snapshot());
+    const unsubMode = appMode.subscribe(resync);
+    const unsubNet = networkStatus.subscribe(resync);
+    const unsubPrefs = guidePrefs.subscribe(resync);
+    return () => {
+      unsubMode();
+      unsubNet();
+      unsubPrefs();
+    };
   }, []);
 
   return state;

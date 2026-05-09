@@ -119,3 +119,11 @@ export const appMode = {
 // Kick off hydration at module load so persisted choice is in effect before
 // the first render — mirrors guidePrefs and radiusPrefs boot patterns.
 appMode.hydrate().catch(() => {});
+
+// Subscribe to the underlying sources at module load (rather than lazily on
+// first appMode.get()/subscribe()). Without this, NetworkStatus.init's
+// AsyncStorage seed — which fires `transition('offline')` asynchronously —
+// can land before any consumer has registered a subscriber, the notify is
+// dropped, and `effective` stays stuck at the optimistic 'online' it was
+// computed at module load.
+ensureSubscribed();

@@ -10,6 +10,11 @@ export type NetworkState = 'online' | 'offline' | 'unknown';
 const STORAGE_KEY = '@localguide/network-state-v1';
 const PROBE_URL = 'https://en.wikipedia.org/api/rest_v1/page/summary/Earth';
 const PROBE_TIMEOUT_MS = 5_000;
+// Re-probe every 90 s regardless of state. Why also when online: the OS only
+// fires isConnected:false when the WiFi/cell link itself drops; if the link
+// stays up but the upstream internet is unreachable (captive portal, dead
+// gateway, airplane mode flipped while WiFi remembered), no OS event arrives
+// and the state stays stuck on "online" forever. The pill ends up lying.
 const REPOLL_INTERVAL_MS = 90_000;
 // One opportunistic failure per 30s window counts toward the threshold.
 const OPP_FAILURE_WINDOW_MS = 30_000;
@@ -41,17 +46,13 @@ function transition(next: NetworkState): void {
 }
 
 function manageRepollTimer(): void {
-  if (state === 'offline') {
-    if (!repollTimer) {
-      repollTimer = setInterval(() => {
-        runProbe().catch(() => {});
-      }, REPOLL_INTERVAL_MS);
-    }
-  } else {
-    if (repollTimer) {
-      clearInterval(repollTimer);
-      repollTimer = null;
-    }
+  // Run the timer in every state. Previously this was only armed while
+  // offline, which meant a silent loss of connectivity (link still up,
+  // upstream dead) left the pill stuck on "online" indefinitely.
+  if (!repollTimer) {
+    repollTimer = setInterval(() => {
+      runProbe().catch(() => {});
+    }, REPOLL_INTERVAL_MS);
   }
 }
 
@@ -82,8 +83,14 @@ function handleProbeFail(): void {
   consecutiveFailures += 1;
   if (consecutiveFailures >= 2) {
     transition('offline');
+    return;
   }
   // One failure alone leaves state unchanged (stays 'unknown' or 'online').
+  // Schedule a fast follow-up probe so the second failure (which actually
+  // flips the state) lands in seconds rather than waiting REPOLL_INTERVAL_MS.
+  setTimeout(() => {
+    runProbe().catch(() => {});
+  }, 5_000);
 }
 
 function handleNetworkEvent(event: { isConnected?: boolean }): void {
@@ -117,16 +124,24 @@ export const networkStatus = {
     initialized = true;
 
     // Seed from last-known persisted value so UI can paint without waiting for probe.
+    // Use transition() rather than a direct assignment so subscribers (notably
+    // appMode.recompute) actually run — appMode.effective is captured at module
+    // load when state is still 'unknown' and would otherwise stay stuck on
+    // 'online' (the optimistic resolve) until the next genuine transition.
     AsyncStorage.getItem(STORAGE_KEY)
       .then((raw) => {
         if (raw === 'online' || raw === 'offline') {
-          if (state === 'unknown') state = raw;
+          if (state === 'unknown') transition(raw);
         }
       })
       .catch(() => {})
       .finally(() => {
         runProbe().catch(() => {});
       });
+
+    // Arm the periodic re-probe immediately so reachability is checked even
+    // if no transition (or no OS connectivity event) has happened yet.
+    manageRepollTimer();
 
     // Edge events from the OS — faster than probing for disconnect detection.
     try {
