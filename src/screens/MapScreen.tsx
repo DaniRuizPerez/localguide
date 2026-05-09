@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Linking, View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView, Animated, PanResponder, Dimensions, KeyboardAvoidingView, Keyboard } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE, type Region, type PoiClickEvent } from 'react-native-maps';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
@@ -58,6 +59,7 @@ function nearestSnap(y: number, vy: number): number {
 export { nearestSnap, SNAP_FULL, SNAP_HALF, SNAP_COLLAPSED }; // for unit test
 
 export default function MapScreen({ navigation }: Props) {
+  const insets = useSafeAreaInsets();
   const { gps, status, errorMessage, refresh } = useLocation();
   // Stack nav: Map is always pushed on top of Chat, so goBack() pops.
   // If for some reason the stack is empty (e.g. deep-linked straight to Map),
@@ -536,7 +538,7 @@ export default function MapScreen({ navigation }: Props) {
       </MapView>
       )}
 
-      <View style={styles.overlayTop} pointerEvents="box-none">
+      <View style={[styles.overlayTop, { top: 12 + insets.top }]} pointerEvents="box-none">
         <OfflineNotice />
         {gps && (
           <View style={styles.coordPill}>
@@ -550,7 +552,7 @@ export default function MapScreen({ navigation }: Props) {
       </View>
 
       <TouchableOpacity
-        style={styles.backBtn}
+        style={[styles.backBtn, { top: 12 + insets.top }]}
         onPress={goBackToChat}
         accessibilityLabel={t('nav.back')}
         accessibilityRole="button"
