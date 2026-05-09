@@ -136,6 +136,14 @@ export function poiTopic(poi: Poi): GuideTopic | null {
 }
 
 export function poiEmojiFor(poi: Poi): string {
+  // GeoNames populated places (PPL, PPLC, PPLA, …) are cities and towns
+  // bulk-loaded from cities15000.db. Their titles ("Menlo Park",
+  // "Mountain View", "Palo Alto") trip the keyword categorizer (park,
+  // mountain, …) and produce misleading emoji on the row. Always show
+  // the generic pin for those — no semantic guess from a city name.
+  if (poi.source === 'geonames' && poi.featureCode?.startsWith('PPL')) {
+    return CATEGORY_EMOJI.unknown;
+  }
   return CATEGORY_EMOJI[categorizePoi(poi)];
 }
 
