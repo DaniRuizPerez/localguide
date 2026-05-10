@@ -543,8 +543,9 @@ export default function MapScreen({ navigation }: Props) {
         {gps && (
           <View style={styles.coordPill}>
             <View style={[styles.statusDot, { backgroundColor: Colors.success }]} />
-            <Text style={[Type.chip, { color: Colors.text }]}>
-              {gps.latitude.toFixed(4)}° · {gps.longitude.toFixed(4)}°
+            <Text style={[Type.chip, { color: Colors.text }]} numberOfLines={1}>
+              {gps.placeName ??
+                `${gps.latitude.toFixed(4)}° · ${gps.longitude.toFixed(4)}°`}
               {gps.accuracy != null ? `  ·  ±${Math.round(gps.accuracy)}m` : ''}
             </Text>
           </View>
@@ -633,20 +634,32 @@ export default function MapScreen({ navigation }: Props) {
         {tab === 'places' && (
           <>
             {compassTarget && gps && compassTarget.source !== 'llm' && (
-              <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={() => setCompassTarget(null)}
-                accessibilityHint={t('compass.tapToClear')}
-                style={{ marginTop: 10 }}
-              >
-                <CompassArrow
-                  targetLat={compassTarget.latitude}
-                  targetLon={compassTarget.longitude}
-                  userLat={gps.latitude}
-                  userLon={gps.longitude}
-                  label={compassTarget.title}
-                />
-              </TouchableOpacity>
+              <View style={styles.selectedPoiRow}>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => setCompassTarget(null)}
+                  accessibilityHint={t('compass.tapToClear')}
+                  style={{ flex: 1 }}
+                >
+                  <CompassArrow
+                    targetLat={compassTarget.latitude}
+                    targetLon={compassTarget.longitude}
+                    userLat={gps.latitude}
+                    userLon={gps.longitude}
+                    label={compassTarget.title}
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.selectedPoiChatBtn}
+                  onPress={() => askAboutPoi(compassTarget)}
+                  hitSlop={8}
+                  accessibilityLabel={`Ask about ${compassTarget.title}`}
+                  accessibilityRole="button"
+                  testID={`selected-poi-chat-${compassTarget.pageId}`}
+                >
+                  <ChatBubbleIcon size={20} color={Colors.primary} />
+                </TouchableOpacity>
+              </View>
             )}
 
             <ScrollView
@@ -1013,6 +1026,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 8,
+  },
+  selectedPoiRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+    gap: 8,
+  },
+  selectedPoiChatBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.primaryLight,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   timelineIcon: {
     width: 28,
