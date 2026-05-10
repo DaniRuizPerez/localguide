@@ -1,5 +1,5 @@
 import React, { forwardRef, useCallback, useMemo } from 'react';
-import { FlatList, type ListRenderItem, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Image, type ListRenderItem, StyleSheet, Text, View } from 'react-native';
 import { Colors } from '../theme/colors';
 import { Type } from '../theme/tokens';
 import { GuideAvatar } from './GuideAvatar';
@@ -144,7 +144,11 @@ export const MessageList = forwardRef<FlatList<Message>, Props>(function Message
       contentContainerStyle={styles.messageList}
       ListEmptyComponent={
         <View style={styles.emptyContainer}>
-          <GuideAvatar size={48} />
+          <Image
+            source={require('../../assets/canyon/canyon-180.png')}
+            style={styles.emptyIcon}
+            accessibilityIgnoresInvertColors
+          />
           <Text style={[Type.title, styles.emptyTitle]}>
             {autoGuideEnabled ? t('chat.autoGuideListening') : t('app.ready')}
           </Text>
@@ -171,6 +175,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 60,
     paddingHorizontal: 32,
+  },
+  emptyIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 16,
   },
   emptyTitle: {
     color: Colors.text,
