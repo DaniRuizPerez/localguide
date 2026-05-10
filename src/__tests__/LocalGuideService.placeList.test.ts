@@ -129,4 +129,37 @@ describe('listNearbyPlaces — city grounding in prompt', () => {
     // Without a placeName the city phrase should not appear mid-sentence.
     expect(prompt).not.toMatch(/TOURIST-WORTHY places IN /);
   });
+
+  it('asks the model for at least 12 places (post-verifier ≥5 floor math)', async () => {
+    const location = {
+      latitude: 37.4419,
+      longitude: -122.143,
+      placeName: 'Palo Alto, California',
+    };
+    const task = localGuideService.listNearbyPlaces(location, 1000);
+    const donePromise = task.promise;
+    await completeWith('Rodin Sculpture Garden\n');
+    await donePromise;
+    const [prompt] = mockRunStream.mock.calls[mockRunStream.mock.calls.length - 1];
+    expect(prompt).toMatch(/at least 12 real, famous landmarks/i);
+  });
+
+  it('includes the templated generic-noun anti-pattern in the prompt', async () => {
+    // The "{city} + Botanical Gardens / Lighthouse / Park" anti-pattern is
+    // load-bearing — it's the concrete negative the model anchors against
+    // when refusing to invent generic-sounding names. Asserting on
+    // "Botanical Gardens" (rather than the templated city) keeps the test
+    // city-agnostic.
+    const location = {
+      latitude: 37.4419,
+      longitude: -122.143,
+      placeName: 'Palo Alto, California',
+    };
+    const task = localGuideService.listNearbyPlaces(location, 1000);
+    const donePromise = task.promise;
+    await completeWith('Rodin Sculpture Garden\n');
+    await donePromise;
+    const [prompt] = mockRunStream.mock.calls[mockRunStream.mock.calls.length - 1];
+    expect(prompt).toContain('Botanical Gardens');
+  });
 });

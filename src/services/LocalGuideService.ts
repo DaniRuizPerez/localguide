@@ -269,10 +269,10 @@ function buildNearbyPlacesPrompt(
     place: location,
     omitCoordsWithPlace: true,
     extraContext:
-      // Ask for 12 (not 6/8): the downstream verifier rejects ~half the
-      // candidates as "not really near here" and the parser caps at 12,
-      // so we need this much headroom to consistently leave ≥5 accepted
-      // names — the user-visible "Around You" target.
+      // Ask for 12 (not 6/8/10): the downstream verifier is now stricter
+      // (bias-toward-NO + generic-name anti-pattern) so its pass rate drops
+      // to ~40%. Asking for 12 candidates and slicing at 16 leaves ≥5
+      // verifier-accepted names — the user-visible "Around You" floor.
       //
       // The format-only example block deliberately spans 5 continents
       // (Paris/Tokyo/NYC/Barcelona/Cape Town/Rio). An earlier version
@@ -284,9 +284,18 @@ function buildNearbyPlacesPrompt(
       // Gemma 4 E2B (LiteRT-LM), substantially stronger than the 1B
       // this prompt was originally tuned for, so format guidance via
       // examples now helps more than it hurts.
-      `Name at least 10 real, famous landmarks in ${targetCity} ` +
-      `(or, if you don't know 10 specific to ${targetCity}, fill in with well-known places from its metro area, region, or state). ` +
+      //
+      // The uncertainty rule + templated "{city} + generic noun"
+      // anti-pattern are the accuracy levers. Abstract rules ("don't
+      // invent names") have been shown not to move this model; concrete
+      // templated negatives ("Palo Alto Lighthouse / Botanical Gardens /
+      // Park") give the decoder a specific shape to suppress.
+      `Name at least 12 real, famous landmarks in ${targetCity} ` +
+      `(or, if you don't know 12 specific to ${targetCity}, fill in with well-known places from its metro area, region, or state).\n\n` +
       `Use only real places you actually know — do NOT invent names. ` +
+      `If you are uncertain whether a specific place exists in ${targetCity}, do NOT list it. ` +
+      `Listing fewer real places is better than inventing generic-sounding ones. ` +
+      `Do NOT output generic patterns like "${targetCity} Lighthouse", "${targetCity} Botanical Gardens", or "${targetCity} Park" unless you specifically know that exact named place exists there.\n\n` +
       `Output ONE place name PER LINE — nothing else. No greetings, no descriptions, no colons, no addresses, no numbering, no markdown.\n\n` +
       `Format example (the names below are ONLY to show the output shape — DO NOT copy them; list real places in ${targetCity}):\n` +
       `Eiffel Tower\n` +
@@ -340,10 +349,11 @@ function parsePlaceList(text: string): string[] {
       seen.add(key);
       return true;
     })
-    // 12 (not 8): the verifier downstream rejects ~half the candidates as
-    // "not really near here", so we need a wider candidate pool to land
-    // on ≥5 accepted names. The prompt asks the model for ≥10 places.
-    .slice(0, 12);
+    // 16 (not 8/12): the verifier downstream is now stricter (bias toward
+    // NO + generic-name anti-pattern, ~40% pass rate). The prompt asks for
+    // ≥12 places; widening the slice to 16 lets the model exceed the ask
+    // and gives the verifier enough candidates to leave ≥5 accepted.
+    .slice(0, 16);
 }
 
 export type ListPlacesTask = AbortableTask<string[]>;
@@ -860,7 +870,11 @@ export const localGuideService = {
     // shows nothing. 256 tokens gives enough headroom for the model to
     // get past any preamble and emit at least a few names, even on bad
     // runs.
-    return runParsedStream(prompt, parse, { maxTokens: 256 });
+    // 320 (was 256): prompt now asks for ≥12 names and parser slices at
+    // 16. At ~12-16 chars per line, 16 lines is ~80 tokens of content;
+    // 320 leaves headroom for any preamble the model emits before the
+    // first listed name.
+    return runParsedStream(prompt, parse, { maxTokens: 320 });
   },
 
   /**
@@ -897,9 +911,22 @@ export const localGuideService = {
         // the row is already labelled "AI Generated" so the trust burden
         // is honest. We still drop pure hallucinations and other-country
         // results.
-        `For each candidate place below, answer YES if it is a real, well-known place ` +
-        `in ${locationLabel} OR in the same metro area / region (within roughly 50 km). ` +
-        `Answer NO only if it is in a clearly different region or country, or if it does not really exist.\n\n` +
+        //
+        // "Bias toward NO" + templated generic-noun anti-pattern: the
+        // previous wording ("answer NO only if...") biased the model
+        // toward YES on uncertainty, which let plausibly-named-but-fake
+        // places ("Palo Alto Botanical Gardens") through. Flipping to
+        // "bias toward NO" + requiring confident SPECIFIC-place
+        // confirmation reverses that pressure. Templating the literal
+        // {locationLabel} into the anti-pattern is what makes the rule
+        // land on Gemma — abstract instructions don't move it; concrete
+        // templated negatives do.
+        `For each candidate place below, decide if it is a real, well-known place ` +
+        `in ${locationLabel} or its metro area / region (within roughly 50 km).\n\n` +
+        `Bias toward NO. If you cannot confidently confirm the SPECIFIC named place exists at this location, answer NO. ` +
+        `Be especially strict with generic-sounding names (${locationLabel} + a common noun like "Park", "Lighthouse", "Botanical Gardens"): ` +
+        `answer YES only if you know that exact named place exists there, not because the name sounds plausible. ` +
+        `Otherwise, answer NO only if the candidate is in a clearly different region or country, or does not really exist.\n\n` +
         `Candidates:\n${numbered}\n\n` +
         `Output exactly ${candidates.length} lines, one per candidate, in the same order. ` +
         `Each line is just "YES" or "NO" — no explanations, no extra text.`,
@@ -932,12 +959,15 @@ export const localGuideService = {
       }
       return accepted;
     };
-    // Verifier output is tiny (one YES/NO per line); cap is forgiving.
-    // Priority: normal — gates the user-visible "Around You" list, so it
-    // must beat background work like Quiz prefetch (also priority='low').
-    // Without this, the verifier sits behind 5 quiz inferences (~80 s on
-    // Pixel 3) and the LLM POIs never arrive while the user is looking.
-    return runParsedStream(prompt, parse, { maxTokens: 96, priority: 'normal' });
+    // Verifier output is tiny (one YES/NO per line). 128 (was 96): with
+    // the stricter "bias toward NO" prompt the model occasionally emits a
+    // short rationale before YES/NO; 16 candidates × ~3 tokens × occasional
+    // verbosity headroom fits comfortably in 128. Priority: normal — gates
+    // the user-visible "Around You" list, so it must beat background work
+    // like Quiz prefetch (priority='low'). Without this, the verifier sits
+    // behind 5 quiz inferences (~80 s on Pixel 3) and the LLM POIs never
+    // arrive while the user is looking.
+    return runParsedStream(prompt, parse, { maxTokens: 128, priority: 'normal' });
   },
 
   async ask(
