@@ -1,6 +1,6 @@
 /**
  * ConnectionPill — three state snapshots (online, offline, unknown/probing),
- * tap handler, and soft-tactile style assertions.
+ * tap handler, and label-colour + puck-position style assertions.
  */
 
 import React from 'react';
@@ -69,71 +69,104 @@ describe('ConnectionPill', () => {
     expect(getByText('Online')).toBeTruthy();
   });
 
-  it('pill body has soft-tactile inset-shadow style: borderRadius 14, paddingHorizontal 11, paddingVertical 5', () => {
+  it('pill body row has no padding/border/background — bare label + track', () => {
     mockUseAppMode.mockReturnValue({ effective: 'online', choice: 'auto', networkState: 'online' });
     mockUseNetworkStatus.mockReturnValue('online');
 
     const { getByTestId } = render(<ConnectionPill onPress={() => {}} />);
     const body = getByTestId('connection-pill-body');
     const style = body.props.style;
-    // Flatten in case it's an array.
     const flat: Record<string, unknown> = Array.isArray(style)
       ? Object.assign({}, ...style)
       : style;
-    expect(flat.borderRadius).toBe(14);
-    expect(flat.paddingHorizontal).toBe(11);
-    expect(flat.paddingVertical).toBe(5);
-    // Inset shadow: elevation should be 0 (no Android outset shadow).
-    expect(flat.elevation).toBe(0);
+    expect(flat.flexDirection).toBe('row');
+    expect(flat.alignItems).toBe('center');
+    expect(flat.gap).toBe(6);
+    expect(flat.padding).toBeUndefined();
+    expect(flat.paddingHorizontal).toBeUndefined();
+    expect(flat.paddingVertical).toBeUndefined();
+    expect(flat.borderRadius).toBeUndefined();
+    expect(flat.backgroundColor).toBeUndefined();
   });
 
-  it('online dot uses Colors.success (#4ea374)', () => {
+  it('online: label coloured Colors.success, puck pinned right inside sage track', () => {
     mockUseAppMode.mockReturnValue({ effective: 'online', choice: 'auto', networkState: 'online' });
     mockUseNetworkStatus.mockReturnValue('online');
 
-    const { UNSAFE_getAllByType } = render(<ConnectionPill onPress={() => {}} />);
-    // The dot is a View with a backgroundColor style containing the dot color.
-    // We find the View nodes and look for the one with backgroundColor === Colors.success.
+    const { getByText, UNSAFE_getAllByType } = render(<ConnectionPill onPress={() => {}} />);
+    const labelStyle = getByText('Online').props.style;
+    const flatLabel = Array.isArray(labelStyle) ? Object.assign({}, ...labelStyle) : labelStyle;
+    expect(flatLabel.color).toBe(Colors.success);
+
     const { View } = require('react-native');
     const views = UNSAFE_getAllByType(View);
-    const dotView = views.find((v: { props: { style?: unknown } }) => {
+    const track = views.find((v: { props: { style?: unknown } }) => {
       const s = v.props.style;
       if (!s) return false;
       const f: Record<string, unknown> = Array.isArray(s) ? Object.assign({}, ...s) : s;
-      return f.backgroundColor === Colors.success;
+      return f.backgroundColor === Colors.successLight && f.width === 36 && f.height === 20;
     });
-    expect(dotView).toBeTruthy();
+    expect(track).toBeTruthy();
+    const puck = views.find((v: { props: { style?: unknown } }) => {
+      const s = v.props.style;
+      if (!s) return false;
+      const f: Record<string, unknown> = Array.isArray(s) ? Object.assign({}, ...s) : s;
+      return f.backgroundColor === '#FFFFFF' && f.width === 14 && f.right === 2;
+    });
+    expect(puck).toBeTruthy();
   });
 
-  it('offline dot uses Colors.warning (amber)', () => {
+  it('offline: label coloured Colors.warning, puck pinned left inside amber track', () => {
     mockUseAppMode.mockReturnValue({ effective: 'offline', choice: 'force-offline', networkState: 'offline' });
     mockUseNetworkStatus.mockReturnValue('offline');
 
-    const { UNSAFE_getAllByType } = render(<ConnectionPill onPress={() => {}} />);
+    const { getByText, UNSAFE_getAllByType } = render(<ConnectionPill onPress={() => {}} />);
+    const labelStyle = getByText('Offline').props.style;
+    const flatLabel = Array.isArray(labelStyle) ? Object.assign({}, ...labelStyle) : labelStyle;
+    expect(flatLabel.color).toBe(Colors.warning);
+
     const { View } = require('react-native');
     const views = UNSAFE_getAllByType(View);
-    const dotView = views.find((v: { props: { style?: unknown } }) => {
+    const track = views.find((v: { props: { style?: unknown } }) => {
       const s = v.props.style;
       if (!s) return false;
       const f: Record<string, unknown> = Array.isArray(s) ? Object.assign({}, ...s) : s;
-      return f.backgroundColor === Colors.warning;
+      return f.backgroundColor === Colors.warningLight && f.width === 36 && f.height === 20;
     });
-    expect(dotView).toBeTruthy();
+    expect(track).toBeTruthy();
+    const puck = views.find((v: { props: { style?: unknown } }) => {
+      const s = v.props.style;
+      if (!s) return false;
+      const f: Record<string, unknown> = Array.isArray(s) ? Object.assign({}, ...s) : s;
+      return f.backgroundColor === '#FFFFFF' && f.width === 14 && f.left === 2;
+    });
+    expect(puck).toBeTruthy();
   });
 
-  it('probing dot uses Colors.textTertiary (grey)', () => {
+  it('probing: label coloured Colors.textTertiary, puck centred (left: 11) in muted track', () => {
     mockUseAppMode.mockReturnValue({ effective: 'online', choice: 'auto', networkState: 'unknown' });
     mockUseNetworkStatus.mockReturnValue('unknown');
 
-    const { UNSAFE_getAllByType } = render(<ConnectionPill />);
+    const { getByText, UNSAFE_getAllByType } = render(<ConnectionPill />);
+    const labelStyle = getByText('Checking…').props.style;
+    const flatLabel = Array.isArray(labelStyle) ? Object.assign({}, ...labelStyle) : labelStyle;
+    expect(flatLabel.color).toBe(Colors.textTertiary);
+
     const { View } = require('react-native');
     const views = UNSAFE_getAllByType(View);
-    const dotView = views.find((v: { props: { style?: unknown } }) => {
+    const track = views.find((v: { props: { style?: unknown } }) => {
       const s = v.props.style;
       if (!s) return false;
       const f: Record<string, unknown> = Array.isArray(s) ? Object.assign({}, ...s) : s;
-      return f.backgroundColor === Colors.textTertiary;
+      return f.backgroundColor === Colors.surface && f.width === 36 && f.height === 20;
     });
-    expect(dotView).toBeTruthy();
+    expect(track).toBeTruthy();
+    const puck = views.find((v: { props: { style?: unknown } }) => {
+      const s = v.props.style;
+      if (!s) return false;
+      const f: Record<string, unknown> = Array.isArray(s) ? Object.assign({}, ...s) : s;
+      return f.backgroundColor === '#FFFFFF' && f.width === 14 && f.left === 11;
+    });
+    expect(puck).toBeTruthy();
   });
 });

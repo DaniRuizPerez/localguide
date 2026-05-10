@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useAppMode } from '../hooks/useAppMode';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { Colors } from '../theme/colors';
-import { Sizing, Type } from '../theme/tokens';
+import { Type } from '../theme/tokens';
 import { t } from '../i18n';
 
 interface Props {
@@ -12,13 +12,11 @@ interface Props {
 }
 
 /**
- * Soft-tactile connectivity pill rendered in ChatHeader.
- * Shows the effective connectivity mode: online (green dot), offline (amber
- * dot), or probing (grey dot). Tap to open the "How should I answer?" sheet
- * (Ticket 3 wires the handler; here we just expose the `onPress` prop).
- *
- * Visual spec: padding 5/11, borderRadius 14, inset shadow peach/white,
- * dot 6×6 borderRadius 3, text Nunito 700 / fontSize 10.
+ * Connectivity status indicator rendered in ChatHeader.
+ * Renders a coloured label + a 36×20 track with a 14×14 white puck whose
+ * position encodes the state: right=online, left=offline, centred=probing.
+ * Label colour matches the active state. Tap to open the
+ * "How should I answer?" sheet.
  */
 export function ConnectionPill({ onPress }: Props) {
   const { effective } = useAppMode();
@@ -27,45 +25,44 @@ export function ConnectionPill({ onPress }: Props) {
   // Probing state: effective is online (optimistic) but network still unknown.
   const isProbing = effective === 'online' && network === 'unknown';
 
-  let dotColor: string;
   let label: string;
-  let pillBg: string;
-  let emoji: string;
+  let labelColor: string;
+  let trackBg: string;
+  let trackBorder: string;
+  let puckStyle: { left?: number; right?: number };
   let a11yLabel: string;
 
   if (isProbing) {
-    dotColor = Colors.textTertiary;
     label = t('mode.unknownProbing');
-    pillBg = Colors.surface;
-    emoji = '';
+    labelColor = Colors.textTertiary;
+    trackBg = Colors.surface;
+    trackBorder = Colors.borderLight;
+    puckStyle = { left: 11 };
     a11yLabel = label;
   } else if (effective === 'online') {
-    dotColor = Colors.success; // #4ea374
     label = t('mode.online');
-    // Sage/mint background: successLight (#DDE8DF light / #172A1F dark).
-    pillBg = Colors.successLight;
-    // Emoji kept in a separate sibling Text so tests can still do getByText('Online').
-    emoji = '🌐 ';
+    labelColor = Colors.success;
+    trackBg = Colors.successLight;
+    trackBorder = 'rgba(78,163,116,0.35)';
+    puckStyle = { right: 2 };
     a11yLabel = 'Online mode';
   } else {
-    dotColor = Colors.warning; // amber
     label = t('mode.offline');
-    // Amber background: warningLight (#FBEBD0 light / #2E2210 dark).
-    pillBg = Colors.warningLight;
-    // Emoji kept in a separate sibling Text so tests can still do getByText('Offline').
-    emoji = '📴 ';
+    labelColor = Colors.warning;
+    trackBg = Colors.warningLight;
+    trackBorder = 'rgba(216,139,42,0.45)';
+    puckStyle = { left: 2 };
     a11yLabel = 'Offline mode';
   }
 
   const pillBody = (
-    <View style={[styles.pill, { backgroundColor: pillBg }]} testID="connection-pill-body">
-      <View style={[styles.dot, { backgroundColor: dotColor }]} />
-      <Text style={[Type.metaUpper, styles.label]} numberOfLines={1} aria-hidden>
-        {emoji}
-      </Text>
-      <Text style={[Type.metaUpper, styles.label]} numberOfLines={1}>
+    <View style={styles.row} testID="connection-pill-body">
+      <Text style={[Type.metaUpper, { color: labelColor }]} numberOfLines={1}>
         {label}
       </Text>
+      <View style={[styles.track, { backgroundColor: trackBg, borderColor: trackBorder }]}>
+        <View style={[styles.puck, puckStyle]} />
+      </View>
     </View>
   );
 
@@ -94,31 +91,24 @@ export function ConnectionPill({ onPress }: Props) {
 }
 
 const styles = StyleSheet.create({
-  pill: {
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 11,
-    paddingVertical: 5,
-    borderRadius: 14,
     gap: 6,
-    flexShrink: 0,
-    maxWidth: Sizing.vw(28),
-    // Inset shadow — approximated on iOS via shadowColor/offset/opacity and on
-    // Android via a subtle elevation-0 (inset shadows are not native on Android
-    // but the surface colour + border give the same depth read at small sizes).
-    shadowColor: 'rgba(184,98,58,1)',
-    shadowOffset: { width: 2, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 0,
   },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    flexShrink: 0,
+  track: {
+    width: 36,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1,
+    position: 'relative',
   },
-  label: {
-    color: Colors.textSecondary,
+  puck: {
+    position: 'absolute',
+    top: 2,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#FFFFFF',
   },
 });
