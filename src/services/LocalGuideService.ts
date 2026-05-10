@@ -912,21 +912,18 @@ export const localGuideService = {
         // is honest. We still drop pure hallucinations and other-country
         // results.
         //
-        // "Bias toward NO" + templated generic-noun anti-pattern: the
-        // previous wording ("answer NO only if...") biased the model
-        // toward YES on uncertainty, which let plausibly-named-but-fake
-        // places ("Palo Alto Botanical Gardens") through. Flipping to
-        // "bias toward NO" + requiring confident SPECIFIC-place
-        // confirmation reverses that pressure. Templating the literal
-        // {locationLabel} into the anti-pattern is what makes the rule
-        // land on Gemma — abstract instructions don't move it; concrete
-        // templated negatives do.
-        `For each candidate place below, decide if it is a real, well-known place ` +
-        `in ${locationLabel} or its metro area / region (within roughly 50 km).\n\n` +
-        `Bias toward NO. If you cannot confidently confirm the SPECIFIC named place exists at this location, answer NO. ` +
-        `Be especially strict with generic-sounding names (${locationLabel} + a common noun like "Park", "Lighthouse", "Botanical Gardens"): ` +
-        `answer YES only if you know that exact named place exists there, not because the name sounds plausible. ` +
-        `Otherwise, answer NO only if the candidate is in a clearly different region or country, or does not really exist.\n\n` +
+        // DO NOT replace the imperative "answer YES if ... Answer NO only
+        // if ..." structure with an interrogative "decide if ..." form or
+        // add a multi-sentence "Bias toward NO + generic-noun anti-pattern"
+        // block. That variant was deployed in 126e323 and on emulator-5554
+        // produced LiteRTModule onDone chunks=0 pendingLen=0 — the model
+        // ran 26 s and emitted nothing parseable, dropping verifier accept
+        // from 4/5 to 0/5. The imperative-first format anchors Gemma E2B
+        // on the YES/NO output shape from token 1; extra rules + framing
+        // density push it off-format.
+        `For each candidate place below, answer YES if it is a real, well-known place ` +
+        `in ${locationLabel} OR in the same metro area / region (within roughly 50 km). ` +
+        `Answer NO only if it is in a clearly different region or country, or if it does not really exist.\n\n` +
         `Candidates:\n${numbered}\n\n` +
         `Output exactly ${candidates.length} lines, one per candidate, in the same order. ` +
         `Each line is just "YES" or "NO" — no explanations, no extra text.`,
