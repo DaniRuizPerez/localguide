@@ -172,6 +172,51 @@ describe('StreamPostfilter — race semantics', () => {
   });
 });
 
+describe('StreamPostfilter — getCleanedText preserves pre-tail content (issue #8)', () => {
+  // Non-repeating string of unique comma-separated integers (>512 chars, no flood, no repetition).
+  const uniquePrefix = Array.from({ length: 200 }, (_, i) => i).join(',') + ','; // ~691 chars
+
+  it('returns the full leading content when caller passes the accumulated text', () => {
+    const pf = new StreamPostfilter();
+    // Block ≥ 64 chars so only 2 matches trigger abort.
+    const block = 'The historic Stanford Quad gathers students from all over the world here. '; // 73 chars
+    expect(uniquePrefix.length).toBeGreaterThan(512);
+    const input = uniquePrefix + block.repeat(4);
+
+    let accumulated = '';
+    let abortedAt = -1;
+    for (let i = 0; i < input.length; i++) {
+      accumulated += input[i];
+      if (pf.pushDelta(input[i]) !== 'ok') {
+        abortedAt = i;
+        break;
+      }
+    }
+
+    expect(abortedAt).toBeGreaterThan(-1); // must have aborted on the repetition loop
+
+    // Passing the full accumulated text preserves the leading content outside the tail window.
+    const cleaned = pf.getCleanedText(accumulated);
+    expect(cleaned.startsWith(uniquePrefix)).toBe(true);
+    expect(cleaned).not.toContain(block.trimEnd());
+  });
+
+  it('finalize() with fullText preserves pre-tail content on natural finish', () => {
+    const pf = new StreamPostfilter();
+    // Trailing duplicate sentence — period < 64 so stream needs 3 matches but finalize uses 2.
+    const sentence = 'Visit the Quad on a sunny afternoon. '; // 37 chars
+    const text = uniquePrefix + sentence + sentence;
+
+    for (const ch of text) pf.pushDelta(ch);
+
+    // Stream did NOT abort (only 2 duplicate sentences, period < 64 needs 3 mid-stream).
+    // finalize() applies 2-match threshold and detects the trailing repeat.
+    const { cleanedText, trimmedReason } = pf.finalize(text);
+    expect(trimmedReason).toBe('abort_repetition');
+    expect(cleanedText.startsWith(uniquePrefix)).toBe(true);
+  });
+});
+
 describe('trailerFor', () => {
   it('returns user-readable strings for the user-facing reasons', () => {
     expect(trailerFor('abort_repetition')).toMatch(/repeating/);
