@@ -1,7 +1,7 @@
 import React from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Colors } from '../theme/colors';
-import { Radii, Shadows, Spacing, Type } from '../theme/tokens';
+import { Radii, Spacing, Type } from '../theme/tokens';
 import { GuideAvatar } from './GuideAvatar';
 import { t } from '../i18n';
 import type { GPSContext } from '../services/InferenceService';
@@ -189,7 +189,7 @@ export function HomeState({
 function CtaCard({
   glyph,
   label,
-  sub,
+  sub: _sub,
   onPress,
   disabled,
   primary,
@@ -207,7 +207,7 @@ function CtaCard({
 }) {
   return (
     <TouchableOpacity
-      style={[styles.cta, primary ? styles.ctaPrimary : styles.ctaSecondary, dimmed && styles.ctaDimmed]}
+      style={[styles.cta, primary && styles.ctaPrimaryWide, dimmed && styles.ctaDimmed]}
       onPress={onPress}
       disabled={disabled}
       accessibilityLabel={label}
@@ -215,10 +215,7 @@ function CtaCard({
       testID={testID}
     >
       <Text style={styles.ctaGlyph}>{glyph}</Text>
-      <Text style={[styles.ctaLabel, primary ? styles.ctaLabelPrimary : styles.ctaLabelSecondary]}>
-        {label}
-      </Text>
-      <Text style={[styles.ctaSub, primary ? styles.ctaSubPrimary : styles.ctaSubSecondary]}>{sub}</Text>
+      <Text style={styles.ctaLabel} numberOfLines={1}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -282,50 +279,36 @@ const styles = StyleSheet.create({
   },
   ctaRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
     marginTop: Spacing.lg,
     marginBottom: Spacing.lg,
   },
   cta: {
     flex: 1,
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    borderRadius: Radii.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 40,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryLight,
     gap: 6,
   },
-  ctaPrimary: {
-    backgroundColor: Colors.primary,
-    ...Shadows.ctaHard,
-  },
-  ctaSecondary: {
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.borderLight,
-    ...Shadows.softOutset,
-  },
+  ctaPrimaryWide: { flex: 1.4 },
   ctaDimmed: {
     opacity: 0.5,
   },
   ctaGlyph: {
-    fontSize: 20,
+    fontSize: 14,
   },
   ctaLabel: {
-    ...Type.title,
-  },
-  ctaLabelPrimary: {
-    color: '#FFFFFF',
-  },
-  ctaLabelSecondary: {
-    color: Colors.text,
-  },
-  ctaSub: {
-    ...Type.hint,
-  },
-  ctaSubPrimary: {
-    color: 'rgba(255,255,255,0.85)',
-  },
-  ctaSubSecondary: {
-    color: Colors.textTertiary,
+    fontSize: 12.5,
+    fontWeight: '700',
+    letterSpacing: -0.1,
+    color: Colors.primaryDark,
   },
   aroundHeader: {
     flexDirection: 'row',
