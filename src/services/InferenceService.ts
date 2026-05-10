@@ -81,8 +81,23 @@ export class InferenceService {
             `Open the app through the download screen to fetch it.`
         );
       }
-      await LiteRTModule.loadModelFromPath(localPath, profile.multimodal);
-      console.log(`[InferenceService] Loaded ${profile.displayName} from ${localPath}`);
+      try {
+        await LiteRTModule.loadModelFromPath(localPath, profile.multimodal);
+        console.log(`[InferenceService] Loaded ${profile.displayName} from ${localPath}`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const isVisionMismatch =
+          profile.multimodal &&
+          /Vision Encoder|TF_LITE_VISION_ENCODER|INVALID_ARGUMENT/i.test(msg);
+        if (!isVisionMismatch) throw err;
+        console.warn(
+          `[InferenceService] Multimodal load failed (${msg}); retrying as text-only`
+        );
+        await LiteRTModule.loadModelFromPath(localPath, false);
+        console.log(
+          `[InferenceService] Loaded ${profile.displayName} as text-only fallback from ${localPath}`
+        );
+      }
       this.loaded = true;
     } finally {
       this.loading = false;
