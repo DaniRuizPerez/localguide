@@ -16,7 +16,7 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: '--allowedTools "mcp__github__add_issue_comment,mcp__github__update_issue,mcp__github__create_pull_request,mcp__github__create_branch,mcp__github__push_files,mcp__github__create_or_update_file,mcp__github__add_labels_to_issue,Bash(npm:*),Bash(npx:*),Bash(git:*),Bash(gh:*),Read,Write,Edit,Grep,Glob"'
+          claude_args: '--allowedTools "Bash,mcp__github__add_issue_comment,mcp__github__update_issue,mcp__github__create_pull_request,mcp__github__create_branch,mcp__github__push_files,mcp__github__create_or_update_file,mcp__github__add_labels_to_issue,mcp__github__remove_label_from_issue,Read,Write,Edit,Grep,Glob,WebFetch,WebSearch"'
           prompt: |
             Triage Sentry-reported issue #${{ github.event.issue.number }}.
             The issue body has a stack trace, breadcrumbs, and device info.
