@@ -142,7 +142,8 @@ export function useGuideStream({ speakResponsesRef, topicRef, onScroll }: GuideS
           },
         });
         const trailer = trailerFor(reason);
-        const cleaned = postfilter.getCleanedText();
+        const storeText = chatStore.get().messages.find((m) => m.id === guideId)?.text ?? '';
+        const cleaned = postfilter.getCleanedText(storeText + delta);
         const body = trailer ? `${cleaned}\n\n${trailer}` : cleaned;
         chatStore.replaceGuideText(guideId, body.trim());
         const durationMs = Date.now() - start;
@@ -158,7 +159,8 @@ export function useGuideStream({ speakResponsesRef, topicRef, onScroll }: GuideS
       // sentences from natural-finish answers without surfacing any trailer.
       const applyFinalizeTrim = (guideId: string): void => {
         if (aborted) return;
-        const { cleanedText, trimmedReason } = postfilter.finalize();
+        const fullText = chatStore.get().messages.find((m) => m.id === guideId)?.text ?? '';
+        const { cleanedText, trimmedReason } = postfilter.finalize(fullText);
         if (trimmedReason !== null) {
           chatStore.replaceGuideText(guideId, cleanedText);
         }

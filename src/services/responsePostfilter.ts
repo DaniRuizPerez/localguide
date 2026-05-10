@@ -169,53 +169,61 @@ export class StreamPostfilter {
   /**
    * Run once at end-of-stream. Trims trailing-repeat / token / flood remnants;
    * never aborts. Returns the cleaned full text + which (if any) trim happened.
+   *
+   * Pass `fullText` (the complete accumulated response, not just the tail) so
+   * that content emitted before the 512-char tail window is preserved.
    */
-  finalize(): FinalizeResult {
+  finalize(fullText?: string): FinalizeResult {
     if (this.aborted !== 'ok') {
-      return { cleanedText: this.getCleanedText(), trimmedReason: this.aborted };
+      return { cleanedText: this.getCleanedText(fullText), trimmedReason: this.aborted };
     }
     if (!this.opts.enabled) {
-      return { cleanedText: this.tail, trimmedReason: null };
+      return { cleanedText: fullText ?? this.tail, trimmedReason: null };
     }
 
     // Trailing repetition with a lower threshold (2 blocks instead of 3).
-    const n = this.tail.length;
+    const text = fullText ?? this.tail;
+    const n = text.length;
     const maxP = Math.floor(n / 2);
     for (let p = this.opts.minRepeatPeriod; p <= maxP; p += 1) {
-      const block = this.tail.slice(n - p);
+      const block = text.slice(n - p);
       if (isSingleCharBlock(block)) continue;
-      if (this.tail.slice(n - 2 * p, n - p) === block) {
-        const stripped = this.tail.slice(0, n - p).trimEnd();
+      if (text.slice(n - 2 * p, n - p) === block) {
+        const stripped = text.slice(0, n - p).trimEnd();
         return { cleanedText: stripped, trimmedReason: 'abort_repetition' };
       }
     }
 
-    return { cleanedText: this.tail, trimmedReason: null };
+    return { cleanedText: text, trimmedReason: null };
   }
 
   /**
    * After a mid-stream abort, return the response text trimmed back to the
    * last "safe" point — before the repeating block, before the leaked token,
    * before the flood run.
+   *
+   * Pass `fullText` (the complete accumulated response, not just the tail) so
+   * that content emitted before the 512-char tail window is preserved.
    */
-  getCleanedText(): string {
+  getCleanedText(fullText?: string): string {
+    const text = fullText ?? this.tail;
     if (this.aborted === 'abort_repetition' && this.abortPeriod > 0) {
       // Strip one full repeat block plus the partial start of the next.
-      return this.tail.slice(0, Math.max(0, this.tail.length - 2 * this.abortPeriod)).trimEnd();
+      return text.slice(0, Math.max(0, text.length - 2 * this.abortPeriod)).trimEnd();
     }
     if (this.aborted === 'abort_token' && this.abortTokenLen > 0) {
-      return this.tail.slice(0, this.tail.length - this.abortTokenLen).trimEnd();
+      return text.slice(0, text.length - this.abortTokenLen).trimEnd();
     }
     if (this.aborted === 'abort_flood') {
       // Strip the trailing run of identical chars.
-      let i = this.tail.length;
-      while (i > 0 && this.tail[i - 1] === this.runChar) i -= 1;
-      return this.tail.slice(0, i).trimEnd();
+      let i = text.length;
+      while (i > 0 && text[i - 1] === this.runChar) i -= 1;
+      return text.slice(0, i).trimEnd();
     }
     if (this.aborted === 'abort_format') {
       return '';
     }
-    return this.tail;
+    return text;
   }
 }
 
