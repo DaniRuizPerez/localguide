@@ -76,9 +76,23 @@ export const chatStore = {
     return snapshot();
   },
 
-  addUserMessage(text: string, imageUri?: string): string {
+  // `opts.subjectPoi` carries POI subject anchors for follow-up turns — see
+  // Message in src/types/chat.ts for the tri-state semantics. Set explicitly
+  // by POI taps and the area-reset chip; omitted for free-typed text/voice
+  // (those fall back to inheritance + live cue inference at stream time).
+  addUserMessage(
+    text: string,
+    opts?: { imageUri?: string; subjectPoi?: string | null }
+  ): string {
     const id = nextId('u');
-    const next = [...messages, { id, role: 'user' as const, text, imageUri }];
+    const message: Message = {
+      id,
+      role: 'user',
+      text,
+      ...(opts?.imageUri !== undefined ? { imageUri: opts.imageUri } : {}),
+      ...(opts?.subjectPoi !== undefined ? { subjectPoi: opts.subjectPoi } : {}),
+    };
+    const next = [...messages, message];
     messages = next.length > MAX_MESSAGES ? next.slice(-MAX_MESSAGES) : next;
     notify();
     schedulePersist();

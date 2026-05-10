@@ -6,8 +6,15 @@ import { chatStore } from '../services/ChatStore';
 
 export interface ChatMessagesApi {
   messages: Message[];
-  /** Append a user turn (typed, voice, POI cue). Returns its id. */
-  addUserMessage(text: string, imageUri?: string): string;
+  /**
+   * Append a user turn (typed, voice, POI cue). Returns its id.
+   * `opts.subjectPoi` carries POI subject anchors for follow-up turns —
+   * see Message in src/types/chat.ts for the tri-state semantics.
+   */
+  addUserMessage(
+    text: string,
+    opts?: { imageUri?: string; subjectPoi?: string | null }
+  ): string;
   /** Append a final guide bubble (used by auto-guide replies). Returns its id. */
   addGuideMessage(
     text: string,
@@ -53,9 +60,12 @@ export function useChatMessages(): ChatMessagesApi {
     return chatStore.subscribe(setSnap);
   }, []);
 
-  const addUserMessage = useCallback((text: string, imageUri?: string) => {
-    return chatStore.addUserMessage(text, imageUri);
-  }, []);
+  const addUserMessage = useCallback(
+    (text: string, opts?: { imageUri?: string; subjectPoi?: string | null }) => {
+      return chatStore.addUserMessage(text, opts);
+    },
+    []
+  );
 
   const addGuideMessage = useCallback(
     (text: string, locationUsed: GPSContext | string, durationMs?: number, source?: Source) => {

@@ -140,3 +140,121 @@ describe('askStream — chat history', () => {
     expect(prompt).not.toMatch(/Guide:\s*\n/);
   });
 });
+
+describe('askStream — subject override + history guard', () => {
+  beforeEach(() => {
+    mockRunStream.mockClear();
+  });
+
+  afterAll(async () => {
+    await localGuideService.dispose();
+  });
+
+  it('emits a Subject directive and uses the override as Place when subjectOverride is set', async () => {
+    await localGuideService.askStream(
+      'tell me its history',
+      paris,
+      { onToken: () => {}, onDone: () => {}, onError: () => {} },
+      undefined,
+      [],
+      undefined,
+      'Hoover Tower',
+      'Hoover Tower'
+    );
+
+    const prompt = mockRunStream.mock.calls[0][0];
+    expect(prompt).toContain('Subject: Hoover Tower.');
+    // Subject is asserted twice for decoder anchoring.
+    expect(prompt.match(/Hoover Tower/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+    expect(prompt).toContain('Place: Hoover Tower');
+    // GPS placeName ("Paris") must NOT be the Place line when subject is set.
+    expect(prompt).not.toMatch(/Place: Paris/);
+  });
+
+  it('preserves history when the subject is unchanged across turns', async () => {
+    const history: ChatTurn[] = [
+      { role: 'user', text: 'Tell me about Hoover Tower.' },
+      { role: 'guide', text: 'Hoover Tower opened in 1941…' },
+    ];
+    await localGuideService.askStream(
+      'tell me its history',
+      paris,
+      { onToken: () => {}, onDone: () => {}, onError: () => {} },
+      undefined,
+      history,
+      undefined,
+      'Hoover Tower',
+      'Hoover Tower'
+    );
+
+    const prompt = mockRunStream.mock.calls[0][0];
+    expect(prompt).toContain('Previous conversation in this session:');
+    expect(prompt).toContain('Visitor: Tell me about Hoover Tower.');
+  });
+
+  it('drops history when the subject just changed (preserves the original guard)', async () => {
+    const history: ChatTurn[] = [
+      { role: 'user', text: 'Tell me about Mountain View.' },
+      { role: 'guide', text: 'Mountain View is a city in Santa Clara County…' },
+    ];
+    await localGuideService.askStream(
+      'Tell me about Hoover Tower.',
+      paris,
+      { onToken: () => {}, onDone: () => {}, onError: () => {} },
+      undefined,
+      history,
+      undefined,
+      'Hoover Tower',
+      'Mountain View'
+    );
+
+    const prompt = mockRunStream.mock.calls[0][0];
+    expect(prompt).not.toContain('Previous conversation');
+    expect(prompt).not.toContain('Mountain View');
+  });
+
+  it('treats "Stanford" and "Stanford, California" as the same subject (sameSubject normalization)', async () => {
+    const history: ChatTurn[] = [
+      { role: 'user', text: 'Tell me about Stanford, California.' },
+      { role: 'guide', text: 'Stanford was founded in 1885…' },
+    ];
+    await localGuideService.askStream(
+      'tell me more',
+      paris,
+      { onToken: () => {}, onDone: () => {}, onError: () => {} },
+      undefined,
+      history,
+      undefined,
+      'Stanford',
+      'Stanford, California'
+    );
+
+    const prompt = mockRunStream.mock.calls[0][0];
+    // History must be kept (subject is "the same" after region-suffix strip).
+    expect(prompt).toContain('Previous conversation in this session:');
+    expect(prompt).toContain('Stanford was founded');
+  });
+
+  it('omits the Subject directive entirely when subjectOverride is null (explicit reset)', async () => {
+    const history: ChatTurn[] = [
+      { role: 'user', text: 'Tell me about Hoover Tower.' },
+      { role: 'guide', text: 'Hoover Tower opened in 1941…' },
+    ];
+    await localGuideService.askStream(
+      'Tell me about this area',
+      paris,
+      { onToken: () => {}, onDone: () => {}, onError: () => {} },
+      undefined,
+      history,
+      undefined,
+      null,
+      'Hoover Tower'
+    );
+
+    const prompt = mockRunStream.mock.calls[0][0];
+    expect(prompt).not.toContain('Subject: ');
+    // Reset means Place falls back to GPS placeName, not the prior subject.
+    expect(prompt).toContain('Place: Paris');
+    expect(prompt).not.toContain('Place: Hoover Tower');
+  });
+});

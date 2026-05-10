@@ -290,7 +290,10 @@ describe('MapScreen', () => {
     fireEvent.press(btn);
 
     await waitFor(() => {
-      expect(mockAddUserMessage).toHaveBeenCalledWith('Tell me about Tower Bridge');
+      expect(mockAddUserMessage).toHaveBeenCalledWith(
+        'Tell me about Tower Bridge',
+        { subjectPoi: 'Tower Bridge' }
+      );
     });
   });
 

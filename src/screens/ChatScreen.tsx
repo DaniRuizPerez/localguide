@@ -186,7 +186,7 @@ export default function ChatScreen(props: Props) {
       }
       const displayText = `Tell me about ${poi.title}`;
       const promptText = `Tell me about ${poi.title}.`;
-      messages.addUserMessage(displayText);
+      messages.addUserMessage(displayText, { subjectPoi: poi.title });
       await stream({ intent: 'text', query: promptText, location: effectiveLocation });
     },
     [effectiveLocation, inferring, stop, messages, stream]
@@ -229,7 +229,9 @@ export default function ChatScreen(props: Props) {
     }
     if (welcomedRef.current || !gps || inferring) return;
     welcomedRef.current = true;
-    messages.addUserMessage('Tell me about this area');
+    // Explicit reset: ambient/area cue must NOT inherit a stale POI subject
+    // from earlier in the session.
+    messages.addUserMessage('Tell me about this area', { subjectPoi: null });
     stream({ intent: 'text', query: AUTO_GUIDE_WELCOME_CUE, location: gps });
   }, [autoGuide.enabled, gps, inferring, messages, stream]);
 
@@ -270,7 +272,9 @@ export default function ChatScreen(props: Props) {
     if (result.canceled || !result.assets?.[0]) return;
     const imageUri = result.assets[0].uri;
     const userQuery = input.trim();
-    messages.addUserMessage(userQuery || 'What do you see?', imageUri);
+    // Photo IS the subject — explicit reset so a stale POI tag doesn't bleed
+    // into the image analysis prompt.
+    messages.addUserMessage(userQuery || 'What do you see?', { imageUri, subjectPoi: null });
     setInput('');
     scrollToEnd();
     await stream({ intent: 'image', query: userQuery, location: effectiveLocation, imageUri });
@@ -442,7 +446,7 @@ export default function ChatScreen(props: Props) {
           if (inferring) stop();
           const displayText = `Tell me about ${title}`;
           const promptText = `Tell me about ${title}.`;
-          messages.addUserMessage(displayText);
+          messages.addUserMessage(displayText, { subjectPoi: title });
           stream({ intent: 'text', query: promptText, location: effectiveLocation });
         }}
       />

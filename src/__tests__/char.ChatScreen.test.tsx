@@ -88,22 +88,29 @@ function mockAskStream(
   return Promise.resolve({ abort: jest.fn().mockResolvedValue(undefined) });
 }
 
-jest.mock('../services/LocalGuideService', () => ({
-  localGuideService: {
-    initialize: jest.fn().mockResolvedValue(undefined),
-    ask: jest.fn(), // kept for backwards compat but no longer invoked by ChatScreen
-    askStream: mockAskStream,
-    askWithImageStream: mockAskStream,
-    // useNearbyPois falls back to this when Wikipedia returns nothing; stub
-    // it with a never-resolving promise so the hook stays in its loading
-    // state and tests don't have to deal with llm-flavored POI rows.
-    listNearbyPlaces: jest.fn(() => ({
-      promise: new Promise<string[]>(() => {}),
-      abort: jest.fn().mockResolvedValue(undefined),
-    })),
-    dispose: jest.fn().mockResolvedValue(undefined),
-  },
-}));
+jest.mock('../services/LocalGuideService', () => {
+  const actual = jest.requireActual('../services/LocalGuideService');
+  return {
+    // Re-export the named helpers (extractCueSubject) that useGuideStream
+    // imports from this module — without this they come back undefined and
+    // every stream call throws "extractCueSubject is not a function".
+    ...actual,
+    localGuideService: {
+      initialize: jest.fn().mockResolvedValue(undefined),
+      ask: jest.fn(), // kept for backwards compat but no longer invoked by ChatScreen
+      askStream: mockAskStream,
+      askWithImageStream: mockAskStream,
+      // useNearbyPois falls back to this when Wikipedia returns nothing; stub
+      // it with a never-resolving promise so the hook stays in its loading
+      // state and tests don't have to deal with llm-flavored POI rows.
+      listNearbyPlaces: jest.fn(() => ({
+        promise: new Promise<string[]>(() => {}),
+        abort: jest.fn().mockResolvedValue(undefined),
+      })),
+      dispose: jest.fn().mockResolvedValue(undefined),
+    },
+  };
+});
 
 const mockSpeechEnqueue = jest.fn();
 jest.mock('../services/SpeechService', () => ({

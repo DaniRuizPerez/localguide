@@ -132,7 +132,9 @@ export default function MapScreen({ navigation }: Props) {
     if (result.canceled || !result.assets?.[0]) return;
     const imageUri = result.assets[0].uri;
     const userQuery = chatInput.trim();
-    messages.addUserMessage(userQuery || 'What do you see?', imageUri);
+    // Photo IS the subject — explicit reset so a stale POI tag doesn't bleed
+    // into the image analysis prompt.
+    messages.addUserMessage(userQuery || 'What do you see?', { imageUri, subjectPoi: null });
     setChatInput('');
     listRef.current?.scrollToEnd({ animated: true });
     await stream({ intent: 'image', query: userQuery, location: gps, imageUri });
@@ -153,7 +155,7 @@ export default function MapScreen({ navigation }: Props) {
   const askAboutPoi = (p: Poi) => {
     if (!gps) return;
     if (inferring) stop();
-    chatStore.addUserMessage(`Tell me about ${p.title}`);
+    chatStore.addUserMessage(`Tell me about ${p.title}`, { subjectPoi: p.title });
     stream({ intent: 'text', query: `Tell me about ${p.title}.`, location: gps });
     setTab('chat');
     // Snap sheet to FULL

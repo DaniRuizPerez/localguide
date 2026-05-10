@@ -104,11 +104,35 @@ const CUE_NAMED_PLACE_RE = /[A-Z][a-z']+(?:\s+[A-Z][a-z']+)+/g;
  * Used to override the GPS-resolved Place line so a 1B model doesn't get
  * dragged toward narrating the visitor's current city when they explicitly
  * asked about somewhere else.
+ *
+ * Exported so useGuideStream can reuse the same heuristic when computing
+ * subject inheritance across turns.
  */
-function extractCueSubject(userQuery: string): string | null {
+export function extractCueSubject(userQuery: string): string | null {
   const matches = userQuery.match(CUE_NAMED_PLACE_RE);
   if (!matches || matches.length === 0) return null;
   return matches.reduce((a, b) => (b.length > a.length ? b : a));
+}
+
+// Two subject strings refer to the same place if their case-insensitive,
+// region-suffix-stripped forms match. Lets "Stanford" and "Stanford,
+// California" count as the same subject so a typed follow-up that drops the
+// region doesn't trip the subjectChanged guard and nuke history.
+function sameSubject(a: string, b: string): boolean {
+  const norm = (s: string) =>
+    s.trim().toLowerCase().replace(/\s*,.*$/, '').trim();
+  return norm(a) === norm(b);
+}
+
+function subjectDirective(subject: string | null | undefined): string | false {
+  if (!subject) return false;
+  // Two terse imperatives — the 1B model latches onto these much better than
+  // prose. Names the subject twice on purpose so the decoder anchors on it.
+  return (
+    `Subject: ${subject}. The visitor's current and follow-up questions ` +
+    `("its", "more about it", "the history") are about ${subject}. ` +
+    `The Place line is ambient context only.`
+  );
 }
 
 function buildPrompt(
@@ -117,19 +141,33 @@ function buildPrompt(
   topics?: readonly GuideTopic[],
   length?: NarrationLength,
   history?: readonly ChatTurn[],
-  reference?: string
+  reference?: string,
+  subjectOverride?: string | null,
+  priorSubject?: string | null
 ): string {
-  // When the cue names a specific place, that place IS the subject — so use
-  // it as the Place line and drop the chat history (prior turns about other
-  // places contaminate the small on-device model, which started parroting
-  // verbatim opening sentences from previous Palo Alto narrations when the
-  // user then asked about Stanford or Los Altos).
-  const cueSubject = extractCueSubject(userQuery);
+  // Subject precedence: explicit override (POI tap or inherited tag) wins
+  // over a fresh extraction from the cue. When a subject is set, that place
+  // IS what the model should narrate.
+  const cueSubject = subjectOverride ?? extractCueSubject(userQuery);
   const effectivePlace = cueSubject ?? location;
-  const effectiveHistory = cueSubject ? undefined : history;
+  // Original guard preserved: drop history only when the SUBJECT JUST CHANGED
+  // (prior turn was about a different POI), so the small on-device model
+  // doesn't parrot verbatim opening sentences from earlier turns about a
+  // different place. When the subject is unchanged or there was no prior
+  // subject, keep history so pronoun follow-ups have continuity.
+  const subjectChanged =
+    cueSubject != null &&
+    priorSubject != null &&
+    !sameSubject(cueSubject, priorSubject);
+  const effectiveHistory = subjectChanged ? undefined : history;
   return buildNarratorPrompt({
     system: SYSTEM_PROMPT,
-    directives: [topicFocusDirective(topics), localePromptDirective(), lengthDirective(length)],
+    directives: [
+      topicFocusDirective(topics),
+      subjectDirective(cueSubject),
+      localePromptDirective(),
+      lengthDirective(length),
+    ],
     place: effectivePlace,
     extraContext: renderHistoryBlock(effectiveHistory),
     reference,
@@ -150,14 +188,32 @@ function buildImagePrompt(
   userQuery: string,
   topics?: readonly GuideTopic[],
   length?: NarrationLength,
-  history?: readonly ChatTurn[]
+  history?: readonly ChatTurn[],
+  subjectOverride?: string | null,
+  priorSubject?: string | null
 ): string {
   const imageContext =
     "The visitor shared a photo from this spot. Identify what's in it and narrate its story — what it is, why it matters, the history and cultural background a local would share. Ground every claim in what's actually visible; use Place/Coordinates only to disambiguate. If image and location disagree, trust the image.";
-  const historyBlock = renderHistoryBlock(history);
+  // Image path is its own subject — image attachments come with subjectPoi=null
+  // from the screen, which arrives here as subjectOverride=null. In that case
+  // we don't inject a Subject directive (the photo IS the subject). Honor an
+  // explicit override otherwise (e.g. user attaches a photo while still asking
+  // a follow-up about a tagged POI — rare, but keeps the API symmetric).
+  const cueSubject = subjectOverride ?? extractCueSubject(userQuery);
+  const subjectChanged =
+    cueSubject != null &&
+    priorSubject != null &&
+    !sameSubject(cueSubject, priorSubject);
+  const effectiveHistory = subjectChanged ? undefined : history;
+  const historyBlock = renderHistoryBlock(effectiveHistory);
   return buildNarratorPrompt({
     system: SYSTEM_PROMPT,
-    directives: [topicFocusDirective(topics), localePromptDirective(), lengthDirective(length)],
+    directives: [
+      topicFocusDirective(topics),
+      subjectDirective(cueSubject),
+      localePromptDirective(),
+      lengthDirective(length),
+    ],
     place: location,
     // Image path needs coords even when we have a place name — the model
     // uses them to disambiguate when the photo contents and named place
@@ -213,16 +269,32 @@ function buildNearbyPlacesPrompt(
     place: location,
     omitCoordsWithPlace: true,
     extraContext:
-      // No example here. A two-shot example (e.g. Paris → Eiffel Tower)
-      // caused the model to imitate the *region* of the example rather
-      // than answer for the target city — Palo Alto came back as
-      // "Mont Saint-Michel, Swiss Alps". A short, plain ask works
-      // better in practice on this 1B model.
-      // 8 (not 6): the verifier prompt rejects ~half the candidates as
-      // "not really near here", so asking for more leaves us with a
-      // healthier accepted pool (the user reported only 1–2 surviving).
-      `Name 8 famous, real landmarks in ${targetCity} (or, if you don't know any specific to ${targetCity}, in its metro area, region, or state). ` +
-      `Output the names ONE PER LINE with NOTHING ELSE — no greetings, no descriptions, no colons, no addresses, no numbers, no markdown.`,
+      // Ask for 12 (not 6/8): the downstream verifier rejects ~half the
+      // candidates as "not really near here" and the parser caps at 12,
+      // so we need this much headroom to consistently leave ≥5 accepted
+      // names — the user-visible "Around You" target.
+      //
+      // The format-only example block deliberately spans 5 continents
+      // (Paris/Tokyo/NYC/Barcelona/Cape Town/Rio). An earlier version
+      // tried a *single-region* two-shot (Paris → Eiffel Tower) on the
+      // 1B model and the output drifted into that region (Palo Alto
+      // came back as "Mont Saint-Michel, Swiss Alps"). Geographically
+      // diverse examples can't anchor a region — they only demonstrate
+      // the bare-name-per-line output shape. The runtime model is
+      // Gemma 4 E2B (LiteRT-LM), substantially stronger than the 1B
+      // this prompt was originally tuned for, so format guidance via
+      // examples now helps more than it hurts.
+      `Name at least 10 real, famous landmarks in ${targetCity} ` +
+      `(or, if you don't know 10 specific to ${targetCity}, fill in with well-known places from its metro area, region, or state). ` +
+      `Use only real places you actually know — do NOT invent names. ` +
+      `Output ONE place name PER LINE — nothing else. No greetings, no descriptions, no colons, no addresses, no numbering, no markdown.\n\n` +
+      `Format example (the names below are ONLY to show the output shape — DO NOT copy them; list real places in ${targetCity}):\n` +
+      `Eiffel Tower\n` +
+      `Senso-ji Temple\n` +
+      `Statue of Liberty\n` +
+      `Sagrada Familia\n` +
+      `Table Mountain\n` +
+      `Christ the Redeemer`,
   });
 }
 
@@ -268,7 +340,10 @@ function parsePlaceList(text: string): string[] {
       seen.add(key);
       return true;
     })
-    .slice(0, 8);
+    // 12 (not 8): the verifier downstream rejects ~half the candidates as
+    // "not really near here", so we need a wider candidate pool to land
+    // on ≥5 accepted names. The prompt asks the model for ≥10 places.
+    .slice(0, 12);
 }
 
 export type ListPlacesTask = AbortableTask<string[]>;
@@ -1424,9 +1499,20 @@ export const localGuideService = {
     callbacks: StreamCallbacks,
     topics?: readonly GuideTopic[],
     history?: readonly ChatTurn[],
-    reference?: string
+    reference?: string,
+    subjectOverride?: string | null,
+    priorSubject?: string | null
   ): Promise<StreamHandle> {
-    const prompt = buildPrompt(location, userQuery, topics, undefined, history, reference);
+    const prompt = buildPrompt(
+      location,
+      userQuery,
+      topics,
+      undefined,
+      history,
+      reference,
+      subjectOverride,
+      priorSubject
+    );
     return inferenceService.runInferenceStream(prompt, callbacks);
   },
 
@@ -1437,10 +1523,20 @@ export const localGuideService = {
     callbacks: StreamCallbacks,
     topics?: readonly GuideTopic[],
     history?: readonly ChatTurn[],
-    reference?: string
+    reference?: string,
+    subjectOverride?: string | null,
+    priorSubject?: string | null
   ): Promise<StreamHandle> {
     // reference is accepted for API symmetry but not used (Decision D: image chat is LLM-only).
-    const prompt = buildImagePrompt(location, userQuery, topics, undefined, history);
+    const prompt = buildImagePrompt(
+      location,
+      userQuery,
+      topics,
+      undefined,
+      history,
+      subjectOverride,
+      priorSubject
+    );
     return inferenceService.runInferenceStream(prompt, callbacks, { imagePath });
   },
 

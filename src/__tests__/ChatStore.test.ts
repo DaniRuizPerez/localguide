@@ -32,6 +32,23 @@ describe('chatStore', () => {
     expect(snap.messages[1].source).toBe('ai-online');
   });
 
+  it('addUserMessage opts: persists subjectPoi when set; omits the field when not passed', () => {
+    chatStore.addUserMessage('Tell me about Hoover Tower', { subjectPoi: 'Hoover Tower' });
+    chatStore.addUserMessage('plain typed message');
+    chatStore.addUserMessage('Tell me about this area', { subjectPoi: null });
+    const msgs = chatStore.get().messages;
+    expect(msgs[0].subjectPoi).toBe('Hoover Tower');
+    // Default (omitted opts) → field absent (so inheritance walk keeps walking).
+    expect(msgs[1]).not.toHaveProperty('subjectPoi');
+    // Explicit null → preserved as a hard reset signal.
+    expect(msgs[2].subjectPoi).toBeNull();
+  });
+
+  it('addUserMessage opts: imageUri positional arg removed — opts.imageUri replaces it', () => {
+    chatStore.addUserMessage('photo', { imageUri: 'file:///photo.jpg' });
+    expect(chatStore.get().messages[0].imageUri).toBe('file:///photo.jpg');
+  });
+
   it('appendGuideToken updates the last message text', () => {
     const id = chatStore.addGuidePlaceholder('Paris');
     chatStore.appendGuideToken(id, 'Hel');

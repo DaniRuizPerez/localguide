@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Sentry from '@sentry/react-native';
-import { localGuideService, type ChatTurn, type GuideTopic } from '../services/LocalGuideService';
+import {
+  localGuideService,
+  extractCueSubject,
+  type ChatTurn,
+  type GuideTopic,
+} from '../services/LocalGuideService';
 import { speechService } from '../services/SpeechService';
 import { SpeechChunker } from '../services/SpeechChunker';
 import type { GPSContext, StreamHandle } from '../services/InferenceService';
@@ -100,6 +105,37 @@ export function useGuideStream({ speakResponsesRef, topicRef, onScroll }: GuideS
           ? allMessages.slice(0, -1)
           : allMessages;
       const history = priorTurnsFor(historyMessages);
+
+      // Subject inheritance for follow-up turns. A typed cue with a named
+      // place wins over inheritance (the user re-stated the topic). Otherwise
+      // walk back through history for the most recent explicit subjectPoi tag
+      // — `null` is an explicit reset (Around You / image) that beats older
+      // POI tags so the user can switch contexts cleanly.
+      const inferredSubject = extractCueSubject(query);
+      const lastTaggedSubject = ((): string | null | undefined => {
+        for (let i = historyMessages.length - 1; i >= 0; i--) {
+          const sp = historyMessages[i].subjectPoi;
+          if (sp !== undefined) return sp;
+        }
+        return undefined;
+      })();
+      const currentSubject: string | null =
+        inferredSubject ?? (lastTaggedSubject ?? null);
+
+      // priorSubject is the effective subject of the most recent prior USER
+      // turn — used by buildPrompt to detect "subject just changed" and apply
+      // the original history-bleed guard. Falls through subjectPoi (explicit)
+      // → extractCueSubject(text) (typed cue) for each prior user turn.
+      const priorSubject: string | null = ((): string | null => {
+        for (let i = historyMessages.length - 1; i >= 0; i--) {
+          const m = historyMessages[i];
+          if (m.role !== 'user') continue;
+          if (m.subjectPoi !== undefined) return m.subjectPoi;
+          const inferred = extractCueSubject(m.text);
+          if (inferred) return inferred;
+        }
+        return null;
+      })();
       chatStore.setInferring(true);
       // Default source from appMode so every guide bubble is tagged from day one.
       const resolvedSource: Source = source ?? (appMode.get() === 'online' ? 'ai-online' : 'ai-offline');
@@ -171,12 +207,13 @@ export function useGuideStream({ speakResponsesRef, topicRef, onScroll }: GuideS
           try {
             // ── Online routing (text intent only — Decision D: image stays LLM-only) ──
             if (appMode.get() === 'online' && intent !== 'image') {
-              // poiTitle: we don't reliably distinguish POI-tap queries from user
-              // queries at this layer (location is always GPS/manual, not POI title).
-              // Pass null and let resolveTitle fall back to entity-extraction + placeName.
+              // currentSubject covers both (a) explicit POI taps tagged via
+              // subjectPoi and (b) typed cues that named a place. When neither
+              // applies it's null and resolveTitle falls back to entity-
+              // extraction + placeName, matching the original behaviour.
               const decision = await onlineGuideService.decide({
                 query,
-                context: { poiTitle: null },
+                context: { poiTitle: currentSubject },
                 gps: location,
                 perfClass: devicePerf.perfClass(),
                 budgetMs: 1500,
@@ -239,7 +276,9 @@ export function useGuideStream({ speakResponsesRef, topicRef, onScroll }: GuideS
                   callbacks,
                   topicRef.current,
                   history,
-                  decision.reference ?? undefined
+                  decision.reference ?? undefined,
+                  currentSubject,
+                  priorSubject
                 );
                 streamRef.current = handle;
                 return;
@@ -290,14 +329,20 @@ export function useGuideStream({ speakResponsesRef, topicRef, onScroll }: GuideS
                     imageUri,
                     callbacks,
                     topicRef.current,
-                    history
+                    history,
+                    undefined,
+                    currentSubject,
+                    priorSubject
                   )
                 : await localGuideService.askStream(
                     query,
                     location,
                     callbacks,
                     topicRef.current,
-                    history
+                    history,
+                    undefined,
+                    currentSubject,
+                    priorSubject
                   );
             streamRef.current = handle;
           } catch (err) {
